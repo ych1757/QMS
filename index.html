@@ -589,12 +589,26 @@ async function sbPullPartSpecs() {
 async function sbDeleteFaiRecord(localKey) {
   if (!_sbReady) return;
   try {
-    await fetch(
+    // 先用 local_key 刪除
+    const r1 = await fetch(
       SUPABASE_URL + '/rest/v1/fai_records?local_key=eq.' + encodeURIComponent(localKey),
       { method: 'DELETE',
         headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY } }
     );
-  } catch(e) {}
+    // 同時用 form_no 備援刪除（舊資料可能沒有 local_key）
+    // 從 localStorage 取得 formNo
+    try {
+      const rec = JSON.parse(localStorage.getItem(localKey) || '{}');
+      if (rec.formNo) {
+        await fetch(
+          SUPABASE_URL + '/rest/v1/fai_records?form_no=eq.' + encodeURIComponent(rec.formNo),
+          { method: 'DELETE',
+            headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY } }
+        );
+        console.log('☁ 已刪除雲端記錄:', rec.formNo);
+      }
+    } catch(e2) {}
+  } catch(e) { console.warn('雲端刪除失敗:', e); }
 }
 
 function showSyncBanner(msg, autoHideMs) {
@@ -8516,6 +8530,23 @@ function renderSysTab() {
     renderSysInfo();
     loadSysBcSettings();
     renderSupplierTable();
+    // 加入一鍵上傳按鈕
+    const sysGrid = document.getElementById('sys-info-grid');
+    if (sysGrid && !document.getElementById('bulk-upload-section')) {
+      const btnDiv = document.createElement('div');
+      btnDiv.id = 'bulk-upload-section';
+      btnDiv.style.cssText = 'margin-top:16px;padding:12px;background:#f0fff4;border:1px solid #1d9e75;border-radius:8px;grid-column:1/-1';
+      btnDiv.innerHTML = `
+        <div style="font-size:12px;font-weight:700;color:#1d9e75;margin-bottom:6px">☁ 一鍵上傳所有本機歷史記錄到 Supabase</div>
+        <div style="font-size:11px;color:#555;margin-bottom:10px">將本機 localStorage 的所有記錄同步到雲端，讓所有裝置都能查看。</div>
+        <button onclick="bulkUploadToSupabase()"
+          style="height:32px;padding:0 16px;background:#1d9e75;color:#fff;border:none;border-radius:6px;font-size:12px;cursor:pointer;font-weight:700">
+          ☁ 開始上傳
+        </button>
+        <span id="bulk-upload-status" style="font-size:11px;margin-left:10px;color:#555"></span>
+      `;
+      sysGrid.parentElement.appendChild(btnDiv);
+    }
   } else {
     noPermEl.style.display  = '';
     adminEl.style.display   = 'none';
@@ -8680,6 +8711,35 @@ function onPermCheck(site, key, permKey, checked, sid) {
   // 若修改的是當前登入者，重新套用權限
   const s = getSession();
   if (s && s.site === site && s.userKey === key) applyRolePermissions();
+}
+
+async function bulkUploadToSupabase() {
+  if (!_sbReady) { alert('Supabase 未連線，請稍後再試'); return; }
+  const btn = document.getElementById('bulk-upload-btn');
+  const st  = document.getElementById('bulk-upload-status');
+  btn.disabled = true;
+  btn.textContent = '⏳ 上傳中...';
+  st.textContent = '';
+
+  const keys = Object.keys(localStorage).filter(k => k.startsWith('fai_record_'));
+  let success = 0, fail = 0;
+
+  for (const key of keys) {
+    try {
+      const data = JSON.parse(localStorage.getItem(key) || '{}');
+      if (!data.header) { fail++; continue; }
+      await sbSaveFaiRecord(key, data);
+      success++;
+      st.textContent = `上傳中：${success}/${keys.length}`;
+    } catch(e) { fail++; }
+    // 避免 API 過快
+    await new Promise(r => setTimeout(r, 100));
+  }
+
+  btn.disabled = false;
+  btn.textContent = '☁ 一鍵上傳所有歷史記錄到雲端';
+  st.textContent = `✅ 完成！成功 ${success} 筆${fail?'，失敗 '+fail+' 筆':''}`;
+  st.style.color = fail ? '#c0392b' : '#1d9e75';
 }
 
 function showSyncToast(msg, isError) {

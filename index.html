@@ -8625,6 +8625,26 @@ function onPermCheck(site, key, permKey, checked, sid) {
   user.role = newRole;
   saveUserDB(db);
 
+  // ☁ 同步權限到 Supabase
+  if (_sbReady) {
+    fetch(
+      SUPABASE_URL + '/rest/v1/qms_users?site_code=eq.' + encodeURIComponent(site) + '&email=eq.' + encodeURIComponent(key),
+      {
+        method: 'PATCH',
+        headers: {
+          'apikey': SUPABASE_KEY,
+          'Authorization': 'Bearer ' + SUPABASE_KEY,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=minimal'
+        },
+        body: JSON.stringify({ role: newRole })
+      }
+    ).then(res => {
+      if (res.ok) console.log('☁ 權限已同步:', key, '→', newRole);
+      else console.warn('權限同步失敗:', res.status);
+    }).catch(e => console.warn('權限同步錯誤:', e));
+  }
+
   // 若修改的是當前登入者，重新套用權限
   const s = getSession();
   if (s && s.site === site && s.userKey === key) applyRolePermissions();
@@ -8644,6 +8664,24 @@ function setUserRole(site, key, role) {
   if (db[site]?.[key]) {
     db[site][key].role = role;
     saveUserDB(db);
+    // ☁ 同步到 Supabase
+    if (_sbReady) {
+      fetch(
+        SUPABASE_URL + '/rest/v1/qms_users?site_code=eq.' + encodeURIComponent(site) + '&email=eq.' + encodeURIComponent(key),
+        {
+          method: 'PATCH',
+          headers: {
+            'apikey': SUPABASE_KEY,
+            'Authorization': 'Bearer ' + SUPABASE_KEY,
+            'Content-Type': 'application/json',
+            'Prefer': 'return=minimal'
+          },
+          body: JSON.stringify({ role: role })
+        }
+      ).then(res => {
+        if (res.ok) console.log('☁ 角色已同步:', key, '→', role);
+      }).catch(e => console.warn('角色同步錯誤:', e));
+    }
     const s = getSession();
     if (s && s.site === site && s.userKey === key) applyRolePermissions();
   }

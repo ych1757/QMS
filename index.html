@@ -648,7 +648,32 @@ async function sbPullUsers() {
 async function sbSaveUser(siteCode, email, userData) {
   if (!_sbReady) return;
   try {
-    const payload = {
+    // 先用 PATCH 更新（已存在的帳號）
+    const patchPayload = {
+      password:        userData.password || '',
+      name:            userData.name || email,
+      role:            userData.role || 'inspector',
+      must_change_pwd: userData.mustChange || false,
+    };
+    const patchRes = await fetch(
+      SUPABASE_URL + '/rest/v1/qms_users?site_code=eq.' + encodeURIComponent(siteCode) + '&email=eq.' + encodeURIComponent(email),
+      {
+        method: 'PATCH',
+        headers: {
+          'apikey': SUPABASE_KEY,
+          'Authorization': 'Bearer ' + SUPABASE_KEY,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=minimal'
+        },
+        body: JSON.stringify(patchPayload)
+      }
+    );
+    if (patchRes.ok) {
+      console.log('☁ 帳號已更新:', email, '密碼:', userData.password);
+      return;
+    }
+    // PATCH 失敗時改用 POST 新增
+    const postPayload = {
       site_code:       siteCode,
       email:           email,
       name:            userData.name || email,
@@ -656,7 +681,7 @@ async function sbSaveUser(siteCode, email, userData) {
       role:            userData.role || 'inspector',
       must_change_pwd: userData.mustChange || false,
     };
-    const res = await fetch(SUPABASE_URL + '/rest/v1/qms_users', {
+    const postRes = await fetch(SUPABASE_URL + '/rest/v1/qms_users', {
       method: 'POST',
       headers: {
         'apikey': SUPABASE_KEY,
@@ -664,10 +689,10 @@ async function sbSaveUser(siteCode, email, userData) {
         'Content-Type': 'application/json',
         'Prefer': 'return=minimal,resolution=merge-duplicates'
       },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(postPayload)
     });
-    if (!res.ok && res.status !== 409) { const t = await res.text(); console.warn('sbSaveUser error:', t); }
-    else console.log('☁ 帳號已同步:', email);
+    if (!postRes.ok) { const t = await postRes.text(); console.warn('sbSaveUser POST error:', t); }
+    else console.log('☁ 帳號已新增:', email);
   } catch(e) { console.warn('sbSaveUser exception:', e); }
 }
 

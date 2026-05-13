@@ -6249,13 +6249,38 @@ function addUserAccount() {
   if (st) { st.style.color='#1d9e75'; st.textContent = `✅ 已新增 ${name} (${email})`; }
 }
 
-function resetUserPassword(site, key, name) {
+async function resetUserPassword(site, key, name) {
   if (!confirm(`確定要重設「${name}」（${site}）的密碼為預設值？\n\n重設後，該使用者下次登入需重新設定密碼。`)) return;
+  
+  // ☁ 直接用 PATCH 更新 Supabase
+  if (_sbReady) {
+    try {
+      const res = await fetch(
+        SUPABASE_URL + '/rest/v1/qms_users?site_code=eq.' + encodeURIComponent(site) + '&email=eq.' + encodeURIComponent(key),
+        {
+          method: 'PATCH',
+          headers: {
+            'apikey': SUPABASE_KEY,
+            'Authorization': 'Bearer ' + SUPABASE_KEY,
+            'Content-Type': 'application/json',
+            'Prefer': 'return=minimal'
+          },
+          body: JSON.stringify({ password: DEFAULT_PWD, must_change_pwd: true })
+        }
+      );
+      if (res.ok) console.log('☁ 密碼已重設到 Supabase:', key);
+      else console.warn('重設密碼 Supabase 失敗:', res.status);
+    } catch(e) { console.warn('重設密碼錯誤:', e); }
+  }
+  
+  // 同步更新 localStorage
   const db = getUserDB();
   if (db[site]?.[key]) {
     db[site][key].password = DEFAULT_PWD;
-    saveUserDB(db);
+    db[site][key].mustChange = true;
+    try { localStorage.setItem(USER_DB_KEY, JSON.stringify(db)); } catch(e) {}
   }
+  
   const toast = document.createElement('div');
   toast.textContent = `✅ 已重設 ${name} 的密碼為預設值`;
   toast.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1D9E75;color:#fff;padding:10px 20px;border-radius:8px;font-size:13px;font-weight:700;z-index:99999;box-shadow:0 4px 12px rgba(0,0,0,0.2)';
@@ -8402,7 +8427,7 @@ function addSupplierUser() {
   setTimeout(() => { st.textContent = ''; }, 3000);
 }
 
-function resetSupplierUserPassword(code, key, name) {
+async function resetSupplierUserPassword(code, key, name) {
   if (!confirm(`確定要重設「${name}」（${code}）的密碼為預設值？\n\n重設後，該使用者下次登入需重新設定密碼。`)) return;
   const db = getSupplierUsers();
   if (db[code]?.[key]) {

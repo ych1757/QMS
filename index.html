@@ -1517,7 +1517,7 @@ async function sbInit() {
         <span style="color:#0f6e56;font-weight:700">🔍 查詢</span>：只能查詢歷史記錄和儀表板　
         <span style="color:#1a4f8a;font-weight:700">🔵 輸入</span>：可新增填表，不能編輯歷史記錄　
         <span style="color:#BA7517;font-weight:700">🟠 修改</span>：可填表 + 編輯歷史記錄 + 料號管理　
-        <span style="color:#c0392b;font-weight:700">🔴 刪除</span>：含修改權限 + <b>刪除記錄</b>　
+        <span style="color:#c0392b;font-weight:700">🔴 刪除</span>：含數據修改權限 + <b>可刪除數據記錄</b>　
         <span style="color:#333;font-weight:700">⚫ 全部</span>：全部功能（含系統設定）
       </div>
       <div style="margin-bottom:8px">
@@ -1744,7 +1744,7 @@ async function sbInit() {
               <select id="su-role" style="height:28px;border:1px solid #bbb;border-radius:4px;padding:0 8px;font-size:12px;font-family:Arial,sans-serif">
                 <option value="inspector">🔵 輸入（可填表）</option>
                 <option value="editor">🟠 修改（可編輯記錄 + 料號管理）</option>
-                <option value="supervisor">🔴 刪除（含修改權限 + 刪除記錄）</option>
+                <option value="supervisor">🔴 刪除（含數據修改權限 + 可刪除數據記錄）</option>
                 <option value="query">🔍 查詢（只能查詢）</option>
               </select></div>
           </div>
@@ -2070,11 +2070,12 @@ function buildTableHeader() {
   ];
   cg.innerHTML = cols.map(w=>`<col style="width:${w}">`).join('');
   const sHdrs = Array.from({length:sampleCount},(_,i)=>
-    `<th>S${i+1}<br><span style="font-weight:400;font-size:9px">樣本${i+1}</span></th>`
+    `<th style="width:60px;min-width:60px">S${i+1}<br><span style="font-weight:400;font-size:9px">樣本${i+1}</span></th>`
   ).join('');
   th.innerHTML = `<tr>
     <th>FAI #<br><span style="font-weight:400;font-size:9px">項次</span></th>
     <th>Instrument (MOI)<br><span style="font-weight:400;font-size:9px">量測儀器</span></th>
+    <th style="min-width:72px;width:72px">Char.<br><span style="font-weight:400;font-size:9px">特性</span></th>
     <th>Type<br><span style="font-weight:400;font-size:9px">類型</span></th>
     <th>Nominal<br><span style="font-weight:400;font-size:9px">名目值</span></th>
     <th>+Tol<br><span style="font-weight:400;font-size:9px">上公差</span></th>
@@ -2211,6 +2212,9 @@ function render() {
     tr.innerHTML = `
       <td style="text-align:center;font-weight:700;color:#1a4f8a">${idx+1}</td>
       <td class="lbl"><input value="${r.moi||''}" placeholder="量測儀器" onchange="rows[${idx}].moi=this.value" style="font-size:10px"></td>
+      <td style="text-align:center;padding:0;cursor:pointer" onclick="cycleCharacteristic(${idx},this)" title="點擊切換：— / Key / Major / Minor">
+        <span style="display:inline-block;font-size:10px;font-family:Arial;font-weight:600;color:${r.characteristic==='Key'?'#c0392b':r.characteristic==='Major'?'#BA7517':r.characteristic==='Minor'?'#1a4f8a':'#999'};min-width:40px">${r.characteristic||'—'}</span>
+      </td>
       ${typeCell}
       <td><input type="number" step="any" value="${r.nom??''}" placeholder="名目值" onchange="rows[${idx}].nom=this.value===''?null:+this.value;syncSpec(${idx});render()" class="spec-inp"></td>
       <td><input type="number" step="any" value="${r.pt??''}" placeholder="+Tol" onchange="rows[${idx}].pt=this.value===''?null:+this.value;syncSpec(${idx});render()" class="spec-inp"></td>
@@ -2992,6 +2996,17 @@ function setProcess(proc) {
   // 供應商欄：OQC 改標籤為客戶
   const supLabel = document.querySelector('#info-grid .info-cell:nth-child(2) label');
   if (supLabel) supLabel.textContent = proc==='OQC' ? 'Customer 客戶:' : 'Supplier 供應商:';
+
+  // 更新表單編號 placeholder 前綴
+  const formnoInput = document.getElementById('f-formno');
+  if (formnoInput) {
+    const site = getCurrentSite() || 'SH';
+    const today = new Date();
+    const yy = String(today.getFullYear()).slice(2);
+    const mm = String(today.getMonth()+1).padStart(2,'0');
+    const dd = String(today.getDate()).padStart(2,'0');
+    formnoInput.placeholder = `例：${site}-${proc}-${yy}${mm}${dd}-0001`;
+  }
 
   updateAQLVisibility();
 }
@@ -5932,7 +5947,7 @@ function exportRecordsXLSX() {
     const sHdrs = Array.from({length: maxSamples}, (_, i) => `S${i+1}`);
     const detailHdr = [
       '表單編號', '廠區', '料號', '品名', '檢驗日期', '檢驗員',
-      'FAI#', '量測儀器', 'Type', '名目值', '+Tol', '-Tol', 'USL', 'LSL',
+      'FAI#', '量測儀器', '特性', 'Type', '名目值', '+Tol', '-Tol', 'USL', 'LSL',
       ...sHdrs,
       'Mean', 'Sigma', 'Cpk', '%Tol', '判定', '備註'
     ];
@@ -6036,7 +6051,7 @@ function exportRecordsCSV() {
   let maxS = 3;
   allRecs.forEach(r => { (r.data?.rows||[]).forEach(row => { if ((row.s||[]).length > maxS) maxS = (row.s||[]).length; }); });
   csvRows.push(['=== 量測明細 Measurement Detail ===']);
-  csvRows.push(['表單編號','廠區','料號','品名','檢驗日期','檢驗員','FAI#','量測儀器','Type','名目值','+Tol','-Tol','USL','LSL',...Array.from({length:maxS},(_,i)=>`S${i+1}`),'Mean','Sigma','Cpk','%Tol','判定','備註']);
+  csvRows.push(['表單編號','廠區','料號','品名','檢驗日期','檢驗員','FAI#','量測儀器','特性','Type','名目值','+Tol','-Tol','USL','LSL',...Array.from({length:maxS},(_,i)=>`S${i+1}`),'Mean','Sigma','Cpk','%Tol','判定','備註']);
   allRecs.forEach(r => {
     (r.data?.rows||[]).forEach((row, idx) => {
       const s = row.s||[];
@@ -6163,6 +6178,7 @@ function renderUserMgrTable() {
            style="height:26px;padding:0 8px;font-size:10px;border:1px solid #c0392b;color:#c0392b;background:#fff;border-radius:3px;cursor:pointer;font-family:Arial,sans-serif;white-space:nowrap">✕ Del</button>`
       : `<button onclick="resetUserPassword('${r.site}','${r.key}','${r.name}')"
            style="height:26px;padding:0 8px;font-size:10px;border:1px solid #1a4f8a;color:#1a4f8a;background:#fff;border-radius:3px;cursor:pointer;font-family:Arial,sans-serif;white-space:nowrap;margin-right:3px">🔑 重設</button>
+        <span id="sync_badge_${sid}" style="font-size:10px;color:#1d9e75;font-family:Arial"></span>
          <button onclick="deleteUserConfirm('${r.site}','${r.key}','${r.name}')"
            style="height:26px;padding:0 8px;font-size:10px;border:1px solid #c0392b;color:#c0392b;background:#fff;border-radius:3px;cursor:pointer;font-family:Arial,sans-serif;white-space:nowrap">✕ Del</button>`;
     const opacity = isInactive ? 'opacity:0.7;' : '';
@@ -8640,14 +8656,52 @@ function onPermCheck(site, key, permKey, checked, sid) {
         body: JSON.stringify({ role: newRole })
       }
     ).then(res => {
-      if (res.ok) console.log('☁ 權限已同步:', key, '→', newRole);
-      else console.warn('權限同步失敗:', res.status);
-    }).catch(e => console.warn('權限同步錯誤:', e));
+      if (res.ok) {
+        console.log('☁ 權限已同步:', key, '→', newRole);
+        // ✅ 右下角綠色提示條
+        showSyncToast('☁ 已同步：' + user.name + ' 權限 → ' + newRole);
+        // ✅ 在人員列表該行顯示「已同步 ☁」
+        const syncBadge = document.getElementById('sync_badge_' + sid);
+        if (syncBadge) {
+          syncBadge.textContent = '☁ 已同步';
+          syncBadge.style.color = '#1d9e75';
+          setTimeout(() => { syncBadge.textContent = ''; }, 3000);
+        }
+      } else {
+        showSyncToast('⚠ 權限同步失敗，請重試', true);
+        console.warn('權限同步失敗:', res.status);
+      }
+    }).catch(e => {
+      showSyncToast('⚠ 網路錯誤，權限未同步', true);
+      console.warn('權限同步錯誤:', e);
+    });
   }
 
   // 若修改的是當前登入者，重新套用權限
   const s = getSession();
   if (s && s.site === site && s.userKey === key) applyRolePermissions();
+}
+
+function showSyncToast(msg, isError) {
+  const toast = document.createElement('div');
+  toast.textContent = msg;
+  toast.style.cssText = 'position:fixed;bottom:24px;right:24px;background:' + 
+    (isError ? '#c0392b' : '#1d9e75') + 
+    ';color:#fff;padding:10px 20px;border-radius:8px;font-size:13px;font-weight:700;z-index:99999;box-shadow:0 4px 12px rgba(0,0,0,0.2);transition:opacity .3s';
+  document.body.appendChild(toast);
+  setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 300); }, 3000);
+}
+
+function cycleCharacteristic(idx, td) {
+  const vals = ['', 'Key', 'Major', 'Minor'];
+  const cur = rows[idx].characteristic || '';
+  const next = vals[(vals.indexOf(cur) + 1) % vals.length];
+  rows[idx].characteristic = next;
+  const span = td.querySelector('span');
+  if (span) {
+    span.textContent = next || '—';
+    span.style.color = next==='Key'?'#c0392b':next==='Major'?'#BA7517':next==='Minor'?'#1a4f8a':'#999';
+  }
 }
 
 function roleToBitsGlobal(role) {

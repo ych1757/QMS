@@ -534,7 +534,12 @@ async function sbPullAllRecords() {
         overall: row.overall, formNo: row.form_no, site: row.site_code,
         isRecord: true, savedAt: row.saved_at,
       };
-      const localKey = row.local_key || ('fai_record_' + (row.process||'') + '_' + (row.partno||''));
+      // ── Key 還原策略（修正 v81）──
+      // 優先 local_key（原始 key）> form_no（穩定唯一）> process+partno fallback（舊資料相容）
+      // 用 form_no 可確保刪除時 localStorage.removeItem(key) 找得到對應記錄
+      const localKey = row.local_key
+        || (row.form_no ? 'fai_record_' + row.form_no : null)
+        || ('fai_record_' + (row.process||'') + '_' + (row.partno||''));
       try { localStorage.setItem(localKey, JSON.stringify(rec)); count++; } catch(e) {}
     });
     return count;
@@ -722,6 +727,136 @@ async function sbDeleteUser(siteCode, email) {
   } catch(e) {}
 }
 
+// ══ 廠區設定：儲存單筆到 Supabase ══
+async function sbSaveSite(site) {
+  if (!_sbReady) return;
+  try {
+    const payload = {
+      code:       site.code,
+      name:       site.name,
+      lang:       site.lang || 'zh-TW',
+      active:     site.active !== false,
+      sort_order: site.sort || 0,
+      updated_at: new Date().toISOString()
+    };
+    await fetch(SUPABASE_URL + '/rest/v1/qms_site_config', {
+      method: 'POST',
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY,
+        'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates' },
+      body: JSON.stringify(payload)
+    });
+  } catch(e) { console.warn('廠區同步失敗:', e); }
+}
+
+// ══ 廠區設定：刪除單筆從 Supabase ══
+async function sbDeleteSite(code) {
+  if (!_sbReady) return;
+  try {
+    await fetch(SUPABASE_URL + '/rest/v1/qms_site_config?code=eq.' + encodeURIComponent(code),
+      { method: 'DELETE', headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY } });
+  } catch(e) { console.warn('廠區刪除同步失敗:', e); }
+}
+
+// ══ 廠區設定：從 Supabase 拉取 ══
+async function sbPullSiteConfig() {
+  if (!_sbReady) return;
+  try {
+    const res = await fetch(SUPABASE_URL + '/rest/v1/qms_site_config?select=*&order=sort_order.asc',
+      { headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY } });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (!data || !data.length) return;
+    const list = data.map(r => ({ code: r.code, name: r.name, lang: r.lang, active: r.active, sort: r.sort_order }));
+    saveSiteConfig(list);
+    console.log('☁ 廠區設定已同步:', list.length, '筆');
+  } catch(e) { console.warn('廠區設定同步失敗:', e); }
+}
+
+// ══ 供應商清單：儲存單筆到 Supabase ══
+async function sbSaveSupplier(supplier) {
+  if (!_sbReady) return;
+  try {
+    const payload = { code: supplier.code, name: supplier.name,
+      active: supplier.active !== false, updated_at: new Date().toISOString() };
+    await fetch(SUPABASE_URL + '/rest/v1/qms_supplier_list', {
+      method: 'POST',
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY,
+        'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates' },
+      body: JSON.stringify(payload)
+    });
+  } catch(e) { console.warn('供應商同步失敗:', e); }
+}
+
+// ══ 供應商清單：從 Supabase 拉取 ══
+async function sbPullSupplierList() {
+  if (!_sbReady) return;
+  try {
+    const res = await fetch(SUPABASE_URL + '/rest/v1/qms_supplier_list?select=*',
+      { headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY } });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (!data || !data.length) return;
+    const list = data.map(r => ({ code: r.code, name: r.name, active: r.active }));
+    saveSupplierList(list);
+    console.log('☁ 供應商清單已同步:', list.length, '筆');
+  } catch(e) { console.warn('供應商清單同步失敗:', e); }
+}
+
+// ══ 供應商帳號：儲存單筆到 Supabase ══
+async function sbSaveSupplierUser(supplierCode, email, userData) {
+  if (!_sbReady) return;
+  try {
+    const patchRes = await fetch(
+      SUPABASE_URL + '/rest/v1/qms_supplier_users?supplier_code=eq.' + encodeURIComponent(supplierCode) + '&email=eq.' + encodeURIComponent(email),
+      { method: 'PATCH',
+        headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY,
+          'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+        body: JSON.stringify({ name: userData.name, password: userData.password,
+          role: userData.role, must_change_pwd: userData.mustChange || false }) }
+    );
+    if (patchRes.ok) return;
+    // PATCH 無結果時改 POST 新增
+    await fetch(SUPABASE_URL + '/rest/v1/qms_supplier_users', {
+      method: 'POST',
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY,
+        'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates' },
+      body: JSON.stringify({ supplier_code: supplierCode, email, name: userData.name,
+        password: userData.password, role: userData.role, must_change_pwd: userData.mustChange || false })
+    });
+  } catch(e) { console.warn('供應商帳號同步失敗:', e); }
+}
+
+// ══ 供應商帳號：刪除從 Supabase ══
+async function sbDeleteSupplierUser(supplierCode, email) {
+  if (!_sbReady) return;
+  try {
+    await fetch(
+      SUPABASE_URL + '/rest/v1/qms_supplier_users?supplier_code=eq.' + encodeURIComponent(supplierCode) + '&email=eq.' + encodeURIComponent(email),
+      { method: 'DELETE', headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY } }
+    );
+  } catch(e) {}
+}
+
+// ══ 供應商帳號：從 Supabase 拉取 ══
+async function sbPullSupplierUsers() {
+  if (!_sbReady) return;
+  try {
+    const res = await fetch(SUPABASE_URL + '/rest/v1/qms_supplier_users?select=*',
+      { headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY } });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (!data || !data.length) return;
+    const db = {};
+    data.forEach(r => {
+      if (!db[r.supplier_code]) db[r.supplier_code] = {};
+      db[r.supplier_code][r.email] = { name: r.name, email: r.email,
+        password: r.password, role: r.role, mustChange: r.must_change_pwd || false };
+    });
+    saveSupplierUsers(db);
+    console.log('☁ 供應商帳號已同步:', data.length, '筆');
+  } catch(e) { console.warn('供應商帳號同步失敗:', e); }
+}
+
 async function sbInit() {
   try {
     showSyncBanner('⏳ 正在從雲端同步資料…');
@@ -729,8 +864,10 @@ async function sbInit() {
     if (!ok) { showSyncBanner('⚠ 雲端連線失敗，使用本地資料', 4000); return; }
     _sbReady = true;
     console.log('✅ Supabase 已連線');
-    const [faiCount, cpkCount, userCount] = await Promise.all([
-      sbPullAllRecords(), sbPullCpkRecords(), sbPullPartSpecs(), sbPullUsers()
+    // 同步所有資料類型（含新增的廠區/供應商）
+    const [faiCount, cpkCount] = await Promise.all([
+      sbPullAllRecords(), sbPullCpkRecords(), sbPullPartSpecs(), sbPullUsers(),
+      sbPullSiteConfig(), sbPullSupplierList(), sbPullSupplierUsers()
     ]);
     showSyncBanner('✅ 雲端同步完成：FAI ' + faiCount + ' 筆、CPK ' + cpkCount + ' 筆', 3000);
   } catch(e) {
@@ -2253,10 +2390,19 @@ function render() {
   document.getElementById('s-alert').textContent = cpkAlert||'0';
   document.getElementById('s-fail').textContent  = cpkFail||'0';
   const ov = document.getElementById('s-overall');
-  if (!cpkTotal) { ov.textContent='—'; ov.className='sum-val'; }
-  else if (cpkFail>0) { ov.textContent='REJECT'; ov.className='sum-val fail'; }
-  else if (cpkAlert>0) { ov.textContent='ALERT'; ov.className='sum-val alert'; }
-  else { ov.textContent='PASS'; ov.className='sum-val pass'; }
+
+  // ── 整體判定規則（修正 v79）──
+  // 只要任一列（FAI 或 CPK）判定為 Fail / Reject，整體就顯示 REJECT
+  const anyRowFail = rows.some(r => {
+    const st = calcStats(r.s, r.usl, r.lsl);
+    const jg = getJudge(r.type, st, r.usl, r.lsl, r.s);
+    return jg.label === 'Fail' || jg.label === 'Reject';
+  });
+  if (anyRowFail)       { ov.textContent='REJECT'; ov.className='sum-val fail'; }
+  else if (!cpkTotal)   { ov.textContent='PASS';   ov.className='sum-val pass'; }
+  else if (cpkFail>0)   { ov.textContent='REJECT'; ov.className='sum-val fail'; }
+  else if (cpkAlert>0)  { ov.textContent='ALERT';  ov.className='sum-val alert'; }
+  else                  { ov.textContent='PASS';   ov.className='sum-val pass'; }
 
   // NCR trigger bar
   const hasNC = rows.some(r => {
@@ -2321,10 +2467,19 @@ function updateSummary() {
   document.getElementById('s-alert').textContent = cpkAlert||'0';
   document.getElementById('s-fail').textContent  = cpkFail||'0';
   const ov = document.getElementById('s-overall');
-  if (!cpkTotal) { ov.textContent='—'; ov.className='sum-val'; }
-  else if (cpkFail>0)  { ov.textContent='REJECT'; ov.className='sum-val fail'; }
-  else if (cpkAlert>0) { ov.textContent='ALERT';  ov.className='sum-val alert'; }
-  else { ov.textContent='PASS'; ov.className='sum-val pass'; }
+
+  // ── 整體判定規則（修正 v79）──
+  // 任一列 Fail/Reject → 整體 REJECT，與 render() 邏輯一致
+  const anyRowFail = rows.some(r => {
+    const st = calcStats(r.s, r.usl, r.lsl);
+    const jg = getJudge(r.type, st, r.usl, r.lsl, r.s);
+    return jg.label === 'Fail' || jg.label === 'Reject';
+  });
+  if (anyRowFail)       { ov.textContent='REJECT'; ov.className='sum-val fail'; }
+  else if (!cpkTotal)   { ov.textContent='PASS';   ov.className='sum-val pass'; }
+  else if (cpkFail>0)   { ov.textContent='REJECT'; ov.className='sum-val fail'; }
+  else if (cpkAlert>0)  { ov.textContent='ALERT';  ov.className='sum-val alert'; }
+  else                  { ov.textContent='PASS';   ov.className='sum-val pass'; }
   const hasNC = rows.some(r => {
     const st = calcStats(r.s, r.usl, r.lsl);
     return ['Reject','Fail'].includes(getJudge(r.type, st, r.usl, r.lsl, r.s).label);
@@ -4111,8 +4266,38 @@ function printRecord(key) {
 
 function deleteRecord(key) {
   if (!confirm('確定刪除此記錄？此操作無法復原。')) return;
+
+  // ── 本機刪除（修正 v81）──
+  // 某些從雲端 Pull 回來的舊記錄，localStorage key 是用 form_no 重建的
+  // 例如 fai_record_IQC-20260305-0001，需要兼容這兩種 key 格式
+  const recData = JSON.parse(localStorage.getItem(key) || 'null');
+  localStorage.removeItem(key);  // 先刪傳入的 key
+
+  // 若傳入 key 找不到資料，試著用 form_no-based key 補刪
+  if (!recData) {
+    // 掃描所有 fai_record_ 開頭的 key，找 formNo 符合的
+    Object.keys(localStorage).filter(k => k.startsWith('fai_record_')).forEach(k => {
+      try {
+        const d = JSON.parse(localStorage.getItem(k) || '{}');
+        // key 若包含 form_no 片段也一起清掉（處理 fai_record_[formNo] 格式）
+        if (k === key || k === 'fai_record_' + d.formNo) {
+          localStorage.removeItem(k);
+          console.log('補刪 localStorage key:', k);
+        }
+      } catch(e) {}
+    });
+  }
+
+  // ── 雲端刪除 ──
+  // sbDeleteFaiRecord 內部已同時用 local_key 和 form_no 兩種方式刪除
   sbDeleteFaiRecord(key).catch(e => console.warn('雲端刪除失敗:', e));
-  localStorage.removeItem(key);
+  if (recData?.formNo) {
+    // 額外用 form_no 再確認刪一次（防止 local_key 欄位是空的舊資料漏刪）
+    fetch(SUPABASE_URL + '/rest/v1/fai_records?form_no=eq.' + encodeURIComponent(recData.formNo),
+      { method: 'DELETE', headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY } }
+    ).catch(e => console.warn('雲端 form_no 備援刪除失敗:', e));
+  }
+
   runHistQuery();
 }
 
@@ -5423,6 +5608,10 @@ function loadSiteConfig() {
 function saveSiteConfig(list) {
   SITE_LIST = list;
   try { localStorage.setItem(SITE_CONFIG_KEY, JSON.stringify(list)); } catch(e) {}
+  // ☁ 同步每筆廠區到 Supabase（新增/修改時）
+  if (_sbReady) {
+    list.forEach(s => sbSaveSite(s).catch(e => console.warn('廠區同步失敗:', s.code, e)));
+  }
   renderSiteSelect();
 }
 
@@ -6460,9 +6649,14 @@ function permanentDeleteSiteConfirm(code) {
   const s = SITE_LIST.find(x => x.code === code);
   const name = s ? s.name : code;
   if (!confirm(`⚠ 永久刪除組織「${code} ${name}」？\n\n此操作不可復原！\n該廠區所有人員帳號也將一併刪除。`)) return;
-  // 刪除人員資料
+  // 刪除人員資料（含雲端）
   const db = getUserDB();
-  if (db[code]) { delete db[code]; saveUserDB(db); }
+  if (db[code]) {
+    if (_sbReady) Object.keys(db[code]).forEach(email => sbDeleteUser(code, email).catch(()=>{}));
+    delete db[code]; saveUserDB(db);
+  }
+  // ☁ 雲端刪除廠區
+  sbDeleteSite(code).catch(e => console.warn('廠區雲端刪除失敗:', e));
   // 永久移除廠區
   saveSiteConfig(SITE_LIST.filter(x => x.code !== code));
   renderSiteTable();
@@ -8155,12 +8349,24 @@ function getSupplierList() {
 }
 function saveSupplierList(list) {
   try { localStorage.setItem(SUPPLIER_LIST_KEY, JSON.stringify(list)); } catch(e) {}
+  // ☁ 同步每筆供應商到 Supabase
+  if (_sbReady) {
+    list.forEach(s => sbSaveSupplier(s).catch(e => console.warn('供應商同步失敗:', s.code, e)));
+  }
 }
 function getSupplierUsers() {
   try { return JSON.parse(localStorage.getItem(SUPPLIER_USERS_KEY) || '{}'); } catch(e) { return {}; }
 }
 function saveSupplierUsers(db) {
   try { localStorage.setItem(SUPPLIER_USERS_KEY, JSON.stringify(db)); } catch(e) {}
+  // ☁ 同步每筆供應商帳號到 Supabase
+  if (_sbReady) {
+    Object.entries(db).forEach(([supplierCode, users]) => {
+      Object.entries(users).forEach(([email, userData]) => {
+        sbSaveSupplierUser(supplierCode, email, userData).catch(e => console.warn('供應商帳號同步失敗:', email, e));
+      });
+    });
+  }
 }
 
 // ── 供應商登入 ──
@@ -8537,8 +8743,8 @@ function renderSysTab() {
       btnDiv.id = 'bulk-upload-section';
       btnDiv.style.cssText = 'margin-top:16px;padding:12px;background:#f0fff4;border:1px solid #1d9e75;border-radius:8px;grid-column:1/-1';
       btnDiv.innerHTML = `
-        <div style="font-size:12px;font-weight:700;color:#1d9e75;margin-bottom:6px">☁ 一鍵上傳所有本機歷史記錄到 Supabase</div>
-        <div style="font-size:11px;color:#555;margin-bottom:10px">將本機 localStorage 的所有記錄同步到雲端，讓所有裝置都能查看。</div>
+        <div style="font-size:12px;font-weight:700;color:#1d9e75;margin-bottom:6px">☁ 一鍵上傳所有本機資料到 Supabase</div>
+        <div style="font-size:11px;color:#555;margin-bottom:10px">同步範圍：FAI 記錄、CPK 記錄、料號規格、使用者帳號、廠區設定、供應商清單、供應商帳號，讓所有裝置都能查看最新資料。</div>
         <button id="bulk-upload-btn" onclick="bulkUploadToSupabase()"
           style="height:32px;padding:0 16px;background:#1d9e75;color:#fff;border:none;border-radius:6px;font-size:12px;cursor:pointer;font-weight:700">
           ☁ 開始上傳
@@ -8714,32 +8920,113 @@ function onPermCheck(site, key, permKey, checked, sid) {
 }
 
 async function bulkUploadToSupabase() {
+  // ── 一鍵上傳（v80 擴充）涵蓋四類：FAI 記錄、CPK 記錄、料號規格、使用者帳號 ──
   if (!_sbReady) { alert('Supabase 未連線，請稍後再試'); return; }
   const btn = document.getElementById('bulk-upload-btn');
   const st  = document.getElementById('bulk-upload-status');
   btn.disabled = true;
-  btn.textContent = '⏳ 上傳中...';
   st.textContent = '';
 
-  const keys = Object.keys(localStorage).filter(k => k.startsWith('fai_record_'));
-  let success = 0, fail = 0;
+  let faiOk=0, faiErr=0, cpkOk=0, cpkErr=0, specOk=0, specErr=0, userOk=0, userErr=0;
 
-  for (const key of keys) {
+  // ── 第一階段：FAI 記錄 ──
+  const faiKeys = Object.keys(localStorage).filter(k => k.startsWith('fai_record_'));
+  btn.textContent = `⏳ FAI 記錄上傳中 (0/${faiKeys.length})...`;
+  for (const key of faiKeys) {
     try {
       const data = JSON.parse(localStorage.getItem(key) || '{}');
-      if (!data.header) { fail++; continue; }
+      if (!data.header) { faiErr++; continue; }
       await sbSaveFaiRecord(key, data);
-      success++;
-      st.textContent = `上傳中：${success}/${keys.length}`;
-    } catch(e) { fail++; }
-    // 避免 API 過快
-    await new Promise(r => setTimeout(r, 100));
+      faiOk++;
+      btn.textContent = `⏳ FAI 記錄上傳中 (${faiOk}/${faiKeys.length})...`;
+    } catch(e) { faiErr++; }
+    await new Promise(r => setTimeout(r, 80));
   }
 
+  // ── 第二階段：CPK 記錄 ──
+  const cpkKeys = Object.keys(localStorage).filter(k => k.startsWith('cpk_record_'));
+  btn.textContent = `⏳ CPK 記錄上傳中 (0/${cpkKeys.length})...`;
+  for (const key of cpkKeys) {
+    try {
+      const data = JSON.parse(localStorage.getItem(key) || '{}');
+      if (!data.points) { cpkErr++; continue; }
+      await sbSaveCpkRecord(key, data);
+      cpkOk++;
+      btn.textContent = `⏳ CPK 記錄上傳中 (${cpkOk}/${cpkKeys.length})...`;
+    } catch(e) { cpkErr++; }
+    await new Promise(r => setTimeout(r, 80));
+  }
+
+  // ── 第三階段：料號規格（含廠區別 key） ──
+  const specKeys = Object.keys(localStorage).filter(k => k.startsWith('fai_part_specs'));
+  btn.textContent = `⏳ 料號規格上傳中...`;
+  for (const skey of specKeys) {
+    try {
+      const db = JSON.parse(localStorage.getItem(skey) || '{}');
+      for (const [pn, spec] of Object.entries(db)) {
+        try { await sbSavePartSpec(pn, spec); specOk++; } catch(e) { specErr++; }
+        await new Promise(r => setTimeout(r, 60));
+      }
+    } catch(e) { specErr++; }
+  }
+
+  // ── 第四階段：使用者帳號（qms_users 結構：{廠區: {email: userData}}） ──
+  btn.textContent = `⏳ 使用者帳號上傳中...`;
+  try {
+    const userDB = JSON.parse(localStorage.getItem('qms_users') || '{}');
+    for (const [siteCode, users] of Object.entries(userDB)) {
+      for (const [email, userData] of Object.entries(users)) {
+        try { await sbSaveUser(siteCode, email, userData); userOk++; } catch(e) { userErr++; }
+        await new Promise(r => setTimeout(r, 60));
+      }
+    }
+  } catch(e) { userErr++; }
+
+  // ── 第五階段：廠區設定 ──
+  btn.textContent = `⏳ 廠區設定上傳中...`;
+  let siteOk=0, siteErr=0;
+  try {
+    const siteList = JSON.parse(localStorage.getItem('qms_site_config') || '[]');
+    for (const s of siteList) {
+      try { await sbSaveSite(s); siteOk++; } catch(e) { siteErr++; }
+      await new Promise(r => setTimeout(r, 60));
+    }
+  } catch(e) { siteErr++; }
+
+  // ── 第六階段：供應商清單 ──
+  btn.textContent = `⏳ 供應商清單上傳中...`;
+  let supOk=0, supErr=0;
+  try {
+    const supList = JSON.parse(localStorage.getItem('qms_supplier_list') || '[]');
+    for (const s of supList) {
+      try { await sbSaveSupplier(s); supOk++; } catch(e) { supErr++; }
+      await new Promise(r => setTimeout(r, 60));
+    }
+  } catch(e) { supErr++; }
+
+  // ── 第七階段：供應商帳號 ──
+  btn.textContent = `⏳ 供應商帳號上傳中...`;
+  let supUserOk=0, supUserErr=0;
+  try {
+    const supUserDB = JSON.parse(localStorage.getItem('qms_supplier_users') || '{}');
+    for (const [supplierCode, users] of Object.entries(supUserDB)) {
+      for (const [email, userData] of Object.entries(users)) {
+        try { await sbSaveSupplierUser(supplierCode, email, userData); supUserOk++; } catch(e) { supUserErr++; }
+        await new Promise(r => setTimeout(r, 60));
+      }
+    }
+  } catch(e) { supUserErr++; }
+
+  // ── 完成，顯示各類筆數 ──
   btn.disabled = false;
-  btn.textContent = '☁ 一鍵上傳所有歷史記錄到雲端';
-  st.textContent = `✅ 完成！成功 ${success} 筆${fail?'，失敗 '+fail+' 筆':''}`;
-  st.style.color = fail ? '#c0392b' : '#1d9e75';
+  btn.textContent = '☁ 一鍵上傳所有資料到雲端';
+  const totalErr = faiErr + cpkErr + specErr + userErr + siteErr + supErr + supUserErr;
+  st.innerHTML =
+    `✅ 完成！` +
+    `FAI ${faiOk}筆　CPK ${cpkOk}筆　料號規格 ${specOk}筆　帳號 ${userOk}筆　` +
+    `廠區 ${siteOk}筆　供應商 ${supOk}筆　供應商帳號 ${supUserOk}筆` +
+    (totalErr ? `　<span style="color:#c0392b">失敗 ${totalErr} 筆</span>` : '');
+  st.style.color = totalErr ? '#c0392b' : '#1d9e75';
 }
 
 function showSyncToast(msg, isError) {

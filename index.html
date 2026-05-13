@@ -6833,7 +6833,6 @@ function clearLoginErr(){ const el=document.getElementById('login-err'); if(el) 
 function showLoginErr(msg){ const el=document.getElementById('login-err'); if(el) el.textContent=msg; }
 
 function doLogin() {
-  // 組織選單若被隱藏（無組織設定），自動用 '__nosite__'
   const siteSel     = document.getElementById('login-site');
   const siteSection = siteSel?.closest('.login-section');
   const siteHidden  = siteSection?.style.display === 'none';
@@ -6846,18 +6845,38 @@ function doLogin() {
   if (!email)    { showLoginErr('Please enter your email 請輸入 Email'); return; }
   if (!password) { showLoginErr('Please enter your password 請輸入密碼'); return; }
 
+  // ☁ 優先從 Supabase 驗證（確保密碼是最新版本）
+  if (_sbReady) {
+    const loginBtn = document.getElementById('login-btn');
+    if (loginBtn) loginBtn.textContent = '⏳ 驗證中...';
+    sbLoginVerify(site, email, password).then(result => {
+      if (loginBtn) loginBtn.textContent = '▶ Enter 進入系統';
+      if (result.ok) {
+        // 更新本地 localStorage 帳號（保持同步）
+        const db = getUserDB();
+        const siteKey = site === '__nosite__' ? '__nosite__' : site;
+        if (!db[siteKey]) db[siteKey] = {};
+        db[siteKey][email] = result.user;
+        try { localStorage.setItem(USER_DB_KEY, JSON.stringify(db)); } catch(e) {}
+        enterSystem(site, result.user.name || email, email);
+      } else {
+        showLoginErr(result.msg);
+      }
+    });
+    return;
+  }
+
+  // 離線模式：用 localStorage 驗證（備用）
   const siteKey = site === '__nosite__' ? '__nosite__' : site;
   const db = getUserDB();
   if (!db[siteKey]) { showLoginErr('此組織尚無帳號，請聯絡管理員'); return; }
 
-  // userKey = email（新系統）；相容舊系統：也搜尋 user.email 欄位
   let userKey = null;
   let user    = null;
   if (db[siteKey][email]) {
     userKey = email;
     user    = db[siteKey][email];
   } else {
-    // 舊版 u_xxx 帳號：找 email 欄位相符者
     const found = Object.entries(db[siteKey]).find(([k, u]) => u.email && u.email.toLowerCase() === email);
     if (found) { userKey = found[0]; user = found[1]; }
   }
@@ -6865,8 +6884,38 @@ function doLogin() {
   if (!user) { showLoginErr('帳號不存在，請聯絡管理員'); return; }
   if (user.password && user.password !== password) { showLoginErr('密碼錯誤 Wrong password'); return; }
   if (!user.password) { showLoginErr('此帳號尚未設定密碼，請聯絡管理員重設'); return; }
+  enterSystem(site, user.name || email, email);
+}
 
-  enterSystem(site, user.name || email, userKey);
+// ☁ Supabase 登入驗證
+async function sbLoginVerify(site, email, password) {
+  try {
+    const siteCode = site === '__nosite__' ? null : site;
+    let url = SUPABASE_URL + '/rest/v1/qms_users?email=eq.' + encodeURIComponent(email);
+    if (siteCode) url += '&site_code=eq.' + encodeURIComponent(siteCode);
+    url += '&select=*&limit=1';
+    const res = await fetch(url, {
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
+    });
+    if (!res.ok) return { ok: false, msg: '雲端驗證失敗，請稍後再試' };
+    const data = await res.json();
+    if (!data || !data.length) return { ok: false, msg: '帳號不存在，請聯絡管理員' };
+    const user = data[0];
+    if (!user.password) return { ok: false, msg: '此帳號尚未設定密碼，請聯絡管理員重設' };
+    if (user.password !== password) return { ok: false, msg: '密碼錯誤 Wrong password' };
+    return {
+      ok: true,
+      user: {
+        name:       user.name,
+        email:      user.email,
+        password:   user.password,
+        role:       user.role,
+        mustChange: user.must_change_pwd,
+      }
+    };
+  } catch(e) {
+    return { ok: false, msg: '網路錯誤，請稍後再試' };
+  }
 }
 
 function enterSystem(site, userName, userKey) {
@@ -7011,7 +7060,10 @@ function doChangePassword() {
     if (!user) { st.textContent = '❌ 找不到帳號'; st.style.color = '#c0392b'; return; }
     if (user.password !== oldPwd) { st.textContent = '❌ 舊密碼錯誤'; st.style.color = '#c0392b'; return; }
     user.password = newPwd;
+    user.mustChange = false;
     saveUserDB(db);
+    // ☁ 同步新密碼到 Supabase
+    sbSaveUser(siteKey, s.userKey, user).catch(e => console.warn('密碼同步失敗:', e));
   } else {
     st.textContent = '❌ 管理員請在設定頁修改密碼'; st.style.color = '#c0392b'; return;
   }
@@ -8343,26 +8395,25 @@ function renderSysTab() {
 }
 
 // 在設定頁顯示管理員密碼輸入框（臨時提升權限）
-function showAdminUpgrade() {
-  const pwd = prompt('請輸入管理員密碼 Admin Password：');
+async function showAdminUpgrade() {
+  const pwd = await showCustomPwdDialog('🔐 請輸入管理員密碼 Admin Password');
   if (!pwd) return;
   const cfg = getAdminConfig();
   if (pwd !== cfg.password) { alert('密碼錯誤 Wrong password'); return; }
-  // 臨時提升當前 session 為 admin
   const s = getSession();
   if (s) { s.isAdmin = true; saveSession(s); }
   renderSysTab();
 }
 
 // 管理員可修改密碼
-function changeAdminPassword() {
-  const oldPwd = prompt('請輸入目前密碼：');
+async function changeAdminPassword() {
+  const oldPwd = await showCustomPwdDialog('🔑 請輸入目前密碼');
   if (!oldPwd) return;
   const cfg = getAdminConfig();
   if (oldPwd !== cfg.password) { alert('密碼錯誤'); return; }
-  const newPwd = prompt('請輸入新密碼（至少6碼）：');
+  const newPwd = await showCustomPwdDialog('🔑 請輸入新密碼（至少6碼）');
   if (!newPwd || newPwd.length < 6) { alert('密碼至少需6碼'); return; }
-  const confirm2 = prompt('請再次輸入新密碼：');
+  const confirm2 = await showCustomPwdDialog('🔑 請再次輸入新密碼確認');
   if (newPwd !== confirm2) { alert('兩次輸入不一致'); return; }
   localStorage.setItem(ADMIN_KEY, JSON.stringify({ password: newPwd }));
   alert('✅ 密碼已更新');
@@ -8670,5 +8721,47 @@ setTimeout(() => sbInit(), 1000);
   </div>
 </div>
 
+
+<!-- ══ 自訂密碼輸入對話框 ══ -->
+<div id="custom-pwd-modal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:99999;display:none;align-items:center;justify-content:center;">
+  <div style="background:#fff;border-radius:12px;padding:28px;width:320px;box-shadow:0 8px 32px rgba(0,0,0,0.2)">
+    <div id="custom-pwd-title" style="font-size:15px;font-weight:700;color:#1a4f8a;margin-bottom:16px"></div>
+    <input id="custom-pwd-input" type="password" placeholder="請輸入密碼"
+      style="width:100%;height:40px;border:1.5px solid #ddd;border-radius:8px;padding:0 12px;font-size:14px;box-sizing:border-box;font-family:Arial"
+      onkeydown="if(event.key==='Enter') confirmCustomPwd()">
+    <div id="custom-pwd-err" style="color:#c0392b;font-size:12px;margin-top:6px;min-height:16px"></div>
+    <div style="display:flex;gap:8px;margin-top:16px">
+      <button onclick="confirmCustomPwd()" style="flex:1;height:38px;background:#1a4f8a;color:#fff;border:none;border-radius:8px;font-size:14px;cursor:pointer">確定</button>
+      <button onclick="cancelCustomPwd()" style="flex:1;height:38px;background:#f5f5f5;color:#555;border:1px solid #ddd;border-radius:8px;font-size:14px;cursor:pointer">取消</button>
+    </div>
+  </div>
+</div>
+
+<script>
+let _customPwdResolve = null;
+
+function showCustomPwdDialog(title) {
+  return new Promise(resolve => {
+    _customPwdResolve = resolve;
+    const modal = document.getElementById('custom-pwd-modal');
+    document.getElementById('custom-pwd-title').textContent = title;
+    document.getElementById('custom-pwd-input').value = '';
+    document.getElementById('custom-pwd-err').textContent = '';
+    modal.style.display = 'flex';
+    setTimeout(() => document.getElementById('custom-pwd-input').focus(), 100);
+  });
+}
+
+function confirmCustomPwd() {
+  const val = document.getElementById('custom-pwd-input').value;
+  document.getElementById('custom-pwd-modal').style.display = 'none';
+  if (_customPwdResolve) { _customPwdResolve(val); _customPwdResolve = null; }
+}
+
+function cancelCustomPwd() {
+  document.getElementById('custom-pwd-modal').style.display = 'none';
+  if (_customPwdResolve) { _customPwdResolve(null); _customPwdResolve = null; }
+}
+</script>
 </body>
 </html>

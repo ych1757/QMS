@@ -3722,22 +3722,17 @@ function calcCpkStats(rowList) {
 }
 
 function calcOverallFromRows(rowList) {
-  const cpkRows = (rowList||[]).filter(r => r.type === 'CPK');
-  if (cpkRows.length) {
-    let fail = 0, alert = 0;
-    cpkRows.forEach(r => {
-      const st = calcStats(r.s||[], r.usl, r.lsl);
-      const jg = getJudge(r.type, st, r.usl||0, r.lsl||0, r.s||[]);
-      if (jg.label === 'Reject') fail++;
-      else if (jg.label === 'Alert') alert++;
-    });
-    return fail > 0 ? 'REJECT' : alert > 0 ? 'ALERT' : 'PASS';
-  }
-  const anyFail = (rowList||[]).some(r => {
-    const v = (r.s||[]).filter(x=>x!==null&&!isNaN(x)).map(Number);
-    return v.length && v.some(x => r.usl!=null && r.lsl!=null && (x>r.usl||x<r.lsl));
+  // ── 整體判定重算（修正 v83）──
+  // 原本有 CPK 列時只看 CPK，完全忽略 FAI 列的 Fail → 修正為全列掃描
+  // 規則：任一列（FAI 或 CPK）Fail/Reject → REJECT；有 Alert → ALERT；全 OK → PASS
+  let anyReject = false, anyAlert = false;
+  (rowList || []).forEach(r => {
+    const st = calcStats(r.s||[], r.usl, r.lsl);
+    const jg = getJudge(r.type, st, r.usl||0, r.lsl||0, r.s||[]);
+    if (jg.label === 'Fail' || jg.label === 'Reject') anyReject = true;
+    else if (jg.label === 'Alert') anyAlert = true;
   });
-  return anyFail ? 'REJECT' : 'PASS';
+  return anyReject ? 'REJECT' : anyAlert ? 'ALERT' : 'PASS';
 }
 
 function getAllRecords() {
@@ -3780,7 +3775,23 @@ function getAllRecords() {
         return;
       }
       if (!d.header) return;
-      const overall   = d.overall || calcOverallFromRows(d.rows || []);
+      // ── 即時重算 overall（修正 v83）──
+      // 不信任儲存的舊值，永遠用 rows 重新計算
+      // 確保任一列 Fail/Reject 時整體一定顯示 REJECT
+      const overall = calcOverallFromRows(d.rows || []);
+      // 若儲存值與重算結果不一致，靜默回寫修正（含雲端）
+      if (d.overall !== overall && d.isRecord) {
+        d.overall = overall;
+        try { localStorage.setItem(k, JSON.stringify(d)); } catch(e) {}
+        if (_sbReady && d.formNo) {
+          fetch(SUPABASE_URL + '/rest/v1/fai_records?form_no=eq.' + encodeURIComponent(d.formNo), {
+            method: 'PATCH',
+            headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY,
+              'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+            body: JSON.stringify({ overall })
+          }).catch(e => console.warn('overall 回寫失敗:', d.formNo, e));
+        }
+      }
       const cpkStats  = calcCpkStats(d.rows || []);
       records.push({
         key: k, data: d,

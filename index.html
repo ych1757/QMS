@@ -492,9 +492,17 @@ async function sbSaveCpkRecord(key, data) {
   } catch(e) { console.warn('sbSaveCpkRecord exception:', e); }
 }
 
-async function sbSavePartSpec(partno, spec) {
+async function sbSavePartSpec(partno, spec, scope) {
+  // scope 參數：儲存此料號屬於哪個廠區/供應商（修正 v87）
+  // 例：'SH'、'YUKE'、'shared'（預設）
   if (!_sbReady) return;
   try {
+    const sess = getSession();
+    // 若未傳入 scope，自動判斷：廠區帳號用廠區碼，Admin 用 shared
+    const resolvedScope = scope
+      || (sess && !sess.isAdmin && !sess.isSupplier && sess.site ? sess.site : null)
+      || (sess && sess.isSupplier ? sess.supplierCode : null)
+      || 'shared';
     const payload = {
       partno,
       partname:   spec.partname || null,
@@ -502,6 +510,7 @@ async function sbSavePartSpec(partno, spec) {
       rev:        spec.rev      || null,
       supplier:   spec.supplier || null,
       specs:      spec.specs    || [],
+      scope:      resolvedScope,
       updated_at: new Date().toISOString(),
     };
     const res = await fetch(SUPABASE_URL + '/rest/v1/part_specs', {
@@ -536,10 +545,17 @@ async function sbPullAllRecords() {
       };
       // ── Key 還原策略（修正 v81）──
       // 優先 local_key（原始 key）> form_no（穩定唯一）> process+partno fallback（舊資料相容）
-      // 用 form_no 可確保刪除時 localStorage.removeItem(key) 找得到對應記錄
       const localKey = row.local_key
         || (row.form_no ? 'fai_record_' + row.form_no : null)
         || ('fai_record_' + (row.process||'') + '_' + (row.partno||''));
+      // ── 舊格式防護（修正 v84）──
+      // 過濾掉沒有 site_code 的舊格式記錄（如 IQC-20260305-0001），
+      // 這類記錄無法正確刪除，也不屬於任何廠區，直接略過不寫入 localStorage
+      if (!row.site_code) {
+        // 同時清除本機若已有此 key 的殘留
+        try { localStorage.removeItem(localKey); } catch(e) {}
+        return;
+      }
       try { localStorage.setItem(localKey, JSON.stringify(rec)); count++; } catch(e) {}
     });
     return count;
@@ -570,6 +586,9 @@ async function sbPullCpkRecords() {
 }
 
 async function sbPullPartSpecs() {
+  // ── 修正 v87：根據 scope 欄位寫入正確的 localStorage key ──
+  // SH 廠建的料號 → 寫入 fai_part_specs_SH
+  // shared → 寫入 fai_part_specs（共用）
   if (!_sbReady) return;
   try {
     const res = await fetch(
@@ -578,16 +597,30 @@ async function sbPullPartSpecs() {
     );
     if (!res.ok) return;
     const data = await res.json();
-    const db = {};
-    (data || []).forEach(row => {
-      db[row.partno] = { partname: row.partname, material: row.material,
-        rev: row.rev, supplier: row.supplier, specs: row.specs || [] };
+    if (!data || !data.length) return;
+
+    // 依 scope 分組
+    const byScope = {};
+    data.forEach(row => {
+      const scope = row.scope || 'shared';
+      if (!byScope[scope]) byScope[scope] = {};
+      byScope[scope][row.partno] = {
+        partname: row.partname, material: row.material,
+        rev: row.rev, supplier: row.supplier, specs: row.specs || []
+      };
     });
-    if (Object.keys(db).length) {
-      const local = JSON.parse(localStorage.getItem('fai_part_specs') || '{}');
-      localStorage.setItem('fai_part_specs', JSON.stringify({ ...local, ...db }));
-      console.log('☁ 料號規格已同步:', Object.keys(db).length, '筆');
-    }
+
+    // 寫入各自的 localStorage key
+    Object.entries(byScope).forEach(([scope, db]) => {
+      const storeKey = scope === 'shared' ? 'fai_part_specs' : 'fai_part_specs_' + scope;
+      try {
+        const existing = JSON.parse(localStorage.getItem(storeKey) || '{}');
+        localStorage.setItem(storeKey, JSON.stringify({ ...existing, ...db }));
+      } catch(e) {}
+    });
+
+    const total = data.length;
+    console.log('☁ 料號規格已同步:', total, '筆，涵蓋', Object.keys(byScope).length, '個 scope');
   } catch(e) {}
 }
 
@@ -1636,6 +1669,13 @@ async function sbInit() {
         <button class="btn" onclick="addSpecRow()" style="height:28px;font-size:11px;padding:0 12px" id="btn-add-spec-row">＋ 新增規格行</button>
         <span id="mgr-add-hint-txt" style="font-size:11px;color:#888">每按一次新增一行，填完後按下方「儲存料號」</span>
       </div>
+    </div>
+
+    <!-- STEP 4：歸屬設定（僅 Admin 顯示）-->
+    <div class="mgr-panel" id="scope-panel" style="display:none">
+      <div class="mgr-panel-title">STEP 4　歸屬設定 Scope — 開放給哪些廠區／供應商使用</div>
+      <div style="font-size:11px;color:#888;margin-bottom:10px">勾選的廠區／供應商才能在填表時帶入此料號的規格</div>
+      <div id="scope-checkboxes" style="display:flex;flex-wrap:wrap;gap:8px 16px;padding:4px 0"></div>
     </div>
 
     <!-- 儲存/清除按鈕 -->
@@ -3775,6 +3815,13 @@ function getAllRecords() {
         return;
       }
       if (!d.header) return;
+      // ── 舊格式防護（修正 v84）──
+      // 沒有 site 的記錄是舊格式（如 IQC-20260305-0001），自動清除本機殘留
+      if (!d.site && d.formNo && !d.formNo.includes('-')) return;
+      if (!d.site && k.startsWith('fai_record_IQC-') || (!d.site && k.startsWith('fai_record_OQC-'))) {
+        try { localStorage.removeItem(k); } catch(e) {}
+        return;
+      }
       // ── 即時重算 overall（修正 v83）──
       // 不信任儲存的舊值，永遠用 rows 重新計算
       // 確保任一列 Fail/Reject 時整體一定顯示 REJECT
@@ -4365,6 +4412,8 @@ function renderPnList() {
 
 function clearEditor() {
   editingPn = null;
+  const sp = document.getElementById('scope-panel');
+  if (sp) sp.style.display = 'none';
   document.getElementById('editor-title').textContent = 'STEP 2　填寫料號基本資料 Part Info';
   document.getElementById('e-partno').value    = '';
   document.getElementById('e-partno').readOnly = false;
@@ -4392,10 +4441,57 @@ function editPn(pn) {
   document.getElementById('e-supplier').value  = s.supplier  || '';
   specRows = (s.specs||[]).map(r=>({...r}));
   renderSpecRows();
+  // ── 歸屬設定（Admin 才顯示）──
+  renderScopeCheckboxes(pn);
   setMgrStatus(`正在編輯料號 ${pn}，修改後按「儲存料號」`, '');
   document.getElementById('sc2').classList.add('active-step');
   document.getElementById('sc3').classList.add('active-step');
   document.getElementById('e-partname').scrollIntoView({behavior:'smooth', block:'center'});
+}
+
+// ── 歸屬設定：渲染 Checkbox 列表 ──
+function renderScopeCheckboxes(pn) {
+  const panel = document.getElementById('scope-panel');
+  if (!isAdmin()) { panel.style.display = 'none'; return; }
+  panel.style.display = '';
+
+  // 找出此料號目前存在哪些 scope key
+  const currentScopes = new Set();
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (!k || !k.startsWith(SPEC_DB_KEY)) continue;
+    try {
+      const db = JSON.parse(localStorage.getItem(k) || '{}');
+      if (db[pn]) {
+        const scope = k === SPEC_DB_KEY ? '__shared__' : k.replace(SPEC_DB_KEY + '_', '');
+        currentScopes.add(scope);
+      }
+    } catch(e) {}
+  }
+
+  // 建立 checkbox 清單：廠區 + 供應商 + 共用
+  const allScopes = [
+    { key: '__shared__', label: '(共用) 所有人' },
+    ...SITE_LIST.filter(s => s.active !== false).map(s => ({ key: s.code, label: s.code + ' ' + s.name })),
+    ...getSupplierList().filter(s => s.active !== false).map(s => ({ key: s.code, label: s.code + ' ' + s.name }))
+  ];
+
+  const box = document.getElementById('scope-checkboxes');
+  box.innerHTML = allScopes.map(sc => `
+    <label style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer;
+      background:#f5f7fa;border:0.5px solid #ddd;border-radius:4px;padding:4px 10px;white-space:nowrap">
+      <input type="checkbox" value="${sc.key}" ${currentScopes.has(sc.key)?'checked':''}
+        style="width:14px;height:14px;cursor:pointer">
+      ${sc.label}
+    </label>
+  `).join('');
+}
+
+// ── 歸屬設定：取得目前勾選的 scope 清單 ──
+function getSelectedScopes() {
+  const box = document.getElementById('scope-checkboxes');
+  if (!box) return null;
+  return Array.from(box.querySelectorAll('input[type=checkbox]:checked')).map(cb => cb.value);
 }
 
 function deletePn(pn) {
@@ -4482,18 +4578,32 @@ function savePartSpec() {
     }))
   };
   if (isAdmin()) {
-    // Admin：找到該料號原本所屬的 Site key，存回去；若是新料號存到預設 key
-    let saved = false;
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
-      if (k && k.startsWith(SPEC_DB_KEY) && k !== SPEC_DB_KEY) {
+    // Admin：依歸屬設定寫入／移除對應的 scope key
+    const selectedScopes = getSelectedScopes();
+    if (selectedScopes && selectedScopes.length > 0) {
+      // 先清除所有 scope 中此料號的資料
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (!k || !k.startsWith(SPEC_DB_KEY)) continue;
         try {
-          const db = JSON.parse(localStorage.getItem(k));
-          if (db[pn]) { db[pn] = PART_SPECS[pn]; localStorage.setItem(k, JSON.stringify(db)); saved = true; }
-        } catch(e){}
+          const db = JSON.parse(localStorage.getItem(k) || '{}');
+          if (db[pn]) { delete db[pn]; localStorage.setItem(k, JSON.stringify(db)); }
+        } catch(e) {}
       }
+      // 再寫入勾選的 scope
+      selectedScopes.forEach(scope => {
+        const storeKey = scope === '__shared__' ? SPEC_DB_KEY : SPEC_DB_KEY + '_' + scope;
+        try {
+          const db = JSON.parse(localStorage.getItem(storeKey) || '{}');
+          db[pn] = PART_SPECS[pn];
+          localStorage.setItem(storeKey, JSON.stringify(db));
+          sbSavePartSpec(pn, PART_SPECS[pn]).catch(e => console.warn('料號同步失敗:', pn, e));
+        } catch(e) {}
+      });
+    } else {
+      // 沒有勾選任何歸屬時，存到共用 key
+      saveSpecDB(PART_SPECS);
     }
-    if (!saved) saveSpecDB(PART_SPECS); // 新料號存到預設 key
     PART_SPECS = loadAllSpecDB();
   } else {
     saveSpecDB(PART_SPECS);

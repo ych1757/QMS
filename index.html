@@ -625,15 +625,16 @@ async function sbPullUsers() {
     if (!res.ok) { console.warn('sbPullUsers HTTP', res.status); return 0; }
     const data = await res.json();
     if (!data || !data.length) return 0;
-    // 將雲端帳號合併到 localStorage
+    // Supabase 的帳號資料為權威來源，直接覆蓋 localStorage
+    // （密碼修改後已立即同步到 Supabase，所以 Supabase 永遠是最新的）
     const localDB = JSON.parse(localStorage.getItem('qms_users') || '{}');
     data.forEach(row => {
       if (!localDB[row.site_code]) localDB[row.site_code] = {};
       localDB[row.site_code][row.email] = {
-        name:      row.name,
-        email:     row.email,
-        password:  row.password,
-        role:      row.role,
+        name:       row.name,
+        email:      row.email,
+        password:   row.password,
+        role:       row.role,
         mustChange: row.must_change_pwd || false,
       };
     });
@@ -7087,7 +7088,11 @@ async function doChangePassword() {
 
   st.textContent = '✅ 密碼已修改成功！'; st.style.color = '#1d9e75';
   _forceChangePwd = false;
-  setTimeout(() => {
+
+  // 確保 Supabase 同步完成後再關閉 modal
+  setTimeout(async () => {
+    // 重新從 Supabase 拉取最新帳號資料，確保本地和雲端一致
+    if (_sbReady) await sbPullUsers();
     const modal = document.getElementById('chg-pwd-modal');
     if (modal) modal.style.display = 'none';
   }, 1500);
@@ -7096,17 +7101,23 @@ async function doChangePassword() {
 function checkForceChangePwd() {
   const s = getSession();
   if (!s || s.isAdmin) return;
-  if (s.site === 'TEST') return; // TEST 組織不需要強制改密碼
+  if (s.site === 'TEST') return;
+  
+  // 從 localStorage 讀取（已從 Supabase 同步過來的最新資料）
   let currentPwd = null;
+  let mustChange = false;
   if (s.isSupplier) {
     const db = getSupplierUsers();
     currentPwd = db[s.supplierCode]?.[s.userKey]?.password;
+    mustChange  = db[s.supplierCode]?.[s.userKey]?.mustChange || false;
   } else {
     const db = getUserDB();
     const siteKey = s.site || '__nosite__';
     currentPwd = db[siteKey]?.[s.userKey]?.password;
+    mustChange  = db[siteKey]?.[s.userKey]?.mustChange || false;
   }
-  if (currentPwd === DEFAULT_PWD) {
+  // 只有密碼仍是預設值才強制修改
+  if (currentPwd === DEFAULT_PWD || mustChange) {
     setTimeout(() => showChangePwdModal(true), 300);
   }
 }

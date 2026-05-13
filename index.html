@@ -7089,23 +7089,57 @@ async function doChangePassword() {
     user.password = newPwd;
     saveSupplierUsers(db);
   } else if (!s.isAdmin) {
-    const db = getUserDB();
     const siteKey = s.site || '__nosite__';
-    const user = db[siteKey]?.[s.userKey];
-    if (!user) { st.textContent = '❌ 找不到帳號'; st.style.color = '#c0392b'; return; }
-    if (user.password !== oldPwd) { st.textContent = '❌ 舊密碼錯誤'; st.style.color = '#c0392b'; return; }
-    user.password = newPwd;
-    user.mustChange = false;
-    saveUserDB(db);
-    // ☁ 立即同步新密碼到 Supabase（確保所有裝置都用新密碼）
-    if (_sbReady) {
-      await sbSaveUser(siteKey, s.userKey, user);
-      console.log('☁ 新密碼已同步到 Supabase');
-    } else {
-      // Supabase 未就緒時先等待再同步
-      sbTestConnection().then(ok => {
-        if (ok) { _sbReady = true; sbSaveUser(siteKey, s.userKey, user); }
-      });
+    
+    // ☁ 直接從 Supabase 驗證舊密碼並更新新密碼
+    st.textContent = '⏳ 驗證中...'; st.style.color = '#888';
+    
+    try {
+      // 1. 從 Supabase 查目前密碼
+      const verifyRes = await fetch(
+        SUPABASE_URL + '/rest/v1/qms_users?site_code=eq.' + encodeURIComponent(siteKey) + '&email=eq.' + encodeURIComponent(s.userKey) + '&select=password,name,role,must_change_pwd',
+        { headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY } }
+      );
+      const verifyData = await verifyRes.json();
+      if (!verifyData || !verifyData.length) { st.textContent = '❌ 找不到帳號'; st.style.color = '#c0392b'; return; }
+      
+      const sbUser = verifyData[0];
+      if (sbUser.password !== oldPwd) { st.textContent = '❌ 舊密碼錯誤'; st.style.color = '#c0392b'; return; }
+      
+      // 2. 直接用 PATCH 更新 Supabase 密碼
+      const patchRes = await fetch(
+        SUPABASE_URL + '/rest/v1/qms_users?site_code=eq.' + encodeURIComponent(siteKey) + '&email=eq.' + encodeURIComponent(s.userKey),
+        {
+          method: 'PATCH',
+          headers: {
+            'apikey': SUPABASE_KEY,
+            'Authorization': 'Bearer ' + SUPABASE_KEY,
+            'Content-Type': 'application/json',
+            'Prefer': 'return=minimal'
+          },
+          body: JSON.stringify({ password: newPwd, must_change_pwd: false })
+        }
+      );
+      
+      if (!patchRes.ok) {
+        const errText = await patchRes.text();
+        console.error('密碼更新失敗:', errText);
+        st.textContent = '❌ 密碼更新失敗，請稍後再試'; st.style.color = '#c0392b'; return;
+      }
+      
+      console.log('☁ 密碼已成功更新到 Supabase');
+      
+      // 3. 更新本地 localStorage
+      const db = getUserDB();
+      if (db[siteKey]?.[s.userKey]) {
+        db[siteKey][s.userKey].password = newPwd;
+        db[siteKey][s.userKey].mustChange = false;
+        try { localStorage.setItem(USER_DB_KEY, JSON.stringify(db)); } catch(e) {}
+      }
+      
+    } catch(e) {
+      console.error('修改密碼錯誤:', e);
+      st.textContent = '❌ 網路錯誤，請稍後再試'; st.style.color = '#c0392b'; return;
     }
   } else {
     st.textContent = '❌ 管理員請在設定頁修改密碼'; st.style.color = '#c0392b'; return;

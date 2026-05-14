@@ -171,6 +171,7 @@ table.main tr:hover td.s-col.oos{background:#ffcaca}
 
 /* Print */
 @media print{
+  /* 列印/存PDF時隱藏不必要的UI元素 */
   body{background:#fff;margin:0;padding:0}
   .page{box-shadow:none;border:none;margin:0;padding:8px}
   .no-print{display:none!important}
@@ -870,6 +871,34 @@ async function sbDeleteSupplierUser(supplierCode, email) {
   } catch(e) {}
 }
 
+// ══ 管理員設定：儲存到 Supabase ══
+async function sbSaveAdminConfig(password) {
+  if (!_sbReady) return;
+  try {
+    await fetch(SUPABASE_URL + '/rest/v1/qms_admin_config?id=eq.1', {
+      method: 'PATCH',
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY,
+        'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+      body: JSON.stringify({ password, updated_at: new Date().toISOString() })
+    });
+  } catch(e) { console.warn('管理員密碼同步失敗:', e); }
+}
+
+// ══ 管理員設定：從 Supabase 拉取 ══
+async function sbPullAdminConfig() {
+  if (!_sbReady) return;
+  try {
+    const res = await fetch(SUPABASE_URL + '/rest/v1/qms_admin_config?id=eq.1&select=password',
+      { headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY } });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (!data || !data.length) return;
+    // 寫入本機 localStorage，覆蓋本機舊值
+    localStorage.setItem('qms_admin_config', JSON.stringify({ password: data[0].password }));
+    console.log('☁ 管理員設定已同步');
+  } catch(e) { console.warn('管理員設定同步失敗:', e); }
+}
+
 // ══ 供應商帳號：從 Supabase 拉取 ══
 async function sbPullSupplierUsers() {
   if (!_sbReady) return;
@@ -897,10 +926,11 @@ async function sbInit() {
     if (!ok) { showSyncBanner('⚠ 雲端連線失敗，使用本地資料', 4000); return; }
     _sbReady = true;
     console.log('✅ Supabase 已連線');
-    // 同步所有資料類型（含新增的廠區/供應商）
+    // 同步所有資料類型（含新增的廠區/供應商/管理員密碼）
     const [faiCount, cpkCount] = await Promise.all([
       sbPullAllRecords(), sbPullCpkRecords(), sbPullPartSpecs(), sbPullUsers(),
-      sbPullSiteConfig(), sbPullSupplierList(), sbPullSupplierUsers()
+      sbPullSiteConfig(), sbPullSupplierList(), sbPullSupplierUsers(),
+      sbPullAdminConfig()
     ]);
     showSyncBanner('✅ 雲端同步完成：FAI ' + faiCount + ' 筆、CPK ' + cpkCount + ' 筆', 3000);
   } catch(e) {
@@ -1092,7 +1122,7 @@ async function sbInit() {
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
       <button class="btn" style="background:#1a4f8a;color:#fff;border-color:#1a4f8a;height:34px;padding:0 18px;font-size:13px;font-weight:700" onclick="submitRecord()">✅ 確認送出</button>
       <button class="btn" onclick="exportXLSX()" style="height:34px;padding:0 14px;font-size:12px">⬇ Excel</button>
-      <button class="btn btn-blue" onclick="window.print()" style="height:34px;padding:0 14px;font-size:12px">🖨 列印</button>
+      <button class="btn btn-blue" onclick="printAsPDF()" style="height:34px;padding:0 14px;font-size:12px">🖨 列印 / 存成 PDF</button>
       <button class="btn" onclick="resetData()" style="height:34px;padding:0 14px;font-size:12px;color:#888">↺ 清空</button>
     </div>
     <span class="save-status" id="save-status"></span>
@@ -1581,21 +1611,35 @@ async function sbInit() {
   <div class="tab-pane" id="tab-mgr">
 
     <!-- 三步驟引導 -->
-    <div class="mgr-steps">
-      <div class="step-card" id="sc1">
-        <div class="step-num">1</div>
-        <div class="step-title">查看現有料號</div>
-        <div class="step-desc">確認資料庫中已有哪些料號的規格。點「編輯」可修改，點「刪除」可移除。</div>
+    <!-- 步驟提示列：單行可收合設計（v88）-->
+    <div style="margin-bottom:12px">
+      <div onclick="toggleMgrSteps()" style="display:flex;align-items:center;gap:8px;cursor:pointer;
+        background:#f0f5ff;border:1px solid #c8d8f0;border-radius:6px;padding:7px 12px;
+        font-size:12px;color:#1a4f8a;font-weight:600;user-select:none">
+        <span id="mgr-steps-icon">▶</span>
+        <span>步驟說明</span>
+        <span style="font-weight:400;color:#888;margin-left:4px">
+          ① 查看現有料號　② 填寫基本資料　③ 新增規格並儲存
+        </span>
       </div>
-      <div class="step-card" id="sc2">
-        <div class="step-num">2</div>
-        <div class="step-title">填寫料號基本資料</div>
-        <div class="step-desc">輸入料號、品名、版本、材料等基本資訊。料號是唯一鍵值，不可重複。</div>
-      </div>
-      <div class="step-card" id="sc3">
-        <div class="step-num">3</div>
-        <div class="step-title">新增量測規格並儲存</div>
-        <div class="step-desc">逐行加入量測項目（儀器、公差），USL/LSL 自動計算，確認後儲存。</div>
+      <div id="mgr-steps-body" style="display:none;margin-top:6px">
+        <div class="mgr-steps">
+          <div class="step-card" id="sc1">
+            <div class="step-num">1</div>
+            <div class="step-title">查看現有料號</div>
+            <div class="step-desc">確認資料庫中已有哪些料號的規格。點「編輯」可修改，點「刪除」可移除。</div>
+          </div>
+          <div class="step-card" id="sc2">
+            <div class="step-num">2</div>
+            <div class="step-title">填寫料號基本資料</div>
+            <div class="step-desc">輸入料號、品名、版本、材料等基本資訊。料號是唯一鍵值，不可重複。</div>
+          </div>
+          <div class="step-card" id="sc3">
+            <div class="step-num">3</div>
+            <div class="step-title">新增量測規格並儲存</div>
+            <div class="step-desc">逐行加入量測項目（儀器、公差），USL/LSL 自動計算，確認後儲存。</div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -2054,7 +2098,7 @@ async function sbInit() {
         </div>
         <button onclick="cpkCalculateAll()" style="height:32px;padding:0 18px;background:#1a4f8a;color:#fff;border:none;border-radius:5px;font-size:12px;font-weight:700;cursor:pointer;font-family:Arial,sans-serif">📊 計算 + 分布圖</button>
         <button onclick="cpkSaveRecord()" style="height:32px;padding:0 14px;background:#0f6e56;color:#fff;border:none;border-radius:5px;font-size:12px;font-weight:700;cursor:pointer;font-family:Arial,sans-serif">✅ 儲存</button>
-        <button onclick="window.print()" style="height:32px;padding:0 14px;background:#555;color:#fff;border:none;border-radius:5px;font-size:12px;cursor:pointer;font-family:Arial,sans-serif">🖨 列印</button>
+        <button onclick="printAsPDF()" style="height:32px;padding:0 14px;background:#555;color:#fff;border:none;border-radius:5px;font-size:12px;cursor:pointer;font-family:Arial,sans-serif">🖨 列印 / 存成 PDF</button>
         <button onclick="cpkClearAll()" style="height:32px;padding:0 14px;background:#fff;color:#888;border:1px solid #bbb;border-radius:5px;font-size:12px;cursor:pointer;font-family:Arial,sans-serif">↺ 清空</button>
         <button onclick="importDemoCpkRecord()" style="height:32px;padding:0 14px;background:#fff;color:#0f6e56;border:1px solid #0f6e56;border-radius:5px;font-size:12px;cursor:pointer;font-family:Arial,sans-serif">📊 載入示範數據</button>
         <span id="cpk-status" style="font-size:11px;color:#1d9e75"></span>
@@ -4257,6 +4301,19 @@ function editRecord(key) {
 
 function loadRecord(key) { editRecord(key); } // 向下相容
 
+// 🖨 列印 / 存成 PDF（v90）
+// 提示使用者選擇「Microsoft Print to PDF」或「另存為 PDF」選項
+function printAsPDF() {
+  // 在頁面標題加上表單編號，方便 PDF 存檔時辨識
+  const formNo = document.getElementById('form-no-display')?.textContent
+    || document.querySelector('.form-no')?.textContent || '';
+  const origTitle = document.title;
+  if (formNo && formNo.trim()) document.title = formNo.trim();
+  window.print();
+  // 列印對話框關閉後還原標題
+  setTimeout(() => { document.title = origTitle; }, 2000);
+}
+
 // 🖨 列印歷史單據
 function printRecord(key) {
   let recData;
@@ -4611,6 +4668,15 @@ function savePartSpec() {
   renderPnList();
   setMgrStatus(`✔ 料號 ${pn} 已儲存，共 ${validSpecs.length} 項規格。可切換到「FAI 填表」使用。`, 'ok');
   ['sc1','sc2','sc3'].forEach(id => document.getElementById(id).classList.remove('active-step'));
+}
+
+// ── 步驟說明收合切換 ──
+function toggleMgrSteps() {
+  const body = document.getElementById('mgr-steps-body');
+  const icon = document.getElementById('mgr-steps-icon');
+  const open = body.style.display === 'none';
+  body.style.display = open ? '' : 'none';
+  icon.textContent = open ? '▼' : '▶';
 }
 
 function setMgrStatus(msg, type) {
@@ -6901,7 +6967,6 @@ function exportUserPermissionsXlsx() {
         '🟠修改':       ['editor','supervisor','admin'].includes(role) ? '✔' : '',
         '🔴刪除':       ['supervisor','admin'].includes(role) ? '✔' : '',
         '⚫全部':       role === 'admin' ? '✔' : '',
-        'Password 密碼': u.password || '',
         'Created 建立時間': u.createdAt || ''
       });
     });
@@ -6928,7 +6993,6 @@ function exportUserPermissionsXlsx() {
         '🟠修改':       ['editor','supervisor'].includes(role) ? '✔' : '',
         '🔴刪除':       role === 'supervisor' ? '✔' : '',
         '⚫全部':       '',
-        'Password 密碼': u.password || '',
         'Created 建立時間': u.createdAt || ''
       });
     });
@@ -7585,7 +7649,7 @@ function checkSession() {
         const badgeSite = document.getElementById('badge-site');
         if (badgeSite) { badgeSite.textContent = '⚙'; badgeSite.style.display = ''; badgeSite.style.background = '#555'; }
         const badgeUser = document.getElementById('badge-user');
-        if (badgeUser) badgeUser.textContent = '⚫ 👤 ' + (s.userName || 'Admin');
+        if (badgeUser) badgeUser.textContent = '⚫ ' + (s.userName || 'Admin');
         const sb = document.getElementById('site-badge'); if (sb) sb.style.display = 'none';
         const sw = document.getElementById('site-select-wrap'); if (sw) sw.style.display = 'none';
         applyRolePermissions();
@@ -7606,7 +7670,7 @@ function checkSession() {
         if (badgeUser2) {
           const roleIcons2 = { supervisor:'🔴', editor:'🟠', inspector:'🔵', query:'🔍' };
           const icon2 = roleIcons2[s.role] || '🔵';
-          badgeUser2.textContent = icon2 + ' 👤 ' + (s.userName || s.userKey);
+          badgeUser2.textContent = icon2 + ' ' + (s.userName || s.userKey);
         }
         const chgBtn2 = document.getElementById('chg-pwd-btn');
         if (chgBtn2) chgBtn2.style.display = '';
@@ -8577,7 +8641,7 @@ function doSupplierLogin() {
   if (badgeUser) {
     const roleIcons = { supervisor:'🔴', editor:'🟠', inspector:'🔵', query:'🔍' };
     const icon = roleIcons[user.role] || '🔵';
-    badgeUser.textContent = icon + ' 👤 ' + (user.name || email);
+    badgeUser.textContent = icon + ' ' + (user.name || email);
   }
 
   setTimeout(() => {
@@ -8835,7 +8899,7 @@ function doAdminLogin() {
   const badgeSite = document.getElementById('badge-site');
   if (badgeSite) { badgeSite.textContent = '⚙'; badgeSite.style.display = ''; badgeSite.style.background = '#555'; }
   const badgeUser = document.getElementById('badge-user');
-  if (badgeUser) badgeUser.textContent = '⚫ 👤 Admin';
+  if (badgeUser) badgeUser.textContent = '⚫ Admin';
   // 套用管理員全部權限
   applyRolePermissions();
   // 直接切換到設定頁
@@ -8902,6 +8966,8 @@ async function changeAdminPassword() {
   const confirm2 = await showCustomPwdDialog('🔑 請再次輸入新密碼確認');
   if (newPwd !== confirm2) { alert('兩次輸入不一致'); return; }
   localStorage.setItem(ADMIN_KEY, JSON.stringify({ password: newPwd }));
+  // ☁ 同步新密碼到 Supabase
+  sbSaveAdminConfig(newPwd).catch(e => console.warn('密碼雲端同步失敗:', e));
   alert('✅ 密碼已更新');
 }
 
@@ -9272,7 +9338,7 @@ function applyRolePermissions() {
   if (badgeUser) {
     const s = getSession();
     const roleIcon = {admin:'🔴', editor:'🟠', inspector:'🔵', query:'🔍'}[role] || '👤';
-    badgeUser.textContent = `${roleIcon} 👤 ${s?.userName || ''}`;
+    badgeUser.textContent = `${roleIcon} ${s?.userName || ''}`;
   }
 }
 

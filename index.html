@@ -838,24 +838,20 @@ async function sbPullSupplierList() {
 
 // ══ 供應商帳號：儲存單筆到 Supabase ══
 async function sbSaveSupplierUser(supplierCode, email, userData) {
+  // 修正 v97：改用 upsert 避免 PATCH 空表時誤判成功的問題
   if (!_sbReady) return;
   try {
-    const patchRes = await fetch(
-      SUPABASE_URL + '/rest/v1/qms_supplier_users?supplier_code=eq.' + encodeURIComponent(supplierCode) + '&email=eq.' + encodeURIComponent(email),
-      { method: 'PATCH',
-        headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY,
-          'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
-        body: JSON.stringify({ name: userData.name, password: userData.password,
-          role: userData.role, must_change_pwd: userData.mustChange || false }) }
-    );
-    if (patchRes.ok) return;
-    // PATCH 無結果時改 POST 新增
     await fetch(SUPABASE_URL + '/rest/v1/qms_supplier_users', {
       method: 'POST',
       headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY,
-        'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates' },
-      body: JSON.stringify({ supplier_code: supplierCode, email, name: userData.name,
-        password: userData.password, role: userData.role, must_change_pwd: userData.mustChange || false })
+        'Content-Type': 'application/json',
+        'Prefer': 'resolution=merge-duplicates' },
+      body: JSON.stringify({
+        supplier_code: supplierCode, email,
+        name: userData.name, password: userData.password,
+        role: userData.role, must_change_pwd: userData.mustChange || false,
+        updated_at: new Date().toISOString()
+      })
     });
   } catch(e) { console.warn('供應商帳號同步失敗:', e); }
 }
@@ -2051,7 +2047,7 @@ async function sbInit() {
         <button onclick="exportSysConfig()" style="height:30px;padding:0 14px;background:#555;color:#fff;border:none;border-radius:4px;font-size:11px;cursor:pointer;font-family:Arial,sans-serif">📤 Export Config 匯出設定</button>
         <button onclick="importSysConfig()" style="height:30px;padding:0 14px;background:#fff;color:#555;border:1px solid #bbb;border-radius:4px;font-size:11px;cursor:pointer;font-family:Arial,sans-serif">📥 Import Config 匯入設定</button>
         <input type="file" id="sys-import-file" accept=".json" style="display:none" onchange="onImportConfig(this)">
-        <button onclick="changeAdminPassword()" style="height:30px;padding:0 14px;background:#fff;color:#c0392b;border:1px solid #c0392b;border-radius:4px;font-size:11px;cursor:pointer;font-family:Arial,sans-serif">🔑 修改管理員密碼</button>
+        <button id="btn-change-admin-pwd" onclick="changeAdminPassword()" style="height:30px;padding:0 14px;background:#fff;color:#c0392b;border:1px solid #c0392b;border-radius:4px;font-size:11px;cursor:pointer;font-family:Arial,sans-serif;display:none">🔑 修改管理員密碼</button>
       </div>
     </div>
 
@@ -8909,10 +8905,18 @@ function doAdminLogin() {
 
 // 在設定頁切換時控制顯示
 function renderSysTab() {
+  // ── 修改管理員密碼按鈕：只有真正的 Admin 帳號才顯示（修正 v96）──
+  // isAdmin() = 用 Admin 帳號登入，不包含廠區「全部」權限帳號
+  const adminPwdBtn = document.getElementById('btn-change-admin-pwd');
+  if (adminPwdBtn) adminPwdBtn.style.display = isAdmin() ? '' : 'none';
   const noPermEl  = document.getElementById('sys-no-permission');
   const adminEl   = document.getElementById('sys-admin-content');
   if (!noPermEl || !adminEl) return;
-  if (isAdmin()) {
+  // ── 修正 v95：「全部」權限帳號也可進設定頁，但不能改管理員密碼 ──
+  // isAdmin() = 用 Admin 帳號登入
+  // getCurrentUserRole() === 'admin' = 廠區帳號有「全部」權限
+  const hasAccess = isAdmin() || getCurrentUserRole() === 'admin';
+  if (hasAccess) {
     noPermEl.style.display  = 'none';
     adminEl.style.display   = '';
     renderUserMgrTable();
@@ -8955,8 +8959,10 @@ async function showAdminUpgrade() {
   renderSysTab();
 }
 
-// 管理員可修改密碼
+// 管理員可修改密碼（修正 v94：函數本身加 Admin 驗證）
 async function changeAdminPassword() {
+  // 雙重保護：非 Admin 登入直接拒絕，防止從 Console 呼叫
+  if (!isAdmin()) { alert('此功能僅限管理員使用'); return; }
   const oldPwd = await showCustomPwdDialog('🔑 請輸入目前密碼');
   if (!oldPwd) return;
   const cfg = getAdminConfig();

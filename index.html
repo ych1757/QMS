@@ -922,12 +922,16 @@ async function sbInit() {
     if (!ok) { showSyncBanner('⚠ 雲端連線失敗，使用本地資料', 4000); return; }
     _sbReady = true;
     console.log('✅ Supabase 已連線');
-    // 同步所有資料類型（含新增的廠區/供應商/管理員密碼）
-    const [faiCount, cpkCount] = await Promise.all([
-      sbPullAllRecords(), sbPullCpkRecords(), sbPullPartSpecs(), sbPullUsers(),
+    // 同步所有資料類型（循序執行，設定類失敗不影響記錄拉取）
+    await Promise.allSettled([
       sbPullSiteConfig(), sbPullSupplierList(), sbPullSupplierUsers(),
-      sbPullAdminConfig()
+      sbPullUsers(), sbPullAdminConfig(), sbPullPartSpecs()
     ]);
+    const [faiResult, cpkResult] = await Promise.allSettled([
+      sbPullAllRecords(), sbPullCpkRecords()
+    ]);
+    const faiCount = faiResult.status === 'fulfilled' ? faiResult.value : 0;
+    const cpkCount = cpkResult.status === 'fulfilled' ? cpkResult.value : 0;
     showSyncBanner('✅ 雲端同步完成：FAI ' + faiCount + ' 筆、CPK ' + cpkCount + ' 筆', 3000);
     // ── 同步完成後刷新儀表板和歷史查詢（修正 v99）──
     // Pull 完雲端資料後，localStorage 已更新，需要重新渲染才能顯示最新資料

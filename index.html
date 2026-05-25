@@ -541,7 +541,7 @@ async function sbPullAllRecords() {
     (data || []).forEach(row => {
       const rec = {
         header: row.header, rows: row.rows, photos: row.photos || [],
-        overall: row.overall, formNo: row.form_no, site: row.site_code,
+        overall: row.overall, formNo: row.form_no, site: row.site_code || '',
         isRecord: true, savedAt: row.saved_at,
       };
       // ── Key 還原策略（修正 v81）──
@@ -549,9 +549,9 @@ async function sbPullAllRecords() {
       const localKey = row.local_key
         || (row.form_no ? 'fai_record_' + row.form_no : null)
         || ('fai_record_' + (row.process||'') + '_' + (row.partno||''));
-      // ── 舊格式防護（修正 v84）──
-      // 過濾掉沒有 site_code 的舊格式記錄（如 IQC-20260305-0001），
-      // 這類記錄無法正確刪除，也不屬於任何廠區，直接略過不寫入 localStorage
+      // ── 舊格式防護（修正 v84，v112 調整）──
+      // 過濾掉沒有 site_code 且非 ADMIN 的舊格式記錄（如 IQC-20260305-0001）
+      // ADMIN 填表的記錄（site_code='ADMIN'）正常保留
       if (!row.site_code) {
         // 同時清除本機若已有此 key 的殘留
         try { localStorage.removeItem(localKey); } catch(e) {}
@@ -8563,9 +8563,11 @@ function submitRecord() {
 
 function _doSaveNewRecord(header, now, overall, updatedBy) {
   const formNo = generateFormNo(currentProcess);
-  const site   = getCurrentSite();
+  const _sess  = getSession();
+  const _rawSite = getCurrentSite();
+  const site   = _rawSite || (_sess?.isAdmin ? 'ADMIN' : (_sess?.site || ''));
   const key    = RECORD_PREFIX + currentProcess + '_' + (header.partno||'x') + '_' + now.toISOString().replace(/[:.]/g,'-');
-  const s = getSession();
+  const s = _sess;
   const data   = {
     header, rows: JSON.parse(JSON.stringify(rows)),
     overall, savedAt: now.toISOString(),

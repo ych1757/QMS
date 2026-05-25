@@ -6868,7 +6868,20 @@ function disableSiteConfirm(code) {
   if (!confirm(`停用組織「${code} ${name}」？\n\n停用後：\n• 該廠區帳號無法登入\n• 人員資料保留，可從「失效帳號」區復原\n• 歷史記錄不受影響`)) return;
   const list = loadSiteConfig();
   const idx = list.findIndex(x => x.code === code);
-  if (idx >= 0) { list[idx].active = false; saveSiteConfig(list); }
+  if (idx >= 0) {
+    list[idx].active = false;
+    saveSiteConfig(list);
+    // 直接 PATCH 單筆，確保雲端同步
+    if (_sbReady) {
+      fetch(SUPABASE_URL + '/rest/v1/qms_site_config?code=eq.' + encodeURIComponent(code), {
+        method: 'PATCH',
+        headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY,
+          'Content-Type': 'application/json' },
+        body: JSON.stringify({ active: false, updated_at: new Date().toISOString() })
+      }).then(r => { if(r.ok) console.log('☁ 廠區停用同步成功:', code); })
+        .catch(e => console.warn('廠區停用同步失敗:', e));
+    }
+  }
   // 強制登出該組織的當前使用者
   const sess = getSession();
   if (sess && sess.site === code) {
@@ -6888,7 +6901,20 @@ function enableSiteConfirm(code) {
   if (!confirm(`重新啟用組織「${code} ${name}」？\n啟用後，該廠區帳號可正常登入。`)) return;
   const list = loadSiteConfig();
   const idx = list.findIndex(x => x.code === code);
-  if (idx >= 0) { list[idx].active = true; saveSiteConfig(list); }
+  if (idx >= 0) {
+    list[idx].active = true;
+    saveSiteConfig(list);
+    // 直接 PATCH 單筆，確保雲端同步
+    if (_sbReady) {
+      fetch(SUPABASE_URL + '/rest/v1/qms_site_config?code=eq.' + encodeURIComponent(code), {
+        method: 'PATCH',
+        headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY,
+          'Content-Type': 'application/json' },
+        body: JSON.stringify({ active: true, updated_at: new Date().toISOString() })
+      }).then(r => { if(r.ok) console.log('☁ 廠區啟用同步成功:', code); })
+        .catch(e => console.warn('廠區啟用同步失敗:', e));
+    }
+  }
   renderSiteTable();
   renderUserMgrTable();
   renderSiteSelect();

@@ -428,7 +428,7 @@ async function sbTestConnection() {
   } catch(e) { return false; }
 }
 
-async function sbSaveFaiRecord(key, data) {
+async function sbSaveFaiRecord(key, data, isUpdate) {
   if (!_sbReady || !data?.header) return;
   try {
     const h = data.header;
@@ -449,6 +449,46 @@ async function sbSaveFaiRecord(key, data) {
       photos:    data.photos  || [],
       saved_at:  data.savedAt || new Date().toISOString(),
     };
+
+    // ── 覆蓋原單據：用 PATCH 更新既有列（v118 修正）──
+    if (isUpdate) {
+      // 先用 local_key 比對 PATCH
+      let pRes = await fetch(
+        SUPABASE_URL + '/rest/v1/fai_records?local_key=eq.' + encodeURIComponent(key),
+        { method: 'PATCH',
+          headers: {
+            'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY,
+            'Content-Type': 'application/json', 'Prefer': 'return=representation'
+          }, body: JSON.stringify(payload) }
+      );
+      let patched = pRes.ok ? await pRes.json() : [];
+      // 若 local_key 對不到（舊資料），改用 form_no 備援 PATCH
+      if ((!patched || patched.length === 0) && data.formNo) {
+        pRes = await fetch(
+          SUPABASE_URL + '/rest/v1/fai_records?form_no=eq.' + encodeURIComponent(data.formNo),
+          { method: 'PATCH',
+            headers: {
+              'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY,
+              'Content-Type': 'application/json', 'Prefer': 'return=representation'
+            }, body: JSON.stringify(payload) }
+        );
+        patched = pRes.ok ? await pRes.json() : [];
+      }
+      // 兩種都對不到 → 當作新記錄 POST
+      if (!patched || patched.length === 0) {
+        await fetch(SUPABASE_URL + '/rest/v1/fai_records', {
+          method: 'POST',
+          headers: {
+            'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY,
+            'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates'
+          }, body: JSON.stringify(payload)
+        });
+      }
+      console.log('☁ FAI 已更新(覆蓋):', data.formNo || key);
+      return;
+    }
+
+    // ── 新記錄：維持原本 POST ──
     const res = await fetch(SUPABASE_URL + '/rest/v1/fai_records', {
       method: 'POST',
       headers: {
@@ -477,6 +517,9 @@ async function sbSaveCpkRecord(key, data) {
       lot_size:  data.lotSize   || null,
       points:    data.points    || [],
       saved_at:  data.savedAt   || new Date().toISOString(),
+      form_no:   data.formNo    || null,
+      saved_by:  data.savedBy   || null,
+      overall:   data.overall   || null,
     };
     const res = await fetch(SUPABASE_URL + '/rest/v1/cpk_records', {
       method: 'POST',
@@ -538,6 +581,7 @@ async function sbPullAllRecords() {
     if (!res.ok) return 0;
     const data = await res.json();
     let count = 0;
+    const _seen = new Set(); // v118: 去重，保留最新（資料已按 saved_at desc 排序）
     (data || []).forEach(row => {
       const rec = {
         header: row.header, rows: row.rows, photos: row.photos || [],
@@ -557,6 +601,9 @@ async function sbPullAllRecords() {
         try { localStorage.removeItem(localKey); } catch(e) {}
         return;
       }
+      // v118: 同一 localKey 只保留最新那筆（第一筆），跳過後續較舊的重複列
+      if (_seen.has(localKey)) return;
+      _seen.add(localKey);
       try { localStorage.setItem(localKey, JSON.stringify(rec)); count++; } catch(e) {}
     });
     return count;
@@ -573,13 +620,18 @@ async function sbPullCpkRecords() {
     if (!res.ok) return 0;
     const data = await res.json();
     let count = 0;
+    const _seen = new Set(); // v121: 去重，保留最新
     (data || []).forEach(row => {
       const rec = {
         partno: row.partno, partname: row.partname, inspector: row.inspector,
         site: row.site_code, date: row.date, lotSize: row.lot_size,
         points: row.points, savedAt: row.saved_at,
+        formNo: row.form_no || '', savedBy: row.saved_by || '', overall: row.overall || '',
       };
       const localKey = row.local_key || ('cpk_record_' + (row.partno||''));
+      // v121: 同一 localKey 只保留最新那筆，跳過後續較舊的重複列
+      if (_seen.has(localKey)) return;
+      _seen.add(localKey);
       try { localStorage.setItem(localKey, JSON.stringify(rec)); count++; } catch(e) {}
     });
     return count;
@@ -648,6 +700,29 @@ async function sbDeleteFaiRecord(localKey) {
       }
     } catch(e2) {}
   } catch(e) { console.warn('雲端刪除失敗:', e); }
+}
+
+// ══ CPK 記錄：刪除從 Supabase（v123）══
+async function sbDeleteCpkRecord(localKey, recData) {
+  if (!_sbReady) return;
+  try {
+    // 先用 local_key 刪除
+    await fetch(
+      SUPABASE_URL + '/rest/v1/cpk_records?local_key=eq.' + encodeURIComponent(localKey),
+      { method: 'DELETE',
+        headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY } }
+    );
+    // form_no 備援刪除（新版 CPK 已有 form_no 欄位）
+    const fno = recData?.formNo;
+    if (fno) {
+      await fetch(
+        SUPABASE_URL + '/rest/v1/cpk_records?form_no=eq.' + encodeURIComponent(fno),
+        { method: 'DELETE',
+          headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY } }
+      );
+    }
+    console.log('☁ 已刪除雲端 CPK 記錄:', fno || localKey);
+  } catch(e) { console.warn('雲端 CPK 刪除失敗:', e); }
 }
 
 function showSyncBanner(msg, autoHideMs) {
@@ -1516,6 +1591,10 @@ async function sbInit() {
 
     <!-- 篩選列 -->
     <div class="hist-filter">
+      <div class="ef" style="flex:1.3;min-width:150px">
+        <label id="hist-kw-label">🔍 關鍵字 Keyword</label>
+        <input id="f-keyword" placeholder="單號/料號/品名/檢驗員/供應商" style="width:100%">
+      </div>
       <div class="ef" style="flex:1;min-width:140px">
         <label>組織 Site</label>
         <select id="f-site" style="width:100%">
@@ -3962,6 +4041,7 @@ function initHistSiteFilter() {
 }
 
 function runHistQuery() {
+  const fKeyword = document.getElementById('f-keyword')?.value.trim().toLowerCase() || '';
   const fSite    = document.getElementById('f-site')?.value     || '';
   const fFormNo  = document.getElementById('f-formno')?.value.trim().toUpperCase() || '';
   const fProc    = document.getElementById('f-proc')?.value     || '';
@@ -3970,6 +4050,11 @@ function runHistQuery() {
   const fDateTo  = document.getElementById('f-date-to')?.value   || '';
   const fResult  = document.getElementById('f-result')?.value   || '';
   let all = getAllRecords();
+  if (fKeyword)  all = all.filter(r => {
+    const hay = [r.formNo, r.partno, r.partname, r.inspector, r.supplier]
+      .map(x => (x||'').toString().toLowerCase()).join(' ');
+    return hay.includes(fKeyword);
+  });
   if (fSite)     all = all.filter(r => r.site === fSite);
   if (fFormNo)   all = all.filter(r => (r.formNo||'').toUpperCase().includes(fFormNo));
   if (fProc)     all = all.filter(r => r.process === fProc);
@@ -3982,7 +4067,7 @@ function runHistQuery() {
 }
 
 function clearHistFilter() {
-  ['f-site','f-formno','f-proc','f-pn','f-date-from','f-date-to','f-result'].forEach(id => {
+  ['f-keyword','f-site','f-formno','f-proc','f-pn','f-date-from','f-date-to','f-result'].forEach(id => {
     const el = document.getElementById(id);
     if (!el) return;
     el.value = '';
@@ -4206,6 +4291,58 @@ function toggleHistDetail(key) {
   try { recData = JSON.parse(localStorage.getItem(key)); } catch(e) { return; }
   if (!recData) return;
 
+  // ── v120: CPK 記錄專用渲染（用 points 而非 rows）──
+  if (key.startsWith('cpk_record_') && recData.points) {
+    const pts = recData.points || [];
+    const cpkDetailRows = pts.map((p, idx) => {
+      const st = cpkCalcStats ? cpkCalcStats(p.values, p.usl, p.lsl, p.nom) : null;
+      const pass = st && st.cpk != null && st.cpk >= 1.33;
+      const alert = st && st.cpk != null && st.cpk >= 1.0 && st.cpk < 1.33;
+      const fail = st && st.cpk != null && st.cpk < 1.0;
+      const resCls = pass ? 'hist-result-pass' : alert ? 'hist-result-alert' : fail ? 'hist-result-fail' : '';
+      const resLbl = pass ? 'Pass' : alert ? 'Alert' : fail ? 'Fail' : '—';
+      return `<tr>
+        <td>${p.faiNo ?? (idx+1)}</td>
+        <td style="text-align:left">${p.moi||'—'}</td>
+        <td>${p.nom??''}</td><td>${p.usl??''}</td><td>${p.lsl??''}</td>
+        <td>${st ? st.n : '—'}</td>
+        <td>${st ? st.mean.toFixed(3) : '—'}</td>
+        <td>${st ? st.sigma.toFixed(4) : '—'}</td>
+        <td>${st && st.cp != null ? st.cp.toFixed(3) : '—'}</td>
+        <td style="${fail?'color:#c0392b;font-weight:700':''}">${st && st.cpk != null ? st.cpk.toFixed(3) : '—'}</td>
+        <td><span class="hist-result-badge ${resCls}">${resLbl}</span></td>
+      </tr>`;
+    }).join('');
+
+    const fno = recData.formNo || '—';
+    const caps = ROLE_CAPS[getCurrentUserRole()] || ROLE_CAPS.query;
+    const actionBtns = caps.edit
+      ? `<button onclick="editRecord('${key}')" style="height:28px;padding:0 14px;background:#1a4f8a;color:#fff;border:none;border-radius:4px;font-size:11px;cursor:pointer;font-family:Arial,sans-serif">✏ 帶入編輯</button>`
+      : `<span style="font-size:11px;color:#888;background:#f4f6f9;padding:3px 10px;border-radius:4px;border:1px solid #ddd">🔒 唯讀 Read-only</span>`;
+
+    const cpkRow = document.createElement('tr');
+    cpkRow.id = detailId;
+    cpkRow.className = 'hist-detail';
+    cpkRow.innerHTML = `<td colspan="12">
+      <div class="hist-detail-inner">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;flex-wrap:wrap">
+          <span style="font-size:13px;font-weight:700;color:#1a4f8a;font-family:'Courier New',monospace;background:#dce6f1;padding:3px 10px;border-radius:4px">📊 ${fno}</span>
+          <span style="font-size:11px;color:#666">料號：${recData.partno||'—'}</span>
+          <span style="font-size:11px;color:#666">品名：${recData.partname||'—'}</span>
+          <span style="font-size:11px;color:#666">樣本數：${recData.lotSize||'—'}</span>
+          ${recData.savedBy ? `<span style="font-size:11px;color:#888">存檔：${recData.savedBy}</span>` : ''}
+          <div style="margin-left:auto">${actionBtns}</div>
+        </div>
+        <table>
+          <thead><tr><th>#</th><th>量測點</th><th>Nominal</th><th>USL</th><th>LSL</th><th>n</th><th>Mean</th><th>σ</th><th>Cp</th><th>Cpk</th><th>判定</th></tr></thead>
+          <tbody>${cpkDetailRows}</tbody>
+        </table>
+      </div>
+    </td>`;
+    mainRow.insertAdjacentElement('afterend', cpkRow);
+    return;
+  }
+
   const rowList = recData.rows || [];
   const sCount  = rowList.length ? (rowList[0].s||[]).length : 0;
   const sHdrs   = Array.from({length:sCount},(_,i)=>`<th>S${i+1}</th>`).join('');
@@ -4427,11 +4564,19 @@ function printRecord(key) {
 function deleteRecord(key) {
   if (!confirm('確定刪除此記錄？此操作無法復原。')) return;
 
+  const recData = JSON.parse(localStorage.getItem(key) || 'null');
+  localStorage.removeItem(key);  // 先刪本機
+
+  // ── CPK 記錄走 cpk_records 表刪除（v123）──
+  if (key.startsWith('cpk_record_')) {
+    sbDeleteCpkRecord(key, recData).catch(e => console.warn('雲端 CPK 刪除失敗:', e));
+    runHistQuery();
+    return;
+  }
+
   // ── 本機刪除（修正 v81）──
   // 某些從雲端 Pull 回來的舊記錄，localStorage key 是用 form_no 重建的
   // 例如 fai_record_IQC-20260305-0001，需要兼容這兩種 key 格式
-  const recData = JSON.parse(localStorage.getItem(key) || 'null');
-  localStorage.removeItem(key);  // 先刪傳入的 key
 
   // 若傳入 key 找不到資料，試著用 form_no-based key 補刪
   if (!recData) {
@@ -5584,6 +5729,7 @@ function applyI18n() {
   // placeholder 翻譯
   const phMap = {
     'f-formno': {'zh-TW':'例：IQC-20260409','zh-CN':'例：IQC-20260409','vi':'Ví dụ: IQC-20260409','th':'เช่น: IQC-20260409'},
+    'f-keyword': {'zh-TW':'單號/料號/品名/檢驗員/供應商','zh-CN':'单号/料号/品名/检验员/供应商','vi':'Số phiếu/Mã VT/Tên/Người KT/NCC','th':'เลขที่/รหัส/ชื่อ/ผู้ตรวจ/ผู้ขาย'},
     'f-pn':     {'zh-TW':'輸入料號關鍵字','zh-CN':'输入料号关键字','vi':'Nhập từ khóa mã vật tư','th':'ป้อนคำค้นหารหัสชิ้นส่วน'},
     'dash-pn':  {'zh-TW':'關鍵字','zh-CN':'关键字','vi':'Từ khóa','th':'คำค้นหา'},
     'aql-lotsize':{'zh-TW':'輸入批量','zh-CN':'输入批量','vi':'Nhập cỡ lô','th':'ป้อนขนาดล็อต'},
@@ -7476,7 +7622,10 @@ async function sbLoginVerify(site, email, password) {
 }
 
 function enterSystem(site, userName, userKey) {
-  saveSession({ site, userName, userKey, loginAt: new Date().toISOString() });
+  // v119: 保留首次登入時間（頁面重整時不重設，確保 7 天壽命計算正確）
+  const _prev = getSession();
+  const firstLoginAt = (_prev && _prev.firstLoginAt) ? _prev.firstLoginAt : new Date().toISOString();
+  saveSession({ site, userName, userKey, loginAt: new Date().toISOString(), firstLoginAt });
   // 每次登入清除本機記錄快取，確保從 Supabase 拉取最新資料
   clearLocalCache();
   try { localStorage.setItem(SITE_KEY, site === '__nosite__' ? '' : site); } catch(e) {}
@@ -7711,6 +7860,7 @@ function checkForceChangePwd() {
 
 // ── Session 逾時常數（8小時）──
 const SESSION_TIMEOUT_MS = 8 * 60 * 60 * 1000;
+const SESSION_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // v119: 7天最大登入壽命
 
 function checkSessionTimeout() {
   try {
@@ -7726,6 +7876,18 @@ function checkSessionTimeout() {
       document.getElementById('login-screen').style.display = 'flex';
       document.getElementById('main-page').style.display    = 'none';
       return true; // 已逾時
+    }
+    // v119: 7天最大登入壽命（不管有無操作，超過7天一律強制重新登入）
+    if (s.firstLoginAt) {
+      const age = Date.now() - new Date(s.firstLoginAt).getTime();
+      if (age > SESSION_MAX_AGE_MS) {
+        clearSession();
+        clearLocalCache();
+        showToast('登入已超過 7 天，請重新登入', 'error', 4000);
+        document.getElementById('login-screen').style.display = 'flex';
+        document.getElementById('main-page').style.display    = 'none';
+        return true;
+      }
     }
     return false;
   } catch(e) { return false; }
@@ -8297,7 +8459,7 @@ function cpkDrawChart(canvas, pt, st) {
     .forEach((s,i) => ctx.fillText(s, ml+(pw/5)*i, H-2));
 }
 
-function cpkSaveRecord() {
+async function cpkSaveRecord() {
   const caps = ROLE_CAPS[getCurrentUserRole()] || ROLE_CAPS.query;
   if (!caps.submit) {
     showNoPermToast('CPK 儲存 需要「輸入」以上權限');
@@ -8315,6 +8477,13 @@ function cpkSaveRecord() {
       pt.values.push(isNaN(v) ? null : v);
     }
   });
+  // v122: 無量測數據禁止存檔
+  const hasData = cpkPoints.some(pt => (pt.values || []).some(v => v != null));
+  if (!cpkPoints.length || !hasData) {
+    const el=document.getElementById('cpk-status');
+    if (el) { el.textContent='⚠ 無量測數據，無法存檔（請至少輸入一筆數值）'; el.style.color='#c0392b'; }
+    return;
+  }
   const now = new Date();
   const key = CPK_RECORD_PREFIX + pn + '_' + now.toISOString().replace(/[:.]/g,'-');
   const s = getSession();
@@ -8328,11 +8497,16 @@ function cpkSaveRecord() {
     date:      document.getElementById('cpk-date').value,
     lotSize,
     toolno:    document.getElementById('cpk-toolno').value,
-    site:      getCurrentSite(),
+    site:      getCurrentSite() || (s?.isSupplier ? s.supplierCode : '') || (s?.isAdmin ? 'ADMIN' : '') || s?.site || '',
     points:    JSON.parse(JSON.stringify(cpkPoints)),
     savedAt:   now.toISOString(),
     savedBy:   s?.userName || '—',
-    formNo:    generateFormNo('CPK'),
+    formNo:    await generateFormNoAsync('CPK', 'cpk_records'),
+    overall:   (() => {  // v121: 存檔時計算判定
+      const vs = cpkPoints.map(p => cpkCalcStats ? cpkCalcStats(p.values, p.usl, p.lsl, p.nom) : null).filter(Boolean);
+      return vs.some(x => x.cpk != null && x.cpk < 1.0) ? 'REJECT'
+           : vs.some(x => x.cpk != null && x.cpk < 1.33) ? 'ALERT' : 'PASS';
+    })(),
     ...(s?.isSupplier ? { supplierCode: s.supplierCode } : {}),
   };
   try {
@@ -8456,6 +8630,53 @@ function generateFormNo(process) {
   return `${prefix}-${ymd}-${String(seq).padStart(4,'0')}`;
 }
 
+// ══ 雲端發號（v124）══
+// 先查 Supabase 當天同 prefix 已存在的最大流水號，+1 後回傳，避免跨裝置/清快取造成重複。
+// table: 'fai_records' 或 'cpk_records'。雲端查詢失敗時 fallback 用本機計數器 + 時間後綴。
+async function generateFormNoAsync(process, table) {
+  const now = new Date();
+  const yy  = String(now.getFullYear()).slice(2);
+  const mm  = String(now.getMonth()+1).padStart(2,'0');
+  const dd  = String(now.getDate()).padStart(2,'0');
+  const ymd = yy + mm + dd;
+  const site   = getCurrentSite();
+  const prefix = site ? `${site}-${process}` : process;
+  const counterKey = FORMNO_KEY + '_' + prefix + '_' + ymd;
+  const tbl = table || 'fai_records';
+
+  // 先取本機計數器當基準（離線備援）
+  let localSeq = 1;
+  try {
+    const saved = localStorage.getItem(counterKey);
+    if (saved) localSeq = parseInt(saved) + 1;
+  } catch(e) {}
+
+  let cloudMax = 0;
+  if (_sbReady) {
+    try {
+      // 查當天同 prefix 的 form_no（like 'prefix-ymd-%'）
+      const pat = encodeURIComponent(prefix + '-' + ymd + '-%');
+      const res = await fetch(
+        SUPABASE_URL + '/rest/v1/' + tbl + '?select=form_no&form_no=like.' + pat,
+        { headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY } }
+      );
+      if (res.ok) {
+        const rows = await res.json();
+        (rows || []).forEach(r => {
+          const m = (r.form_no||'').match(/-(\d{4})$/);
+          if (m) { const n = parseInt(m[1]); if (n > cloudMax) cloudMax = n; }
+        });
+      }
+    } catch(e) { console.warn('雲端發號查詢失敗，改用本機計數器:', e); }
+  }
+
+  // 取雲端與本機計數器的較大值 +1，確保不撞號
+  const base = Math.max(cloudMax, localSeq - 1);
+  const seq  = base + 1;
+  try { localStorage.setItem(counterKey, seq); } catch(e) {}
+  return `${prefix}-${ymd}-${String(seq).padStart(4,'0')}`;
+}
+
 let editingRecordKey = null;   // 非 null = 編輯模式，值為原記錄 key
 let editingRecordSnap = null;  // 編輯模式下的原始資料快照（用於比較是否有修改）
 
@@ -8532,7 +8753,7 @@ function submitRecord() {
               ...(s2?.isSupplier && !existing.supplierCode ? { supplierCode: s2.supplierCode } : {}),
             };
             localStorage.setItem(editingRecordKey, JSON.stringify(updated));
-            sbSaveFaiRecord(editingRecordKey, updated).catch(e => console.warn('覆蓋同步失敗:', e));
+            sbSaveFaiRecord(editingRecordKey, updated, true).catch(e => console.warn('覆蓋同步失敗:', e));
             setStatus(`✅ 已更新原記錄：${existing.formNo || editingRecordKey}`, 'ok');
             editingRecordKey = null; editingRecordSnap = null;
             updateSubmitBtnLabel();
@@ -8561,8 +8782,8 @@ function submitRecord() {
   _doSaveNewRecord(header, now, overall);
 }
 
-function _doSaveNewRecord(header, now, overall, updatedBy) {
-  const formNo = generateFormNo(currentProcess);
+async function _doSaveNewRecord(header, now, overall, updatedBy) {
+  const formNo = await generateFormNoAsync(currentProcess, 'fai_records');
   const _sess  = getSession();
   const _rawSite = getCurrentSite();
   const site   = _rawSite || (_sess?.isAdmin ? 'ADMIN' : (_sess?.site || ''));
@@ -8756,7 +8977,8 @@ function doSupplierLogin() {
     userName:      user.name || email,
     userKey:       email,
     role:          user.role || 'inspector',
-    loginAt:       new Date().toISOString()
+    loginAt:       new Date().toISOString(),
+    firstLoginAt:  new Date().toISOString()
   });
   clearLocalCache();
   try { localStorage.removeItem(SITE_KEY); } catch(e) {}
@@ -9025,7 +9247,7 @@ function doAdminLogin() {
   if (!pwd) { showLoginErr('請輸入管理員密碼'); return; }
   if (pwd !== cfg.password) { showLoginErr('密碼錯誤 Wrong password'); return; }
   // 管理員登入
-  saveSession({ site: '__admin__', userName: 'Admin', userKey: '__admin__', isAdmin: true, loginAt: new Date().toISOString() });
+  saveSession({ site: '__admin__', userName: 'Admin', userKey: '__admin__', isAdmin: true, loginAt: new Date().toISOString(), firstLoginAt: new Date().toISOString() });
   clearLocalCache();
   try { localStorage.removeItem(SITE_KEY); } catch(e) {}
   document.getElementById('login-screen').style.display = 'none';

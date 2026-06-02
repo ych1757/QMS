@@ -1684,6 +1684,7 @@ async function sbInit() {
       <button onclick="exportRecords()" style="height:28px;padding:0 14px;font-size:11px;font-weight:600;background:#1a4f8a;color:#fff;border:none;border-radius:4px;cursor:pointer;white-space:nowrap">⬇ 備份 JSON</button>
       <button onclick="exportRecordsCSV()" style="height:28px;padding:0 14px;font-size:11px;font-weight:600;background:#0f6e56;color:#fff;border:none;border-radius:4px;cursor:pointer;white-space:nowrap">📊 匯出查詢結果 Excel</button>
       <button onclick="document.getElementById('import-records-file').click()" style="height:28px;padding:0 14px;font-size:11px;font-weight:600;background:#555;color:#fff;border:none;border-radius:4px;cursor:pointer;white-space:nowrap">⬆ 匯入 JSON</button>
+      <button id="resync-btn" onclick="resyncFromCloud()" style="height:28px;padding:0 14px;font-size:11px;font-weight:600;background:#BA7517;color:#fff;border:none;border-radius:4px;cursor:pointer;white-space:nowrap">🔄 重新同步雲端</button>
       <input type="file" id="import-records-file" accept=".json" style="display:none" onchange="importRecords(this)">
       <span id="export-import-status" style="font-size:11px;color:#1d9e75"></span>
     </div>
@@ -8524,6 +8525,31 @@ async function cpkSaveRecord() {
 
 // ══════════════════════════════════════════════
 // 預載示範資料函數
+// ══════════════════════════════════════════════
+// 🔄 重新同步雲端（v125）：清本機快取 → 重拉 Supabase → 刷新列表
+async function resyncFromCloud() {
+  const btn = document.getElementById('resync-btn');
+  const st  = document.getElementById('export-import-status');
+  if (!_sbReady) {
+    if (st) { st.textContent = '⚠ 雲端未連線，無法同步'; st.style.color = '#c0392b'; }
+    return;
+  }
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ 同步中…'; }
+  if (st)  { st.textContent = ''; }
+  try {
+    clearLocalCache();                       // 清掉本機 FAI/CPK 快取
+    const n1 = await sbPullAllRecords();     // 重拉 FAI
+    const n2 = await sbPullCpkRecords();     // 重拉 CPK
+    runHistQuery();                          // 刷新歷史查詢列表
+    if (st) { st.textContent = `✅ 已同步：FAI ${n1||0} 筆、CPK ${n2||0} 筆`; st.style.color = '#1d9e75'; }
+  } catch(e) {
+    console.warn('resyncFromCloud error:', e);
+    if (st) { st.textContent = '⚠ 同步失敗，請稍後再試'; st.style.color = '#c0392b'; }
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '🔄 重新同步雲端'; }
+  }
+}
+
 // ══════════════════════════════════════════════
 function forceReimportRecords() {
   const RECORDS = {

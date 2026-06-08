@@ -850,7 +850,7 @@ async function sbSaveSite(site) {
       sort_order: site.sort || 0,
       updated_at: new Date().toISOString()
     };
-    await fetch(SUPABASE_URL + '/rest/v1/qms_site_config', {
+    await fetch(SUPABASE_URL + '/rest/v1/qms_site_config?on_conflict=code', {
       method: 'POST',
       headers: { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer(),
         'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates' },
@@ -889,7 +889,7 @@ async function sbSaveSupplier(supplier) {
   try {
     const payload = { code: supplier.code, name: supplier.name,
       active: supplier.active !== false, updated_at: new Date().toISOString() };
-    await fetch(SUPABASE_URL + '/rest/v1/qms_supplier_list', {
+    await fetch(SUPABASE_URL + '/rest/v1/qms_supplier_list?on_conflict=code', {
       method: 'POST',
       headers: { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer(),
         'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates' },

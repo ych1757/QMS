@@ -336,8 +336,8 @@ input.spec-inp[type=number] { -moz-appearance:textfield; appearance:textfield; }
 .hist-stat-label{font-size:10px;color:#888;margin-bottom:4px}
 .hist-stat-val{font-size:22px;font-weight:700;color:#1a4f8a}
 .hist-stat-val.pass{color:#1D9E75}.hist-stat-val.fail{color:#c0392b}.hist-stat-val.warn{color:#BA7517}
-.hist-table{width:100%;border-collapse:collapse;font-size:12px}
-.hist-table th{background:#1a4f8a;color:#fff;padding:7px 10px;text-align:left;font-size:11px;font-weight:700;position:sticky;top:0;white-space:nowrap}
+.hist-table{width:100%;border-collapse:separate;border-spacing:0;font-size:12px}
+.hist-table th{background:#1a4f8a;color:#fff;padding:7px 10px;text-align:left;font-size:11px;font-weight:700;position:sticky;top:0;z-index:2;white-space:nowrap}
 .hist-table th.sort-asc::after{content:' ▲'}
 .hist-table th.sort-desc::after{content:' ▼'}
 .hist-table th[data-sort]{cursor:pointer}
@@ -422,7 +422,7 @@ let _sbReady = false;
 async function sbTestConnection() {
   try {
     const res = await fetch(SUPABASE_URL + '/rest/v1/fai_records?limit=1', {
-      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer() }
     });
     return res.ok || res.status === 406;
   } catch(e) { return false; }
@@ -457,7 +457,7 @@ async function sbSaveFaiRecord(key, data, isUpdate) {
         SUPABASE_URL + '/rest/v1/fai_records?local_key=eq.' + encodeURIComponent(key),
         { method: 'PATCH',
           headers: {
-            'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY,
+            'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer(),
             'Content-Type': 'application/json', 'Prefer': 'return=representation'
           }, body: JSON.stringify(payload) }
       );
@@ -468,7 +468,7 @@ async function sbSaveFaiRecord(key, data, isUpdate) {
           SUPABASE_URL + '/rest/v1/fai_records?form_no=eq.' + encodeURIComponent(data.formNo),
           { method: 'PATCH',
             headers: {
-              'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY,
+              'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer(),
               'Content-Type': 'application/json', 'Prefer': 'return=representation'
             }, body: JSON.stringify(payload) }
         );
@@ -479,7 +479,7 @@ async function sbSaveFaiRecord(key, data, isUpdate) {
         await fetch(SUPABASE_URL + '/rest/v1/fai_records', {
           method: 'POST',
           headers: {
-            'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY,
+            'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer(),
             'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates'
           }, body: JSON.stringify(payload)
         });
@@ -493,7 +493,7 @@ async function sbSaveFaiRecord(key, data, isUpdate) {
       method: 'POST',
       headers: {
         'apikey': SUPABASE_KEY,
-        'Authorization': 'Bearer ' + SUPABASE_KEY,
+        'Authorization': sbAuthBearer(),
         'Content-Type': 'application/json',
         'Prefer': 'resolution=merge-duplicates'
       },
@@ -525,7 +525,7 @@ async function sbSaveCpkRecord(key, data) {
       method: 'POST',
       headers: {
         'apikey': SUPABASE_KEY,
-        'Authorization': 'Bearer ' + SUPABASE_KEY,
+        'Authorization': sbAuthBearer(),
         'Content-Type': 'application/json',
         'Prefer': 'resolution=merge-duplicates'
       },
@@ -561,7 +561,7 @@ async function sbSavePartSpec(partno, spec, scope) {
       method: 'POST',
       headers: {
         'apikey': SUPABASE_KEY,
-        'Authorization': 'Bearer ' + SUPABASE_KEY,
+        'Authorization': sbAuthBearer(),
         'Content-Type': 'application/json',
         'Prefer': 'resolution=merge-duplicates'
       },
@@ -576,7 +576,7 @@ async function sbPullAllRecords() {
   try {
     const res = await fetch(
       SUPABASE_URL + '/rest/v1/fai_records?select=*&order=saved_at.desc&limit=500',
-      { headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY } }
+      { headers: { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer() } }
     );
     if (!res.ok) return 0;
     const data = await res.json();
@@ -615,7 +615,7 @@ async function sbPullCpkRecords() {
   try {
     const res = await fetch(
       SUPABASE_URL + '/rest/v1/cpk_records?select=*&order=saved_at.desc&limit=200',
-      { headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY } }
+      { headers: { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer() } }
     );
     if (!res.ok) return 0;
     const data = await res.json();
@@ -646,7 +646,7 @@ async function sbPullPartSpecs() {
   try {
     const res = await fetch(
       SUPABASE_URL + '/rest/v1/part_specs?select=*',
-      { headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY } }
+      { headers: { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer() } }
     );
     if (!res.ok) return;
     const data = await res.json();
@@ -684,7 +684,7 @@ async function sbDeleteFaiRecord(localKey) {
     const r1 = await fetch(
       SUPABASE_URL + '/rest/v1/fai_records?local_key=eq.' + encodeURIComponent(localKey),
       { method: 'DELETE',
-        headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY } }
+        headers: { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer() } }
     );
     // 同時用 form_no 備援刪除（舊資料可能沒有 local_key）
     // 從 localStorage 取得 formNo
@@ -694,7 +694,7 @@ async function sbDeleteFaiRecord(localKey) {
         await fetch(
           SUPABASE_URL + '/rest/v1/fai_records?form_no=eq.' + encodeURIComponent(rec.formNo),
           { method: 'DELETE',
-            headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY } }
+            headers: { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer() } }
         );
         console.log('☁ 已刪除雲端記錄:', rec.formNo);
       }
@@ -710,7 +710,7 @@ async function sbDeleteCpkRecord(localKey, recData) {
     await fetch(
       SUPABASE_URL + '/rest/v1/cpk_records?local_key=eq.' + encodeURIComponent(localKey),
       { method: 'DELETE',
-        headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY } }
+        headers: { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer() } }
     );
     // form_no 備援刪除（新版 CPK 已有 form_no 欄位）
     const fno = recData?.formNo;
@@ -718,7 +718,7 @@ async function sbDeleteCpkRecord(localKey, recData) {
       await fetch(
         SUPABASE_URL + '/rest/v1/cpk_records?form_no=eq.' + encodeURIComponent(fno),
         { method: 'DELETE',
-          headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY } }
+          headers: { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer() } }
       );
     }
     console.log('☁ 已刪除雲端 CPK 記錄:', fno || localKey);
@@ -748,7 +748,7 @@ async function sbPullUsers() {
   try {
     const res = await fetch(
       SUPABASE_URL + '/rest/v1/qms_users?select=*',
-      { headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY } }
+      { headers: { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer() } }
     );
     if (!res.ok) { console.warn('sbPullUsers HTTP', res.status); return 0; }
     const data = await res.json();
@@ -789,18 +789,20 @@ async function sbSaveUser(siteCode, email, userData) {
         method: 'PATCH',
         headers: {
           'apikey': SUPABASE_KEY,
-          'Authorization': 'Bearer ' + SUPABASE_KEY,
+          'Authorization': sbAuthBearer(),
           'Content-Type': 'application/json',
-          'Prefer': 'return=minimal'
+          'Prefer': 'return=representation'
         },
         body: JSON.stringify(patchPayload)
       }
     );
-    if (patchRes.ok) {
-      console.log('☁ 帳號已更新:', email, '密碼:', userData.password);
+    // 修正：PATCH 對 0 筆也回 204/200，不能只看 res.ok，需確認實際有更新到列
+    const patched = patchRes.ok ? await patchRes.json().catch(() => []) : [];
+    if (patched && patched.length > 0) {
+      console.log('☁ 帳號已更新:', email);
       return;
     }
-    // PATCH 失敗時改用 POST 新增
+    // PATCH 沒對到任何列（新帳號）→ 改用 POST 新增
     const postPayload = {
       site_code:       siteCode,
       email:           email,
@@ -813,7 +815,7 @@ async function sbSaveUser(siteCode, email, userData) {
       method: 'POST',
       headers: {
         'apikey': SUPABASE_KEY,
-        'Authorization': 'Bearer ' + SUPABASE_KEY,
+        'Authorization': sbAuthBearer(),
         'Content-Type': 'application/json',
         'Prefer': 'return=minimal,resolution=merge-duplicates'
       },
@@ -831,7 +833,7 @@ async function sbDeleteUser(siteCode, email) {
     await fetch(
       SUPABASE_URL + '/rest/v1/qms_users?site_code=eq.' + encodeURIComponent(siteCode) + '&email=eq.' + encodeURIComponent(email),
       { method: 'DELETE',
-        headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY } }
+        headers: { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer() } }
     );
   } catch(e) {}
 }
@@ -850,7 +852,7 @@ async function sbSaveSite(site) {
     };
     await fetch(SUPABASE_URL + '/rest/v1/qms_site_config', {
       method: 'POST',
-      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY,
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer(),
         'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates' },
       body: JSON.stringify(payload)
     });
@@ -862,7 +864,7 @@ async function sbDeleteSite(code) {
   if (!_sbReady) return;
   try {
     await fetch(SUPABASE_URL + '/rest/v1/qms_site_config?code=eq.' + encodeURIComponent(code),
-      { method: 'DELETE', headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY } });
+      { method: 'DELETE', headers: { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer() } });
   } catch(e) { console.warn('廠區刪除同步失敗:', e); }
 }
 
@@ -871,7 +873,7 @@ async function sbPullSiteConfig() {
   if (!_sbReady) return;
   try {
     const res = await fetch(SUPABASE_URL + '/rest/v1/qms_site_config?select=*&order=sort_order.asc',
-      { headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY } });
+      { headers: { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer() } });
     if (!res.ok) return;
     const data = await res.json();
     if (!data || !data.length) return;
@@ -889,7 +891,7 @@ async function sbSaveSupplier(supplier) {
       active: supplier.active !== false, updated_at: new Date().toISOString() };
     await fetch(SUPABASE_URL + '/rest/v1/qms_supplier_list', {
       method: 'POST',
-      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY,
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer(),
         'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates' },
       body: JSON.stringify(payload)
     });
@@ -901,7 +903,7 @@ async function sbPullSupplierList() {
   if (!_sbReady) return;
   try {
     const res = await fetch(SUPABASE_URL + '/rest/v1/qms_supplier_list?select=*',
-      { headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY } });
+      { headers: { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer() } });
     if (!res.ok) return;
     const data = await res.json();
     if (!data || !data.length) return;
@@ -918,7 +920,7 @@ async function sbSaveSupplierUser(supplierCode, email, userData) {
   try {
     await fetch(SUPABASE_URL + '/rest/v1/qms_supplier_users', {
       method: 'POST',
-      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY,
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer(),
         'Content-Type': 'application/json',
         'Prefer': 'resolution=merge-duplicates' },
       body: JSON.stringify({
@@ -937,7 +939,7 @@ async function sbDeleteSupplierUser(supplierCode, email) {
   try {
     await fetch(
       SUPABASE_URL + '/rest/v1/qms_supplier_users?supplier_code=eq.' + encodeURIComponent(supplierCode) + '&email=eq.' + encodeURIComponent(email),
-      { method: 'DELETE', headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY } }
+      { method: 'DELETE', headers: { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer() } }
     );
   } catch(e) {}
 }
@@ -948,7 +950,7 @@ async function sbSaveAdminConfig(password) {
   try {
     await fetch(SUPABASE_URL + '/rest/v1/qms_admin_config?id=eq.1', {
       method: 'PATCH',
-      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY,
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer(),
         'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
       body: JSON.stringify({ password, updated_at: new Date().toISOString() })
     });
@@ -960,7 +962,7 @@ async function sbPullAdminConfig() {
   if (!_sbReady) return;
   try {
     const res = await fetch(SUPABASE_URL + '/rest/v1/qms_admin_config?id=eq.1&select=password',
-      { headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY } });
+      { headers: { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer() } });
     if (!res.ok) return;
     const data = await res.json();
     if (!data || !data.length) return;
@@ -975,7 +977,7 @@ async function sbPullSupplierUsers() {
   if (!_sbReady) return;
   try {
     const res = await fetch(SUPABASE_URL + '/rest/v1/qms_supplier_users?select=*',
-      { headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY } });
+      { headers: { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer() } });
     if (!res.ok) return;
     const data = await res.json();
     if (!data || !data.length) return;
@@ -1462,6 +1464,12 @@ async function sbInit() {
 
     <!-- 篩選列 -->
     <div class="dash-filter">
+      <span id="dash-scope-wrap" style="display:none;align-items:center;gap:6px">
+        <label>組織/供應商</label>
+        <select id="dash-scope" onchange="renderDashboard()" style="min-width:170px">
+          <option value="">— 全部 All —</option>
+        </select>
+      </span>
       <label>日期起</label><input type="date" id="dash-from">
       <label>日期迄</label><input type="date" id="dash-to">
       <label>料號</label><input id="dash-pn" placeholder="關鍵字" style="width:90px">
@@ -1656,7 +1664,7 @@ async function sbInit() {
     </div>
 
     <!-- 查詢結果表格 -->
-    <div class="hist-wrap" style="overflow-x:auto;-webkit-overflow-scrolling:touch">
+    <div class="hist-wrap" style="overflow:auto;max-height:65vh;-webkit-overflow-scrolling:touch">
       <table class="hist-table">
         <thead>
           <tr>
@@ -1857,7 +1865,7 @@ async function sbInit() {
             <th style="padding:7px 12px;text-align:left;width:100px;white-space:nowrap">Name 姓名</th>
             <th style="padding:7px 12px;text-align:left;width:180px;white-space:nowrap">Email 帳號</th>
             <th style="padding:7px 12px;text-align:center;white-space:nowrap">Role 角色</th>
-            <th style="padding:7px 12px;text-align:left;width:100px;white-space:nowrap">Created 建立時間</th>
+            <th style="padding:7px 5px;text-align:left;width:62px;white-space:nowrap;font-size:10px">建立</th>
             <th style="padding:7px 12px;text-align:center;width:100px;white-space:nowrap">Action</th>
           </tr>
         </thead>
@@ -1902,7 +1910,7 @@ async function sbInit() {
           </div>
           <div class="ef">
             <label>Password 密碼 *</label>
-            <input id="au-password" type="password" placeholder="至少 6 碼" style="height:30px;border:1px solid #bbb;border-radius:4px;padding:0 8px;font-size:12px;font-family:Arial,sans-serif">
+            <input id="au-password" type="password" placeholder="留空＝預設 12345678（首次登入須改）" style="height:30px;border:1px solid #bbb;border-radius:4px;padding:0 8px;font-size:12px;font-family:Arial,sans-serif">
           </div>
           <div class="ef">
             <label>Role 角色</label>
@@ -2062,7 +2070,7 @@ async function sbInit() {
             <div class="ef"><label>Email 帳號 *</label>
               <input id="su-email" type="email" style="height:28px;border:1px solid #bbb;border-radius:4px;padding:0 8px;font-size:12px;font-family:Arial,sans-serif"></div>
             <div class="ef"><label>Password 密碼 *</label>
-              <input id="su-password" type="password" placeholder="至少 6 碼" style="height:28px;border:1px solid #bbb;border-radius:4px;padding:0 8px;font-size:12px;font-family:Arial,sans-serif"></div>
+              <input id="su-password" type="password" placeholder="留空＝預設 12345678（首次登入須改）" style="height:28px;border:1px solid #bbb;border-radius:4px;padding:0 8px;font-size:12px;font-family:Arial,sans-serif"></div>
             <div class="ef"><label>Role 角色</label>
               <select id="su-role" style="height:28px;border:1px solid #bbb;border-radius:4px;padding:0 8px;font-size:12px;font-family:Arial,sans-serif">
                 <option value="inspector">🔵 輸入（可填表）</option>
@@ -2386,10 +2394,11 @@ function buildTableHeader() {
   const cg = document.getElementById('main-colgroup');
   const th = document.getElementById('main-thead');
   const sW = sampleCount <= 5 ? 50 : sampleCount <= 10 ? 44 : 36;
+  // Cpk 欄已從檢驗填表移除（FAI 只量 3PCS，Cpk 無統計意義；完整 CPK 請用「CPK 分析」頁）
   const cols = [
     '30px','110px','38px','54px','38px','38px','52px','52px',
     ...Array(sampleCount).fill(sW+'px'),
-    '58px','52px','52px','46px','72px','110px'
+    '58px','52px','46px','72px','110px'
   ];
   cg.innerHTML = cols.map(w=>`<col style="width:${w}">`).join('');
   const sHdrs = Array.from({length:sampleCount},(_,i)=>
@@ -2408,7 +2417,6 @@ function buildTableHeader() {
     ${sHdrs}
     <th>Mean X̄<br><span style="font-weight:400;font-size:9px">平均值</span></th>
     <th>σ<br><span style="font-weight:400;font-size:9px">標準差</span></th>
-    <th>Cpk<br><span style="font-weight:400;font-size:9px">製程能力</span></th>
     <th>%Tol<br><span style="font-weight:400;font-size:9px">公差使用率</span></th>
     <th>Alert/Reject<br><span style="font-weight:400;font-size:9px">警示/判定</span></th>
     <th>Supplier Comment<br><span style="font-weight:400;font-size:9px">供應商備註</span></th>
@@ -2508,7 +2516,7 @@ function render() {
     const judge = getJudge(r.type, stats, r.usl, r.lsl, r.s);
     if (r.type==='CPK') {
       cpkTotal++;
-      if (judge.label==='Pass') cpkPass++;
+      if (judge.label==='Pass'||judge.label==='OK') cpkPass++;
       else if (judge.label==='Alert') cpkAlert++;
       else if (judge.label==='Reject') cpkFail++;
     }
@@ -2547,9 +2555,6 @@ function render() {
       ${sHtml}
       <td style="font-weight:700">${stats?stats.mean.toFixed(3):'—'}</td>
       <td>${stats&&stats.sigma?stats.sigma.toFixed(4):'—'}</td>
-      <td style="font-weight:700;color:${r.type==='CPK'&&stats&&stats.cpk!==null?(stats.cpk>=1.33?'#1D9E75':stats.cpk>=1.0?'#BA7517':'#c0392b'):'#222'}">
-        ${r.type==='CPK'&&stats&&stats.cpk!==null?stats.cpk.toFixed(3):'—'}
-      </td>
       <td>${stats&&stats.pctTol!==null?stats.pctTol.toFixed(1)+'%':'—'}</td>
       <td><span class="badge ${judge.cls}" id="judge_${idx}">${judge.label}</span></td>
       <td class="lbl"><input value="${r.comment||''}" onchange="rows[${idx}].comment=this.value" style="font-size:10px"></td>
@@ -2630,7 +2635,7 @@ function updateSummary() {
     const stats = calcStats(r.s, r.usl, r.lsl);
     const judge = getJudge(r.type, stats, r.usl, r.lsl, r.s);
     cpkTotal++;
-    if (judge.label==='Pass') cpkPass++;
+    if (judge.label==='Pass'||judge.label==='OK') cpkPass++;
     else if (judge.label==='Alert') cpkAlert++;
     else if (judge.label==='Reject') cpkFail++;
   });
@@ -2861,7 +2866,7 @@ function renderSPC() {
   }
 
   const r   = rows[idx];
-  const vals = (r.s||[]).filter(v => v!==null && !isNaN(v)).map(Number);
+  const vals = (r.s||[]).filter(v => v!==null && v!=='' && !isNaN(v)).map(Number);
   if (vals.length < 2) {
     metaEl.innerHTML = '<span>樣本數不足（需 ≥ 2 筆）</span>';
     warnEl.textContent = '';
@@ -2875,7 +2880,7 @@ function renderSPC() {
   const usl  = r.usl; const lsl = r.lsl;
   const ucl  = xbar + 3*sigma;
   const lcl  = xbar - 3*sigma;
-  const cpk  = (usl && lsl && sigma>0) ? Math.min((usl-xbar)/(3*sigma),(xbar-lsl)/(3*sigma)) : null;
+  const cpk  = (usl!=null && lsl!=null && sigma>0) ? Math.min((usl-xbar)/(3*sigma),(xbar-lsl)/(3*sigma)) : null;
 
   // Canvas 尺寸
   const W = canvas.parentElement.clientWidth || 700;
@@ -2973,7 +2978,7 @@ function openNCR() {
     if (jg.label !== 'Reject' && jg.label !== 'Fail') return;
     ncCount++;
     const tr = document.createElement('tr');
-    const meas = (r.s||[]).filter(v=>v!==null&&!isNaN(v)).map(Number);
+    const meas = (r.s||[]).filter(v=>v!==null&&v!==''&&!isNaN(v)).map(Number);
     const oosVals = meas.filter(v=>r.usl!==null&&r.lsl!==null&&(v>r.usl||v<r.lsl));
     tr.innerHTML = `
       <td>${r.fai||''}</td>
@@ -3528,11 +3533,41 @@ function showNoPermToast(msg) {
 // ══════════════════════════════════════════════
 // 品質儀表板
 // ══════════════════════════════════════════════
+// 儀表板「組織/供應商」範圍下拉（僅 Admin；其他帳號已被資料隔離鎖在自己範圍）
+function initDashScopeFilter() {
+  const wrap = document.getElementById('dash-scope-wrap');
+  const sel  = document.getElementById('dash-scope');
+  if (!wrap || !sel) return;
+  if (!isAdmin()) { wrap.style.display = 'none'; sel.value = ''; return; }
+  wrap.style.display = 'inline-flex';
+  const cur = sel.value; // 保留目前選擇
+  try { loadSiteConfig(); } catch(e) {}
+  const esc = s => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  let html = '<option value="">— 全部 All —</option>';
+  const sites = (SITE_LIST || []).filter(s => s.active !== false);
+  if (sites.length) {
+    html += '<optgroup label="📍 廠區 Sites">';
+    sites.forEach(s => { html += `<option value="${esc(s.code)}">${esc(s.code)} — ${esc(s.name)}</option>`; });
+    html += '</optgroup>';
+  }
+  let sups = [];
+  try { sups = getSupplierList().filter(s => s && s.active !== false && s.code); } catch(e) {}
+  if (sups.length) {
+    html += '<optgroup label="🏭 供應商 Suppliers">';
+    sups.forEach(s => { html += `<option value="${esc(s.code)}">${esc(s.code)} — ${esc(s.name)}</option>`; });
+    html += '</optgroup>';
+  }
+  sel.innerHTML = html;
+  if (cur) sel.value = cur; // 還原先前選擇（若已不存在會自動落回「全部」）
+}
+
 function getDashRecords() {
   const pn    = document.getElementById('dash-pn')?.value.trim().toLowerCase() || '';
   const dfrom = document.getElementById('dash-from')?.value || '';
   const dto   = document.getElementById('dash-to')?.value || '';
-  let recs = getAllRecords(); // 已含 Site/供應商隔離
+  const scope = document.getElementById('dash-scope')?.value || ''; // 廠區碼或供應商碼（兩者都存在 r.site）
+  let recs = getAllRecords(); // 已含 Site/供應商隔離（非 Admin 自動鎖範圍）
+  if (scope) recs = recs.filter(r => r.site === scope);
   if (pn)    recs = recs.filter(r => (r.partno||'').toLowerCase().includes(pn) || (r.partname||'').toLowerCase().includes(pn));
   if (dfrom) recs = recs.filter(r => r.date >= dfrom);
   if (dto)   recs = recs.filter(r => r.date <= dto);
@@ -3541,6 +3576,7 @@ function getDashRecords() {
 
 function renderDashboard() {
   try {
+    initDashScopeFilter();
     const all  = getDashRecords();
     const fai  = all.filter(r => r.process !== 'CPK');
     const cpkR = all.filter(r => r.process === 'CPK');
@@ -3900,7 +3936,7 @@ function calcOverallFromRows(rowList) {
   let anyReject = false, anyAlert = false;
   (rowList || []).forEach(r => {
     const st = calcStats(r.s||[], r.usl, r.lsl);
-    const jg = getJudge(r.type, st, r.usl||0, r.lsl||0, r.s||[]);
+    const jg = getJudge(r.type, st, r.usl ?? null, r.lsl ?? null, r.s||[]);
     if (jg.label === 'Fail' || jg.label === 'Reject') anyReject = true;
     else if (jg.label === 'Alert') anyAlert = true;
   });
@@ -3912,6 +3948,8 @@ function getAllRecords() {
   const sess = getSession();
   const filterSite     = (sess && !sess.isAdmin && !sess.isSupplier && sess.site && sess.site !== '__nosite__') ? sess.site : null;
   const filterSupplier = (sess && sess.isSupplier) ? sess.supplierCode : null;
+  // 供應商碼集合：雲端拉回的記錄會掉 supplierCode 欄位（site 仍=供應商碼），用此反查補回，欄位才不會掉
+  const _supCodes = new Set((getSupplierList() || []).map(x => x && x.code).filter(Boolean));
 
   const keys = Object.keys(localStorage).filter(k =>
     k.startsWith(RECORD_PREFIX) || k.startsWith(STORAGE_PREFIX) || k.startsWith('cpk_record_')
@@ -3942,7 +3980,8 @@ function getAllRecords() {
           cpkTotal:  pts.length,
           isRecord:  true,
           formNo:    d.formNo || `${d.site?d.site+'-':''}CPK-${(d.date||'').replace(/-/g,'').replace(/^20/,'')}-0001`,
-          site:      d.site || ''
+          site:      d.site || '',
+          supplierCode: d.supplierCode || (_supCodes.has(d.site) ? d.site : '')
         });
         return;
       }
@@ -3965,7 +4004,7 @@ function getAllRecords() {
         if (_sbReady && d.formNo) {
           fetch(SUPABASE_URL + '/rest/v1/fai_records?form_no=eq.' + encodeURIComponent(d.formNo), {
             method: 'PATCH',
-            headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY,
+            headers: { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer(),
               'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
             body: JSON.stringify({ overall })
           }).catch(e => console.warn('overall 回寫失敗:', d.formNo, e));
@@ -3987,7 +4026,8 @@ function getAllRecords() {
         cpkTotal:  cpkStats.total,
         isRecord:  !!d.isRecord,
         formNo:    d.formNo           || '',
-        site:      d.site             || ''
+        site:      d.site             || '',
+        supplierCode: d.supplierCode || (_supCodes.has(d.site) ? d.site : '')
       });
     } catch(e) {}
   });
@@ -3995,9 +4035,11 @@ function getAllRecords() {
   if (filterSite) {
     return records.filter(r => !r.site || r.site === filterSite);
   }
-  // 供應商隔離：只看 supplierCode 相符的記錄
+  // 供應商隔離：只看相符的記錄
+  // 修正：推入的 record 物件未帶 supplierCode 欄位，供應商記錄是把供應商碼存在 site，
+  // 故同時比對 supplierCode 與 site，避免供應商看不到任何記錄
   if (filterSupplier) {
-    return records.filter(r => r.supplierCode === filterSupplier);
+    return records.filter(r => (r.supplierCode || r.site) === filterSupplier);
   }
   return records;
 }
@@ -4017,8 +4059,18 @@ function initHistSiteFilter() {
   const s = getSession();
   const isAdminUser = s?.isAdmin;
 
-  if (!isAdminUser && s?.site && s.site !== '__nosite__') {
-    // 非 Admin：鎖定廠區，只顯示自己的廠區
+  if (s?.isSupplier) {
+    // 供應商：鎖定自己的供應商碼（供應商記錄的 site 欄存的就是供應商碼）
+    // 若不鎖定，會誤列出全部廠區，供應商一旦選了廠區就查無資料 → 困惑
+    sel.innerHTML = '';
+    const code = s.supplierCode || '';
+    const opt = document.createElement('option');
+    opt.value = code;
+    opt.textContent = '🏢 ' + (s.supplierName ? `${code} — ${s.supplierName}` : code);
+    sel.appendChild(opt);
+    sel.disabled = true;
+  } else if (!isAdminUser && s?.site && s.site !== '__nosite__') {
+    // 非 Admin 廠區：鎖定廠區，只顯示自己的廠區
     sel.innerHTML = '';
     const siteInfo = SITE_LIST.find(sl => sl.code === s.site);
     const opt = document.createElement('option');
@@ -4203,7 +4255,9 @@ function enableColumnResize(table) {
   table.querySelectorAll('.col-resizer').forEach(el => el.remove());
 
   ths.forEach(th => {
-    th.style.position = 'relative';
+    // ⚠ 不可設 th.style.position='relative'：inline style 會蓋掉 CSS 的 position:sticky，
+    //   導致凍結表頭失效。sticky 本身即為定位上下文，下方 resizer 的 position:absolute
+    //   仍會正確對齊此 th 右緣，故不需要 relative。
     // 建立拖動分隔線
     const resizer = document.createElement('div');
     resizer.className = 'col-resizer';
@@ -4350,7 +4404,7 @@ function toggleHistDetail(key) {
 
   const detailRows = rowList.map(r => {
     const st = calcStats(r.s||[], r.usl, r.lsl);
-    const jg = getJudge(r.type, st, r.usl||0, r.lsl||0, r.s||[]);
+    const jg = getJudge(r.type, st, r.usl ?? null, r.lsl ?? null, r.s||[]);
     const resCls = jg.label==='Pass'||jg.label==='OK'?'hist-result-pass':jg.label==='Alert'?'hist-result-alert':jg.label==='Reject'||jg.label==='Fail'?'hist-result-fail':'';
     const sVals = Array.from({length:sCount},(_,i)=>{
       const v=r.s?r.s[i]:null;
@@ -4362,7 +4416,6 @@ function toggleHistDetail(key) {
       <td>${r.nom??''}</td><td>${r.usl??''}</td><td>${r.lsl??''}</td>
       ${sVals}
       <td>${st?st.mean.toFixed(3):'—'}</td>
-      <td>${r.type==='CPK'&&st&&st.cpk!==null?st.cpk.toFixed(3):'—'}</td>
       <td><span class="hist-result-badge ${resCls}">${jg.label}</span></td>
     </tr>`;
   }).join('');
@@ -4405,7 +4458,7 @@ function toggleHistDetail(key) {
         <div style="margin-left:auto">${actionBtns}</div>
       </div>
       <table>
-        <thead><tr><th>#</th><th>儀器</th><th>Type</th><th>Nominal</th><th>USL</th><th>LSL</th>${sHdrs}<th>Mean</th><th>Cpk</th><th>判定</th></tr></thead>
+        <thead><tr><th>#</th><th>儀器</th><th>Type</th><th>Nominal</th><th>USL</th><th>LSL</th>${sHdrs}<th>Mean</th><th>判定</th></tr></thead>
         <tbody>${detailRows}</tbody>
       </table>
       ${photoHtml}
@@ -4465,6 +4518,12 @@ function checkBackupReminder() {
     return;
   }
 
+  // 修正：忽略後 7 天內不再提醒（用獨立 key，不竄改真實備份時間）
+  const dismissedAt = localStorage.getItem('qms_backup_dismissed_at');
+  if (dismissedAt) {
+    const daysSinceDismiss = Math.floor((Date.now() - new Date(dismissedAt)) / (1000 * 60 * 60 * 24));
+    if (daysSinceDismiss < 7) { banner.style.display = 'none'; return; }
+  }
   const daysSince = Math.floor((Date.now() - new Date(lastBackup)) / (1000 * 60 * 60 * 24));
   if (daysSince >= 30) {
     banner.style.display = '';
@@ -4479,9 +4538,10 @@ function checkBackupReminder() {
 }
 
 function dismissBackupReminder() {
-  // 忽略後 7 天不再提醒
-  localStorage.setItem('qms_last_backup', new Date(Date.now() - 23 * 24 * 60 * 60 * 1000).toISOString());
-  document.getElementById('backup-reminder-banner').style.display = 'none';
+  // 修正：忽略後 7 天不再提醒，改記在獨立 key，不再竄改真實的 qms_last_backup
+  localStorage.setItem('qms_backup_dismissed_at', new Date().toISOString());
+  const b = document.getElementById('backup-reminder-banner');
+  if (b) b.style.display = 'none';
 }
 
 // 🖨 列印 / 存成 PDF（v90）
@@ -4600,7 +4660,7 @@ function deleteRecord(key) {
   if (recData?.formNo) {
     // 額外用 form_no 再確認刪一次（防止 local_key 欄位是空的舊資料漏刪）
     fetch(SUPABASE_URL + '/rest/v1/fai_records?form_no=eq.' + encodeURIComponent(recData.formNo),
-      { method: 'DELETE', headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY } }
+      { method: 'DELETE', headers: { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer() } }
     ).catch(e => console.warn('雲端 form_no 備援刪除失敗:', e));
   }
 
@@ -4743,9 +4803,20 @@ function getSelectedScopes() {
 }
 
 function deletePn(pn) {
+  const _adm = isAdmin();
+  // 🔒 共用料號只有 admin 能刪：非 admin 若該料號存在於「共用」scope，擋下並提示
+  if (!_adm) {
+    let isShared = false;
+    try { isShared = !!JSON.parse(localStorage.getItem(SPEC_DB_KEY) || '{}')[pn]; } catch(e){}
+    if (isShared) {
+      setMgrStatus(`料號 ${pn} 為共用料號，僅管理員可刪除，請洽管理員`, 'err');
+      return;
+    }
+  }
   if (!confirm(`確定刪除料號 ${pn}？此操作無法復原。`)) return;
-  if (isAdmin()) {
-    // Admin：找到該料號所屬的所有 Site key 並刪除
+
+  if (_adm) {
+    // Admin：刪本機所有 scope key
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i);
       if (k && k.startsWith(SPEC_DB_KEY)) {
@@ -4755,11 +4826,27 @@ function deletePn(pn) {
         } catch(e){}
       }
     }
+    // ☁ 雲端：刪除此料號所有 scope 記錄（修正：原本只刪本機，重新同步會復活→刪不掉）
+    if (_sbReady) {
+      fetch(SUPABASE_URL + '/rest/v1/part_specs?partno=eq.' + encodeURIComponent(pn),
+        { method: 'DELETE', headers: { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer() } }
+      ).catch(e => console.warn('料號雲端刪除失敗:', pn, e));
+    }
   } else {
+    // 廠區/供應商：只刪自己 scope（本機 + 雲端對應 scope）
     delete PART_SPECS[pn];
     saveSpecDB(PART_SPECS);
+    if (_sbReady) {
+      const s = getSession();
+      const myScope = s?.isSupplier ? s.supplierCode : (getCurrentSite() || s?.site || '');
+      if (myScope) {
+        fetch(SUPABASE_URL + '/rest/v1/part_specs?partno=eq.' + encodeURIComponent(pn) + '&scope=eq.' + encodeURIComponent(myScope),
+          { method: 'DELETE', headers: { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer() } }
+        ).catch(e => console.warn('料號雲端刪除失敗:', pn, e));
+      }
+    }
   }
-  PART_SPECS = isAdmin() ? loadAllSpecDB() : loadSpecDB();
+  PART_SPECS = _adm ? loadAllSpecDB() : loadSpecDB();
   renderPnList();
   if (editingPn === pn) clearEditor();
   setMgrStatus(`已刪除料號 ${pn}`, 'ok');
@@ -4842,7 +4929,7 @@ function savePartSpec() {
       // Supabase part_specs 用 partno+scope 唯一，多個 scope 各存一筆
       // 先刪除 Supabase 中此料號所有舊 scope 記錄
       fetch(SUPABASE_URL + '/rest/v1/part_specs?partno=eq.' + encodeURIComponent(pn),
-        { method: 'DELETE', headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY } }
+        { method: 'DELETE', headers: { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer() } }
       ).then(() => {
         // 再依新勾選的 scope 逐一新增
         selectedScopes.forEach(scope => {
@@ -6701,11 +6788,31 @@ function setExportStatus(msg, color) {
 // ══════════════════════════════════════════════
 let editingSiteCode = null; // null=新增, code=編輯
 
-function renderUserMgrTable() {
+async function renderUserMgrTable() {
   const filterSite = document.getElementById('user-mgr-site')?.value || '';
-  const db = getUserDB();
   const tbody = document.getElementById('user-mgr-tbody');
   if (!tbody) return;
+  // 🔐 _2CODE：從 profiles 載入（透過 admin-users Edge Function），不再讀舊的 qms_users
+  let db = {};
+  try {
+    const lr = await sbCallAdminFn('list');
+    if (!lr.ok || !lr.data || !lr.data.profiles) {
+      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:14px;color:#c0392b;font-size:12px">載入帳號失敗：' + (lr.msg||'') + '</td></tr>';
+      return;
+    }
+    lr.data.profiles.forEach(p => {
+      if (p.account_type === 'supplier') return; // 供應商在另一張表管理
+      const s = p.account_type === 'admin' ? '__nosite__' : (p.site_code || '__nosite__');
+      if (!db[s]) db[s] = {};
+      db[s][p.email] = { name: p.name || p.email, email: p.email,
+        role: (p.account_type === 'admin' ? 'admin' : (p.qms_role || 'inspector')),
+        createdAt: p.created_at || '' };
+    });
+    try { localStorage.setItem(USER_DB_KEY, JSON.stringify(db)); } catch(e) {} // 供 onPermCheck 沿用
+  } catch(e) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:14px;color:#c0392b;font-size:12px">載入帳號錯誤</td></tr>';
+    return;
+  }
   // 更新組織篩選選單
   const siteSel = document.getElementById('user-mgr-site');
   if (siteSel) {
@@ -6789,7 +6896,7 @@ function renderUserMgrTable() {
       <td style="padding:6px 10px;vertical-align:middle;min-width:420px">
         <div style="display:flex;gap:4px;align-items:center;flex-wrap:nowrap">${checks}</div>
       </td>
-      <td style="padding:8px 12px;font-size:11px;color:#888;vertical-align:middle;white-space:nowrap">${r.createdAt ? r.createdAt.slice(0,10) : '—'}</td>
+      <td style="padding:6px 5px;font-size:10px;color:#888;vertical-align:middle;white-space:nowrap">${r.createdAt ? r.createdAt.slice(0,10) : '—'}</td>
       <td style="padding:8px 12px;text-align:center;vertical-align:middle;white-space:nowrap">${actionBtns}</td>
     </tr>`;
   }
@@ -6806,9 +6913,11 @@ function renderUserMgrTable() {
   tbody.innerHTML = html;
 }
 
-function deleteUserConfirm(site, key, name) {
+async function deleteUserConfirm(site, key, name) {
   if (!confirm(`Delete inspector "${name}" from ${site}?\n確定刪除「${name}」？`)) return;
-  removeUser(site, key);
+  // 🔐 _2CODE：透過 Edge Function 刪除 Auth 帳號（profiles 連帶移除）
+  const r = await sbCallAdminFn('delete', { email: key });
+  if (!r.ok) { alert('刪除失敗：' + (r.msg||'')); return; }
   renderUserMgrTable();
 }
 
@@ -6842,63 +6951,36 @@ function addUserAccount() {
   const site     = document.getElementById('au-site')?.value.trim()     || '';
   const name     = document.getElementById('au-name')?.value.trim()     || '';
   const email    = (document.getElementById('au-email')?.value.trim()   || '').toLowerCase();
-  const password = document.getElementById('au-password')?.value        || '';
+  let   password = document.getElementById('au-password')?.value        || '';
   const role     = document.getElementById('au-role')?.value            || 'inspector';
   const st       = document.getElementById('add-user-status');
 
   if (!site)     { if (st) st.textContent = '請選擇組織'; return; }
   if (!name)     { if (st) st.textContent = '請輸入姓名'; return; }
   if (!email || !email.includes('@')) { if (st) st.textContent = '請輸入有效 Email'; return; }
-  if (password.length < 6) { if (st) st.textContent = '密碼至少需 6 碼'; return; }
+  // 密碼可留空 → 用預設密碼 DEFAULT_PWD，並要求該員工首次登入修改
+  let mustChange = false;
+  if (!password) { password = DEFAULT_PWD; mustChange = true; }
+  else if (password.length < 8) { if (st) { st.style.color='#c0392b'; st.textContent = '密碼至少需 8 碼（或留空用預設）'; } return; }
 
-  const db = getUserDB();
-  if (!db[site]) db[site] = {};
-  if (db[site][email]) { if (st) { st.style.color='#c0392b'; st.textContent = '此 Email 已存在'; } return; }
-
-  db[site][email] = { name, email, role, password, createdAt: new Date().toISOString() };
-  saveUserDB(db);
-  renderUserMgrTable();
-  // 清空表單
-  ['au-name','au-email','au-password'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
-  document.getElementById('au-role').value = 'inspector';
-  if (st) { st.style.color='#1d9e75'; st.textContent = `✅ 已新增 ${name} (${email})`; }
+  if (st) { st.style.color='#888'; st.textContent = '⏳ 建立中...'; }
+  // 🔐 _2CODE：透過 Edge Function 在 Auth + profiles 建立帳號（新帳號才能用 Auth 登入）
+  sbCallAdminFn('create', { email, password, name, account_type:'site', qms_role:role, site_code:site, must_change:mustChange }).then(r => {
+    if (!r.ok) { if (st) { st.style.color='#c0392b'; st.textContent = '❌ ' + (r.msg||'建立失敗'); } return; }
+    renderUserMgrTable();
+    ['au-name','au-email','au-password'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
+    const roleEl = document.getElementById('au-role'); if (roleEl) roleEl.value = 'inspector';
+    if (st) { st.style.color='#1d9e75'; st.textContent = mustChange ? `✅ 已新增 ${name}，預設密碼 ${DEFAULT_PWD}（首次登入須改）` : `✅ 已新增 ${name} (${email})`; }
+  });
 }
 
 async function resetUserPassword(site, key, name) {
-  if (!confirm(`確定要重設「${name}」（${site}）的密碼為預設值？\n\n重設後，該使用者下次登入需重新設定密碼。`)) return;
-  
-  // ☁ 直接用 PATCH 更新 Supabase
-  if (_sbReady) {
-    try {
-      const res = await fetch(
-        SUPABASE_URL + '/rest/v1/qms_users?site_code=eq.' + encodeURIComponent(site) + '&email=eq.' + encodeURIComponent(key),
-        {
-          method: 'PATCH',
-          headers: {
-            'apikey': SUPABASE_KEY,
-            'Authorization': 'Bearer ' + SUPABASE_KEY,
-            'Content-Type': 'application/json',
-            'Prefer': 'return=minimal'
-          },
-          body: JSON.stringify({ password: DEFAULT_PWD, must_change_pwd: true })
-        }
-      );
-      if (res.ok) console.log('☁ 密碼已重設到 Supabase:', key);
-      else console.warn('重設密碼 Supabase 失敗:', res.status);
-    } catch(e) { console.warn('重設密碼錯誤:', e); }
-  }
-  
-  // 同步更新 localStorage
-  const db = getUserDB();
-  if (db[site]?.[key]) {
-    db[site][key].password = DEFAULT_PWD;
-    db[site][key].mustChange = true;
-    try { localStorage.setItem(USER_DB_KEY, JSON.stringify(db)); } catch(e) {}
-  }
-  
+  if (!confirm(`確定要重設「${name}」（${site}）的密碼為預設值（${DEFAULT_PWD}）？\n\n重設後，該使用者下次登入需重新設定密碼。`)) return;
+  // 🔐 _2CODE：透過 Edge Function 重設 Auth 密碼（並標記下次須改）
+  const r = await sbCallAdminFn('resetPassword', { email: key, password: DEFAULT_PWD });
   const toast = document.createElement('div');
-  toast.textContent = `✅ 已重設 ${name} 的密碼為預設值`;
-  toast.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1D9E75;color:#fff;padding:10px 20px;border-radius:8px;font-size:13px;font-weight:700;z-index:99999;box-shadow:0 4px 12px rgba(0,0,0,0.2)';
+  toast.textContent = r.ok ? `✅ 已重設 ${name} 的密碼為 ${DEFAULT_PWD}` : `❌ 重設失敗：${r.msg||''}`;
+  toast.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:' + (r.ok ? '#1D9E75' : '#c0392b') + ';color:#fff;padding:10px 20px;border-radius:8px;font-size:13px;font-weight:700;z-index:99999;box-shadow:0 4px 12px rgba(0,0,0,0.2)';
   document.body.appendChild(toast);
   setTimeout(() => toast.remove(), 2500);
 }
@@ -7022,7 +7104,7 @@ function disableSiteConfirm(code) {
     if (_sbReady) {
       fetch(SUPABASE_URL + '/rest/v1/qms_site_config?code=eq.' + encodeURIComponent(code), {
         method: 'PATCH',
-        headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY,
+        headers: { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer(),
           'Content-Type': 'application/json' },
         body: JSON.stringify({ active: false, updated_at: new Date().toISOString() })
       }).then(r => { if(r.ok) console.log('☁ 廠區停用同步成功:', code); })
@@ -7055,7 +7137,7 @@ function enableSiteConfirm(code) {
     if (_sbReady) {
       fetch(SUPABASE_URL + '/rest/v1/qms_site_config?code=eq.' + encodeURIComponent(code), {
         method: 'PATCH',
-        headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY,
+        headers: { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer(),
           'Content-Type': 'application/json' },
         body: JSON.stringify({ active: true, updated_at: new Date().toISOString() })
       }).then(r => { if(r.ok) console.log('☁ 廠區啟用同步成功:', code); })
@@ -7385,9 +7467,13 @@ function onImportConfig(input) {
 const LOGIN_SESSION_KEY = 'qms_session';
 const USER_DB_KEY       = 'qms_users';
 
-function getSession()  { try { return JSON.parse(localStorage.getItem(LOGIN_SESSION_KEY)||'null'); } catch(e){ return null; } }
-function saveSession(s){ try { localStorage.setItem(LOGIN_SESSION_KEY, JSON.stringify(s)); } catch(e){} }
-function clearSession(){ try { localStorage.removeItem(LOGIN_SESSION_KEY); } catch(e){} }
+// 🔐 _2CODE：登入 session 改存 sessionStorage → 關閉/重開分頁即需重新登入
+// （確保每次重開都重新向 Auth 驗證、重新抓最新資料，不沿用電腦上的舊登入）
+function getSession()  { try { return JSON.parse(sessionStorage.getItem(LOGIN_SESSION_KEY)||'null'); } catch(e){ return null; } }
+function saveSession(s){ try { sessionStorage.setItem(LOGIN_SESSION_KEY, JSON.stringify(s)); } catch(e){} }
+function clearSession(){ try { sessionStorage.removeItem(LOGIN_SESSION_KEY); localStorage.removeItem(LOGIN_SESSION_KEY); } catch(e){} }
+// 啟動時清掉舊版殘留在 localStorage 的 session，避免自動登入
+try { localStorage.removeItem(LOGIN_SESSION_KEY); } catch(e){}
 
 // 使用者資料庫：{ [siteCode]: { [userKey]: { name } } }
 function getUserDB() { try { return JSON.parse(localStorage.getItem(USER_DB_KEY)||'{}'); } catch(e){ return {}; } }
@@ -7401,6 +7487,119 @@ function saveUserDB(db){
 function syncUserToSupabase(siteCode, email, userData) {
   if (!_sbReady) return;
   sbSaveUser(siteCode, email, userData).catch(e => console.warn('帳號同步失敗:', e));
+}
+
+// ══════════════════════════════════════════════
+// 🔐 Supabase Auth 整合（_2CODE）
+// ══════════════════════════════════════════════
+const ADMIN_EMAIL = 'yc.huang@syncmold.com.tw'; // DTO/管理員固定 email
+
+// 用 email+密碼向 Supabase Auth 登入，並讀取自己的 profile
+async function sbAuthLogin(email, password) {
+  try {
+    const res = await fetch(SUPABASE_URL + '/auth/v1/token?grant_type=password', {
+      method: 'POST',
+      headers: { 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const raw = ((data.error_description || data.msg || data.error || '') + '').toLowerCase();
+      let msg = '帳號或密碼錯誤';
+      if (raw.includes('not confirmed')) msg = '帳號尚未啟用，請聯絡管理員';
+      return { ok: false, msg };
+    }
+    const token = data.access_token, refresh = data.refresh_token, uid = data.user && data.user.id;
+    const meta  = (data.user && data.user.user_metadata) || {};
+    const pRes = await fetch(
+      SUPABASE_URL + '/rest/v1/profiles?id=eq.' + encodeURIComponent(uid) + '&select=*&limit=1',
+      { headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + token } }
+    );
+    const pData = pRes.ok ? await pRes.json().catch(() => []) : [];
+    const profile = (pData && pData[0]) || null;
+    if (!profile) return { ok: false, msg: '帳號資料不完整，請聯絡管理員' };
+    if (profile.active === false) return { ok: false, msg: '此帳號已停用，請聯絡管理員' };
+    return { ok: true, token, refresh, uid, profile, mustChange: meta.must_change === true };
+  } catch (e) {
+    return { ok: false, msg: '網路錯誤，請稍後再試' };
+  }
+}
+
+// 修改密碼：先用舊密碼重新驗證，再透過 Auth 更新
+async function sbAuthChangePassword(email, oldPwd, newPwd) {
+  const v = await sbAuthLogin(email, oldPwd);
+  if (!v.ok) return { ok: false, msg: '舊密碼錯誤' };
+  try {
+    const res = await fetch(SUPABASE_URL + '/auth/v1/user', {
+      method: 'PUT',
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + v.token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: newPwd, data: { must_change: false } })
+    });
+    if (!res.ok) { console.warn('改密碼失敗:', await res.text()); return { ok: false, msg: '密碼更新失敗，請稍後再試' }; }
+    return { ok: true };
+  } catch (e) { return { ok: false, msg: '網路錯誤，請稍後再試' }; }
+}
+
+// 呼叫 admin-users Edge Function（帳號管理，需 admin 身分）
+async function sbCallAdminFn(action, payload) {
+  const s = getSession();
+  const token = s && s.token;
+  if (!token) return { ok: false, msg: '未登入或登入逾時，請重新登入' };
+  try {
+    const res = await fetch(SUPABASE_URL + '/functions/v1/admin-users', {
+      method: 'POST',
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify(Object.assign({ action }, payload))
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.error) return { ok: false, msg: data.error || ('HTTP ' + res.status) };
+    return { ok: true, data };
+  } catch (e) { return { ok: false, msg: '網路錯誤，請稍後再試' }; }
+}
+
+// 🔐 _2CODE：資料存取的 Authorization — 登入後用「使用者 JWT」(供 RLS 判斷身分)，未登入用匿名 key
+// （RLS 還沒開時 JWT 與匿名 key 皆可存取，故此切換對現狀透明）
+function sbAuthBearer() {
+  try { const s = getSession(); if (s && s.token) return 'Bearer ' + s.token; } catch(e) {}
+  return 'Bearer ' + (SUPABASE_KEY);
+}
+
+// 🔐 _2CODE：JWT 預設 1 小時過期 → 用 refresh token 背景續期，讓登入期間 token 持續有效
+async function sbRefreshToken() {
+  const s = getSession();
+  if (!s || !s.refresh) return false;
+  try {
+    const res = await fetch(SUPABASE_URL + '/auth/v1/token?grant_type=refresh_token', {
+      method: 'POST',
+      headers: { 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: s.refresh })
+    });
+    if (!res.ok) { console.warn('Token 續期失敗:', res.status); return false; }
+    const d = await res.json().catch(() => null);
+    if (d && d.access_token) {
+      const cur = getSession();
+      if (cur) { cur.token = d.access_token; if (d.refresh_token) cur.refresh = d.refresh_token; saveSession(cur); }
+      return true;
+    }
+  } catch(e) { console.warn('Token 續期錯誤:', e); }
+  return false;
+}
+let _tokenTimer = null;
+function startTokenAutoRefresh() {
+  if (_tokenTimer) clearInterval(_tokenTimer);
+  _tokenTimer = setInterval(() => { sbRefreshToken(); }, 45 * 60 * 1000); // 每 45 分鐘續一次
+}
+
+// 🔐 _2CODE：登入後重新從雲端拉記錄（登入會清本機快取，需重拉才看得到同廠區/全部記錄）
+async function sbPostLoginRefresh() {
+  try {
+    if (!_sbReady) { try { _sbReady = await sbTestConnection(); } catch(e){} }
+    if (!_sbReady) return;
+    await Promise.allSettled([ sbPullAllRecords(), sbPullCpkRecords(), sbPullPartSpecs() ]);
+    const activeTab = document.querySelector('.tab-pane.active')?.id;
+    if (activeTab === 'tab-dash') renderDashboard();
+    if (activeTab === 'tab-hist') runHistQuery();
+  } catch(e) { console.warn('登入後重拉失敗:', e); }
 }
 
 // ── 登入畫面初始化 ──
@@ -7524,8 +7723,25 @@ function onLoginUserChange() {
   }
 }
 
-function clearLoginErr(){ const el=document.getElementById('login-err'); if(el) el.textContent=''; }
-function showLoginErr(msg){ const el=document.getElementById('login-err'); if(el) el.textContent=msg; }
+function clearLoginErr(){
+  const el=document.getElementById('login-err'); if(el) el.textContent='';
+  const fx=document.getElementById('login-err-float'); if(fx) fx.style.display='none';
+}
+function showLoginErr(msg){
+  const el=document.getElementById('login-err'); if(el) el.textContent=msg;
+  // _2CODE：浮動提示，確保三種登入(廠區/供應商/DTO)都看得到錯誤
+  let fx=document.getElementById('login-err-float');
+  if(!fx){
+    fx=document.createElement('div');
+    fx.id='login-err-float';
+    fx.style.cssText='position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:100000;background:#c0392b;color:#fff;padding:10px 18px;border-radius:8px;font-size:13px;font-weight:700;box-shadow:0 4px 16px rgba(0,0,0,0.25);max-width:90vw;text-align:center';
+    document.body.appendChild(fx);
+  }
+  fx.textContent='⚠ '+msg;
+  fx.style.display='block';
+  clearTimeout(window._loginErrTimer);
+  window._loginErrTimer=setTimeout(()=>{ if(fx) fx.style.display='none'; }, 4000);
+}
 
 async function doLogin() {
   const siteSel     = document.getElementById('login-site');
@@ -7540,55 +7756,33 @@ async function doLogin() {
   if (!email)    { showLoginErr('Please enter your email 請輸入 Email'); return; }
   if (!password) { showLoginErr('Please enter your password 請輸入密碼'); return; }
 
-  // ☁ 優先從 Supabase 驗證（確保密碼是最新版本）
   const loginBtn = document.getElementById('login-btn');
   if (loginBtn) loginBtn.textContent = '⏳ 驗證中...';
 
-  // 若 Supabase 尚未就緒，先等待連線（最多等5秒）
-  if (!_sbReady) {
-    try {
-      const ok = await sbTestConnection();
-      if (ok) _sbReady = true;
-    } catch(e) {}
-  }
-
-  if (_sbReady) {
-    sbLoginVerify(site, email, password).then(result => {
-      if (loginBtn) loginBtn.textContent = '▶ Enter 進入系統';
-      if (result.ok) {
-        const db = getUserDB();
-        const siteKey = site === '__nosite__' ? '__nosite__' : site;
-        if (!db[siteKey]) db[siteKey] = {};
-        db[siteKey][email] = result.user;
-        try { localStorage.setItem(USER_DB_KEY, JSON.stringify(db)); } catch(e) {}
-        enterSystem(site, result.user.name || email, email);
-      } else {
-        showLoginErr(result.msg);
-      }
-    });
-    return;
-  }
-
+  // 🔐 改用 Supabase Auth 驗證
+  const r = await sbAuthLogin(email, password);
   if (loginBtn) loginBtn.textContent = '▶ Enter 進入系統';
-  // 離線模式：用 localStorage 驗證（備用）
-  const siteKey = site === '__nosite__' ? '__nosite__' : site;
-  const db = getUserDB();
-  if (!db[siteKey]) { showLoginErr('此組織尚無帳號，請聯絡管理員'); return; }
+  if (!r.ok) { showLoginErr(r.msg); return; }
 
-  let userKey = null;
-  let user    = null;
-  if (db[siteKey][email]) {
-    userKey = email;
-    user    = db[siteKey][email];
-  } else {
-    const found = Object.entries(db[siteKey]).find(([k, u]) => u.email && u.email.toLowerCase() === email);
-    if (found) { userKey = found[0]; user = found[1]; }
+  const p = r.profile;
+  // 防呆：分頁與帳號類型須相符
+  if (p.account_type === 'supplier') { showLoginErr('此為供應商帳號，請改用下方「供應商」登入'); return; }
+  if (p.account_type === 'admin')    { showLoginErr('管理員請改用下方「🔐 Admin 管理員」登入'); return; }
+  // 防呆：若有選組織，須與帳號實際所屬組織一致（選錯擋下）
+  if (!siteHidden && site && p.site_code && site !== p.site_code) {
+    showLoginErr('此帳號不屬於所選組織，請改選「' + p.site_code + '」'); return;
   }
+  const realSite = p.site_code || '__nosite__';
+  const role     = p.qms_role || 'inspector';
 
-  if (!user) { showLoginErr('帳號不存在，請聯絡管理員'); return; }
-  if (user.password && user.password !== password) { showLoginErr('密碼錯誤 Wrong password'); return; }
-  if (!user.password) { showLoginErr('此帳號尚未設定密碼，請聯絡管理員重設'); return; }
-  enterSystem(site, user.name || email, email);
+  // 寫入本機 userDB（供 getCurrentUserRole 等沿用，不含明文密碼）
+  const db = getUserDB();
+  if (!db[realSite]) db[realSite] = {};
+  db[realSite][email] = { name: p.name || email, email, role, mustChange: r.mustChange };
+  try { localStorage.setItem(USER_DB_KEY, JSON.stringify(db)); } catch(e) {}
+
+  enterSystem(realSite, p.name || email, email,
+    { token: r.token, refresh: r.refresh, uid: r.uid, role, mustChange: r.mustChange, isAdmin: false });
 }
 
 // ☁ Supabase 登入驗證
@@ -7599,7 +7793,7 @@ async function sbLoginVerify(site, email, password) {
     if (siteCode) url += '&site_code=eq.' + encodeURIComponent(siteCode);
     url += '&select=*&limit=1';
     const res = await fetch(url, {
-      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer() }
     });
     if (!res.ok) return { ok: false, msg: '雲端驗證失敗，請稍後再試' };
     const data = await res.json();
@@ -7622,11 +7816,11 @@ async function sbLoginVerify(site, email, password) {
   }
 }
 
-function enterSystem(site, userName, userKey) {
+function enterSystem(site, userName, userKey, extra) {
   // v119: 保留首次登入時間（頁面重整時不重設，確保 7 天壽命計算正確）
   const _prev = getSession();
   const firstLoginAt = (_prev && _prev.firstLoginAt) ? _prev.firstLoginAt : new Date().toISOString();
-  saveSession({ site, userName, userKey, loginAt: new Date().toISOString(), firstLoginAt });
+  saveSession(Object.assign({ site, userName, userKey, loginAt: new Date().toISOString(), firstLoginAt }, extra || {}));
   // 每次登入清除本機記錄快取，確保從 Supabase 拉取最新資料
   clearLocalCache();
   try { localStorage.setItem(SITE_KEY, site === '__nosite__' ? '' : site); } catch(e) {}
@@ -7683,6 +7877,8 @@ function enterSystem(site, userName, userKey) {
     if (chgBtn) chgBtn.style.display = '';
     // 首次登入強制改密碼
     checkForceChangePwd();
+    // 🔐 _2CODE：登入後重新拉雲端記錄（否則只看得到登入後新建的那筆）
+    sbPostLoginRefresh();
     // 備份提醒：只對 Admin 和全部權限顯示（修正 v102：移除重複的 role 宣告）
     if (isAdmin() || role === 'admin') {
       setTimeout(checkBackupReminder, 2000);
@@ -7692,25 +7888,11 @@ function enterSystem(site, userName, userKey) {
 
 function doLogout() {
   if (!confirm('Logout? 確定登出？')) return;
+  // 🔐 _2CODE：登出時清 session 並「重新整理整個頁面」→ 徹底重置 DOM，
+  // 避免上一個使用者已顯示的內容（例如設定頁/人員管理）殘留給下一個人看到。
   clearSession();
-  document.getElementById('main-page').style.display   = 'none';
-  const logoutBtn = document.getElementById('logout-btn');
-  if (logoutBtn) logoutBtn.style.display = 'none';
-  const chgPwdBtn = document.getElementById('chg-pwd-btn');
-  if (chgPwdBtn) chgPwdBtn.style.display = 'none';
-  const badge = document.getElementById('login-badge');
-  if (badge) badge.style.display = 'none';
-  document.getElementById('login-screen').style.display = 'flex';
-  // 重設登入表單
-  const siteRow = document.getElementById('site-login-row');
-  if (siteRow) siteRow.style.display = 'none';
-  document.getElementById('login-site').value = '';
-  document.getElementById('login-email-section').style.display    = 'none';
-  document.getElementById('login-password-section').style.display = 'none';
-  document.getElementById('login-btn').style.display              = 'none';
-  if (document.getElementById('login-email-input'))    document.getElementById('login-email-input').value = '';
-  if (document.getElementById('login-password-input')) document.getElementById('login-password-input').value = '';
-  clearLoginErr();
+  try { localStorage.removeItem(SITE_KEY); } catch(e) {}
+  location.reload();
 }
 
 function removeUser(site, userKey) {
@@ -7722,7 +7904,7 @@ function removeUser(site, userKey) {
 // ══════════════════════════════════════════════
 // 🔑 修改密碼
 // ══════════════════════════════════════════════
-const DEFAULT_PWD = '123456';
+const DEFAULT_PWD = '12345678'; // _2CODE：預設密碼 8 碼（新增留空/重設時用，使用者首次登入須改）
 let _forceChangePwd = false;
 
 function showChangePwdModal(force) {
@@ -7752,12 +7934,34 @@ async function doChangePassword() {
   const st         = document.getElementById('chg-pwd-status');
 
   if (!oldPwd) { st.textContent = '❌ 請輸入舊密碼'; st.style.color = '#c0392b'; return; }
-  if (newPwd.length < 6) { st.textContent = '❌ 新密碼至少 6 碼'; st.style.color = '#c0392b'; return; }
+  if (newPwd.length < 8) { st.textContent = '❌ 新密碼至少 8 碼'; st.style.color = '#c0392b'; return; }
   if (newPwd === DEFAULT_PWD) { st.textContent = '❌ 新密碼不能與預設密碼相同'; st.style.color = '#c0392b'; return; }
   if (newPwd !== confirmPwd) { st.textContent = '❌ 兩次輸入的新密碼不一致'; st.style.color = '#c0392b'; return; }
 
   const s = getSession();
   if (!s) { st.textContent = '❌ 未登入'; st.style.color = '#c0392b'; return; }
+  // 🔐 _2CODE：改用 Supabase Auth 修改密碼（以下舊邏輯已停用）
+  {
+    const _email = s.isAdmin ? ADMIN_EMAIL : s.userKey;
+    if (!_email) { st.textContent = '❌ 找不到帳號'; st.style.color = '#c0392b'; return; }
+    st.textContent = '⏳ 驗證中...'; st.style.color = '#888';
+    const _r = await sbAuthChangePassword(_email, oldPwd, newPwd);
+    if (!_r.ok) { st.textContent = '❌ ' + _r.msg; st.style.color = '#c0392b'; return; }
+    try {
+      if (s.isSupplier) {
+        const db = getSupplierUsers();
+        if (db[s.supplierCode] && db[s.supplierCode][s.userKey]) { db[s.supplierCode][s.userKey].mustChange = false; localStorage.setItem(SUPPLIER_USERS_KEY, JSON.stringify(db)); }
+      } else if (!s.isAdmin) {
+        const db = getUserDB(); const sk = s.site || '__nosite__';
+        if (db[sk] && db[sk][s.userKey]) { db[sk][s.userKey].mustChange = false; localStorage.setItem(USER_DB_KEY, JSON.stringify(db)); }
+      }
+    } catch(e) {}
+    s.mustChange = false; saveSession(s);
+    st.textContent = '✅ 密碼已修改成功！'; st.style.color = '#1d9e75';
+    _forceChangePwd = false;
+    setTimeout(() => { const modal = document.getElementById('chg-pwd-modal'); if (modal) modal.style.display = 'none'; }, 1200);
+    return;
+  }
 
   if (s.isSupplier) {
     const db = getSupplierUsers();
@@ -7776,7 +7980,7 @@ async function doChangePassword() {
       // 1. 從 Supabase 查目前密碼
       const verifyRes = await fetch(
         SUPABASE_URL + '/rest/v1/qms_users?site_code=eq.' + encodeURIComponent(siteKey) + '&email=eq.' + encodeURIComponent(s.userKey) + '&select=password,name,role,must_change_pwd',
-        { headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY } }
+        { headers: { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer() } }
       );
       const verifyData = await verifyRes.json();
       if (!verifyData || !verifyData.length) { st.textContent = '❌ 找不到帳號'; st.style.color = '#c0392b'; return; }
@@ -7791,7 +7995,7 @@ async function doChangePassword() {
           method: 'PATCH',
           headers: {
             'apikey': SUPABASE_KEY,
-            'Authorization': 'Bearer ' + SUPABASE_KEY,
+            'Authorization': sbAuthBearer(),
             'Content-Type': 'application/json',
             'Prefer': 'return=minimal'
           },
@@ -7839,6 +8043,9 @@ function checkForceChangePwd() {
   const s = getSession();
   if (!s || s.isAdmin) return;
   if (s.site === 'TEST') return;
+  // 🔐 _2CODE：直接用 session.mustChange 判斷（以下舊邏輯已停用）
+  if (s.mustChange === true) { setTimeout(() => showChangePwdModal(true), 300); }
+  return;
   
   // 從 localStorage 讀取（已從 Supabase 同步過來的最新資料）
   let currentPwd = null;
@@ -8498,7 +8705,7 @@ async function cpkSaveRecord() {
     date:      document.getElementById('cpk-date').value,
     lotSize,
     toolno:    document.getElementById('cpk-toolno').value,
-    site:      getCurrentSite() || (s?.isSupplier ? s.supplierCode : '') || (s?.isAdmin ? 'ADMIN' : '') || s?.site || '',
+    site:      getCurrentSite() || (s?.isSupplier ? s.supplierCode : '') || (s?.isAdmin ? 'ADMIN' : (s?.site || '')),  // 與 FAI _doSaveNewRecord 統一
     points:    JSON.parse(JSON.stringify(cpkPoints)),
     savedAt:   now.toISOString(),
     savedBy:   s?.userName || '—',
@@ -8644,7 +8851,8 @@ function generateFormNo(process) {
   const mm  = String(now.getMonth()+1).padStart(2,'0');
   const dd  = String(now.getDate()).padStart(2,'0');
   const ymd = yy + mm + dd;
-  const site   = getCurrentSite();
+  const _fs    = getSession();
+  const site   = getCurrentSite() || (_fs?.isSupplier ? _fs.supplierCode : '') || (_fs?.isAdmin ? 'ADMIN' : '');
   const prefix = site ? `${site}-${process}` : process;
   const counterKey = FORMNO_KEY + '_' + prefix + '_' + ymd;
   let seq = 1;
@@ -8665,7 +8873,8 @@ async function generateFormNoAsync(process, table) {
   const mm  = String(now.getMonth()+1).padStart(2,'0');
   const dd  = String(now.getDate()).padStart(2,'0');
   const ymd = yy + mm + dd;
-  const site   = getCurrentSite();
+  const _fs    = getSession();
+  const site   = getCurrentSite() || (_fs?.isSupplier ? _fs.supplierCode : '') || (_fs?.isAdmin ? 'ADMIN' : '');
   const prefix = site ? `${site}-${process}` : process;
   const counterKey = FORMNO_KEY + '_' + prefix + '_' + ymd;
   const tbl = table || 'fai_records';
@@ -8684,7 +8893,7 @@ async function generateFormNoAsync(process, table) {
       const pat = encodeURIComponent(prefix + '-' + ymd + '-%');
       const res = await fetch(
         SUPABASE_URL + '/rest/v1/' + tbl + '?select=form_no&form_no=like.' + pat,
-        { headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY } }
+        { headers: { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer() } }
       );
       if (res.ok) {
         const rows = await res.json();
@@ -8812,7 +9021,7 @@ async function _doSaveNewRecord(header, now, overall, updatedBy) {
   const formNo = await generateFormNoAsync(currentProcess, 'fai_records');
   const _sess  = getSession();
   const _rawSite = getCurrentSite();
-  const site   = _rawSite || (_sess?.isAdmin ? 'ADMIN' : (_sess?.site || ''));
+  const site   = _rawSite || (_sess?.isSupplier ? _sess.supplierCode : '') || (_sess?.isAdmin ? 'ADMIN' : (_sess?.site || ''));
   const key    = RECORD_PREFIX + currentProcess + '_' + (header.partno||'x') + '_' + now.toISOString().replace(/[:.]/g,'-');
   const s = _sess;
   const data   = {
@@ -8978,13 +9187,56 @@ function onLoginSupplierChange() {
   }
 }
 
-function doSupplierLogin() {
+async function doSupplierLogin() {
   const supplierCode = document.getElementById('login-supplier')?.value || '';
   const email    = (document.getElementById('login-supplier-email')?.value || '').trim().toLowerCase();
   const password = document.getElementById('login-supplier-pwd')?.value || '';
   if (!supplierCode) { showLoginErr('請選擇供應商'); return; }
   if (!email)    { showLoginErr('請輸入 Email'); return; }
   if (!password) { showLoginErr('請輸入密碼'); return; }
+  // 🔐 _2CODE：改用 Supabase Auth（以下舊邏輯已停用）
+  {
+    const btn = document.getElementById('supplier-login-btn');
+    if (btn) btn.textContent = '⏳ 驗證中...';
+    const r = await sbAuthLogin(email, password);
+    if (btn) btn.textContent = '🏢 供應商進入';
+    if (!r.ok) { showLoginErr(r.msg); return; }
+    const p = r.profile;
+    if (p.account_type !== 'supplier') { showLoginErr('此非供應商帳號，請用上方組織/管理員登入'); return; }
+    // 防呆：選錯供應商擋下（以帳號實際所屬為準）
+    if (supplierCode && p.supplier_code && supplierCode !== p.supplier_code) {
+      showLoginErr('此帳號不屬於所選供應商，請改選「' + p.supplier_code + '」'); return;
+    }
+    const realCode = p.supplier_code || supplierCode;
+    const supList  = getSupplierList();
+    const sup      = supList.find(x => x.code === realCode);
+    const supName  = sup ? sup.name : realCode;
+    const role     = p.qms_role || 'inspector';
+    saveSession({
+      isSupplier: true, supplierCode: realCode, supplierName: supName,
+      userName: p.name || email, userKey: email, role,
+      token: r.token, refresh: r.refresh, uid: r.uid, mustChange: r.mustChange,
+      loginAt: new Date().toISOString(), firstLoginAt: new Date().toISOString()
+    });
+    clearLocalCache();
+    try { localStorage.removeItem(SITE_KEY); } catch(e) {}
+    document.getElementById('login-screen').style.display = 'none';
+    document.getElementById('main-page').style.display    = '';
+    const lo = document.getElementById('logout-btn'); if (lo) lo.style.display = '';
+    const bg = document.getElementById('login-badge'); if (bg) bg.style.display = 'flex';
+    const bs = document.getElementById('badge-site');
+    if (bs) { bs.textContent = '🏢 ' + realCode; bs.style.display = ''; bs.style.background = '#0f6e56'; }
+    const bu = document.getElementById('badge-user');
+    if (bu) { const ic = { supervisor:'🔴', editor:'🟠', inspector:'🔵', query:'🔍' }; bu.textContent = (ic[role] || '🔵') + ' ' + (p.name || email); }
+    setTimeout(() => {
+      applyRolePermissions();
+      switchTab('fai');
+      const cb = document.getElementById('chg-pwd-btn'); if (cb) cb.style.display = '';
+      checkForceChangePwd();
+      sbPostLoginRefresh();
+    }, 50);
+    return;
+  }
 
   const db = getSupplierUsers();
   const users = db[supplierCode] || {};
@@ -9161,11 +9413,20 @@ function showSupplierUsers(code) {
   renderSupplierUsersTable(code);
 }
 
-function renderSupplierUsersTable(code) {
+async function renderSupplierUsersTable(code) {
   const tbody = document.getElementById('supplier-users-tbody');
   if (!tbody) return;
-  const db    = getSupplierUsers();
-  const users = db[code] || {};
+  // 🔐 _2CODE：從 profiles 載入此供應商的帳號
+  let users = {};
+  try {
+    const lr = await sbCallAdminFn('list');
+    if (lr.ok && lr.data && lr.data.profiles) {
+      lr.data.profiles.forEach(p => {
+        if (p.account_type === 'supplier' && p.supplier_code === code)
+          users[p.email] = { name: p.name || p.email, email: p.email, role: p.qms_role || 'inspector' };
+      });
+    }
+  } catch(e) {}
   const entries = Object.entries(users);
   if (!entries.length) {
     tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:12px;color:#bbb;font-size:12px">尚無帳號</td></tr>';
@@ -9211,46 +9472,46 @@ function addSupplierUser() {
   const code  = document.getElementById('su-supplier')?.value || '';
   const name  = document.getElementById('su-name')?.value.trim() || '';
   const email = (document.getElementById('su-email')?.value.trim() || '').toLowerCase();
-  const pwd   = document.getElementById('su-password')?.value || '';
+  let   pwd   = document.getElementById('su-password')?.value || '';
   const role  = document.getElementById('su-role')?.value || 'inspector';
   const st    = document.getElementById('supplier-user-status');
   if (!code)  { st.textContent = '請選擇供應商'; return; }
   if (!name)  { st.textContent = '請輸入姓名'; return; }
   if (!email || !email.includes('@')) { st.textContent = '請輸入有效 Email'; return; }
-  if (pwd.length < 6) { st.textContent = '密碼至少 6 碼'; return; }
-  const db = getSupplierUsers();
-  if (!db[code]) db[code] = {};
-  if (db[code][email]) { st.textContent = '此 Email 已存在'; return; }
-  db[code][email] = { name, email, password: pwd, role, createdAt: new Date().toISOString() };
-  saveSupplierUsers(db);
-  // 刷新：若當前展開的就是這個供應商，更新人員列表
-  const panel = document.getElementById('supplier-users-panel');
-  if (panel?.dataset.supplierCode === code) renderSupplierUsersTable(code);
-  renderSupplierTable();
-  toggleAddSupplierUserForm();
-  st.style.color = '#1d9e75';
-  st.textContent = `✅ 已新增 ${name} → ${code}`;
-  setTimeout(() => { st.textContent = ''; }, 3000);
+  // 密碼可留空 → 用預設密碼 DEFAULT_PWD，並要求首次登入修改
+  let mustChange = false;
+  if (!pwd) { pwd = DEFAULT_PWD; mustChange = true; }
+  else if (pwd.length < 8) { st.style.color='#c0392b'; st.textContent = '密碼至少 8 碼（或留空用預設）'; return; }
+  st.style.color = '#888'; st.textContent = '⏳ 建立中...';
+  // 🔐 _2CODE：透過 Edge Function 在 Auth + profiles 建立供應商帳號
+  sbCallAdminFn('create', { email, password: pwd, name, account_type:'supplier', qms_role:role, supplier_code:code, must_change:mustChange }).then(r => {
+    if (!r.ok) { st.style.color='#c0392b'; st.textContent = '❌ ' + (r.msg||'建立失敗'); return; }
+    const panel = document.getElementById('supplier-users-panel');
+    if (panel?.dataset.supplierCode === code) renderSupplierUsersTable(code);
+    renderSupplierTable();
+    toggleAddSupplierUserForm();
+    st.style.color = '#1d9e75';
+    st.textContent = mustChange ? `✅ 已新增 ${name} → ${code}，預設密碼 ${DEFAULT_PWD}（首次登入須改）` : `✅ 已新增 ${name} → ${code}`;
+    setTimeout(() => { st.textContent = ''; }, 4000);
+  });
 }
 
 async function resetSupplierUserPassword(code, key, name) {
-  if (!confirm(`確定要重設「${name}」（${code}）的密碼為預設值？\n\n重設後，該使用者下次登入需重新設定密碼。`)) return;
-  const db = getSupplierUsers();
-  if (db[code]?.[key]) {
-    db[code][key].password = DEFAULT_PWD;
-    saveSupplierUsers(db);
-  }
+  if (!confirm(`確定要重設「${name}」（${code}）的密碼為預設值（${DEFAULT_PWD}）？\n\n重設後，該使用者下次登入需重新設定密碼。`)) return;
+  // 🔐 _2CODE：透過 Edge Function 重設 Auth 密碼
+  const r = await sbCallAdminFn('resetPassword', { email: key, password: DEFAULT_PWD });
   const toast = document.createElement('div');
-  toast.textContent = `✅ 已重設 ${name} 的密碼為預設值`;
-  toast.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1D9E75;color:#fff;padding:10px 20px;border-radius:8px;font-size:13px;font-weight:700;z-index:99999;box-shadow:0 4px 12px rgba(0,0,0,0.2)';
+  toast.textContent = r.ok ? `✅ 已重設 ${name} 的密碼為 ${DEFAULT_PWD}` : `❌ 重設失敗：${r.msg||''}`;
+  toast.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:' + (r.ok ? '#1D9E75' : '#c0392b') + ';color:#fff;padding:10px 20px;border-radius:8px;font-size:13px;font-weight:700;z-index:99999;box-shadow:0 4px 12px rgba(0,0,0,0.2)';
   document.body.appendChild(toast);
   setTimeout(() => toast.remove(), 2500);
 }
 
-function deleteSupplierUser(code, key, name) {
+async function deleteSupplierUser(code, key, name) {
   if (!confirm(`刪除供應商帳號「${name}」？`)) return;
-  const db = getSupplierUsers();
-  if (db[code]?.[key]) { delete db[code][key]; saveSupplierUsers(db); }
+  // 🔐 _2CODE：透過 Edge Function 刪除 Auth 帳號（profiles 連帶移除）
+  const r = await sbCallAdminFn('delete', { email: key });
+  if (!r.ok) { alert('刪除失敗：' + (r.msg||'')); return; }
   renderSupplierUsersTable(code);
   renderSupplierTable();
 }
@@ -9267,11 +9528,33 @@ function refreshSupplierLoginList() {
   });
 }
 
-function doAdminLogin() {
+async function doAdminLogin() {
   const pwd = document.getElementById('admin-pwd-input')?.value;
-  const cfg = getAdminConfig();
   if (!pwd) { showLoginErr('請輸入管理員密碼'); return; }
-  if (pwd !== cfg.password) { showLoginErr('密碼錯誤 Wrong password'); return; }
+  // 🔐 _2CODE：DTO 用固定 email + Auth 登入（以下舊邏輯已停用）
+  {
+    const r = await sbAuthLogin(ADMIN_EMAIL, pwd);
+    if (!r.ok) { showLoginErr('密碼錯誤 Wrong password'); return; }
+    if (r.profile.account_type !== 'admin') { showLoginErr('此帳號非管理員'); return; }
+    saveSession({ site: '__admin__', userName: 'Admin', userKey: ADMIN_EMAIL, isAdmin: true, role: 'admin',
+      token: r.token, refresh: r.refresh, uid: r.uid,
+      loginAt: new Date().toISOString(), firstLoginAt: new Date().toISOString() });
+    clearLocalCache();
+    try { localStorage.removeItem(SITE_KEY); } catch(e) {}
+    document.getElementById('login-screen').style.display = 'none';
+    document.getElementById('main-page').style.display = '';
+    const lo = document.getElementById('logout-btn'); if (lo) lo.style.display = '';
+    const bg = document.getElementById('login-badge'); if (bg) bg.style.display = 'flex';
+    const bs = document.getElementById('badge-site');
+    if (bs) { bs.textContent = '⚙'; bs.style.display = ''; bs.style.background = '#555'; }
+    const bu = document.getElementById('badge-user'); if (bu) bu.textContent = '⚫ Admin';
+    applyRolePermissions();
+    switchTab('sys');
+    renderSysTab();
+    sbPostLoginRefresh();
+    setTimeout(checkBackupReminder, 2000);
+    return;
+  }
   // 管理員登入
   saveSession({ site: '__admin__', userName: 'Admin', userKey: '__admin__', isAdmin: true, loginAt: new Date().toISOString(), firstLoginAt: new Date().toISOString() });
   clearLocalCache();
@@ -9357,16 +9640,14 @@ async function changeAdminPassword() {
   if (!isAdmin()) { alert('此功能僅限管理員使用'); return; }
   const oldPwd = await showCustomPwdDialog('🔑 請輸入目前密碼');
   if (!oldPwd) return;
-  const cfg = getAdminConfig();
-  if (oldPwd !== cfg.password) { alert('密碼錯誤'); return; }
-  const newPwd = await showCustomPwdDialog('🔑 請輸入新密碼（至少6碼）');
-  if (!newPwd || newPwd.length < 6) { alert('密碼至少需6碼'); return; }
+  const newPwd = await showCustomPwdDialog('🔑 請輸入新密碼（至少 8 碼）');
+  if (!newPwd || newPwd.length < 8) { alert('密碼至少需 8 碼'); return; }
   const confirm2 = await showCustomPwdDialog('🔑 請再次輸入新密碼確認');
   if (newPwd !== confirm2) { alert('兩次輸入不一致'); return; }
-  localStorage.setItem(ADMIN_KEY, JSON.stringify({ password: newPwd }));
-  // ☁ 同步新密碼到 Supabase
-  sbSaveAdminConfig(newPwd).catch(e => console.warn('密碼雲端同步失敗:', e));
-  alert('✅ 密碼已更新');
+  // 🔐 _2CODE：改用 Auth 修改 DTO/管理員（ADMIN_EMAIL = yc.huang）的登入密碼
+  const r = await sbAuthChangePassword(ADMIN_EMAIL, oldPwd, newPwd);
+  if (!r.ok) { alert('❌ ' + (r.msg === '舊密碼錯誤' ? '目前密碼錯誤' : r.msg)); return; }
+  alert('✅ 管理員密碼已更新，下次登入請用新密碼');
 }
 
 // ══════════════════════════════════════════════
@@ -9463,41 +9744,20 @@ function onPermCheck(site, key, permKey, checked, sid) {
   user.role = newRole;
   saveUserDB(db);
 
-  // ☁ 同步權限到 Supabase
-  if (_sbReady) {
-    fetch(
-      SUPABASE_URL + '/rest/v1/qms_users?site_code=eq.' + encodeURIComponent(site) + '&email=eq.' + encodeURIComponent(key),
-      {
-        method: 'PATCH',
-        headers: {
-          'apikey': SUPABASE_KEY,
-          'Authorization': 'Bearer ' + SUPABASE_KEY,
-          'Content-Type': 'application/json',
-          'Prefer': 'return=minimal'
-        },
-        body: JSON.stringify({ role: newRole })
+  // 🔐 _2CODE：權限改存 profiles（透過 admin-users Edge Function）
+  sbCallAdminFn('update', { email: key, qms_role: newRole }).then(r => {
+    if (r.ok) {
+      showSyncToast('☁ 已同步：' + (user.name||key) + ' 權限 → ' + newRole);
+      const syncBadge = document.getElementById('sync_badge_' + sid);
+      if (syncBadge) {
+        syncBadge.textContent = '☁ 已同步';
+        syncBadge.style.color = '#1d9e75';
+        setTimeout(() => { syncBadge.textContent = ''; }, 3000);
       }
-    ).then(res => {
-      if (res.ok) {
-        console.log('☁ 權限已同步:', key, '→', newRole);
-        // ✅ 右下角綠色提示條
-        showSyncToast('☁ 已同步：' + user.name + ' 權限 → ' + newRole);
-        // ✅ 在人員列表該行顯示「已同步 ☁」
-        const syncBadge = document.getElementById('sync_badge_' + sid);
-        if (syncBadge) {
-          syncBadge.textContent = '☁ 已同步';
-          syncBadge.style.color = '#1d9e75';
-          setTimeout(() => { syncBadge.textContent = ''; }, 3000);
-        }
-      } else {
-        showSyncToast('⚠ 權限同步失敗，請重試', true);
-        console.warn('權限同步失敗:', res.status);
-      }
-    }).catch(e => {
-      showSyncToast('⚠ 網路錯誤，權限未同步', true);
-      console.warn('權限同步錯誤:', e);
-    });
-  }
+    } else {
+      showSyncToast('⚠ 權限同步失敗：' + (r.msg||''), true);
+    }
+  });
 
   // 若修改的是當前登入者，重新套用權限
   const s = getSession();
@@ -9658,7 +9918,7 @@ function setUserRole(site, key, role) {
           method: 'PATCH',
           headers: {
             'apikey': SUPABASE_KEY,
-            'Authorization': 'Bearer ' + SUPABASE_KEY,
+            'Authorization': sbAuthBearer(),
             'Content-Type': 'application/json',
             'Prefer': 'return=minimal'
           },
@@ -9746,6 +10006,9 @@ render();
 if (currentLang !== 'zh-TW') setLang(currentLang);
 else applyI18n();
 checkSession();
+// 🔐 _2CODE：JWT 自動續期 — 啟動定時續期（每45分鐘）；若重整後仍登入，立即先續一次避免過期
+startTokenAutoRefresh();
+try { if (getSession() && getSession().token) sbRefreshToken(); } catch(e) {}
 setTimeout(() => sbInit(), 1000);
 // 每 30 分鐘檢查一次 session 是否逾時
 setInterval(() => { checkSessionTimeout(); }, 30 * 60 * 1000);
@@ -9757,7 +10020,7 @@ setInterval(() => { checkSessionTimeout(); }, 30 * 60 * 1000);
   async function pingSupabase() {
     try {
       const res = await fetch(SUPABASE_URL + '/rest/v1/qms_site_config?limit=1', {
-        headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
+        headers: { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer() }
       });
       if (res.ok) {
         localStorage.setItem(PING_KEY, Date.now().toString());
@@ -9869,7 +10132,7 @@ setInterval(() => { checkSessionTimeout(); }, 30 * 60 * 1000);
     </div>
     <div style="margin-bottom:10px">
       <label style="font-size:11px;font-weight:600;color:#555;display:block;margin-bottom:4px">新密碼 New Password</label>
-      <input id="chg-new-pwd" type="password" placeholder="至少 6 碼" style="width:100%;height:34px;border:1px solid #bbb;border-radius:4px;padding:0 10px;font-size:13px;font-family:Arial,sans-serif">
+      <input id="chg-new-pwd" type="password" placeholder="至少 8 碼" style="width:100%;height:34px;border:1px solid #bbb;border-radius:4px;padding:0 10px;font-size:13px;font-family:Arial,sans-serif">
     </div>
     <div style="margin-bottom:14px">
       <label style="font-size:11px;font-weight:600;color:#555;display:block;margin-bottom:4px">確認新密碼 Confirm Password</label>

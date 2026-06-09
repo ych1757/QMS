@@ -504,7 +504,7 @@ async function sbSaveFaiRecord(key, data, isUpdate) {
   } catch(e) { console.warn('sbSaveFaiRecord exception:', e); }
 }
 
-async function sbSaveCpkRecord(key, data) {
+async function sbSaveCpkRecord(key, data, isUpdate) {
   if (!_sbReady) return;
   try {
     const payload = {
@@ -521,16 +521,26 @@ async function sbSaveCpkRecord(key, data) {
       saved_by:  data.savedBy   || null,
       overall:   data.overall   || null,
     };
-    const res = await fetch(SUPABASE_URL + '/rest/v1/cpk_records', {
-      method: 'POST',
-      headers: {
-        'apikey': SUPABASE_KEY,
-        'Authorization': sbAuthBearer(),
-        'Content-Type': 'application/json',
-        'Prefer': 'resolution=merge-duplicates'
-      },
-      body: JSON.stringify(payload)
-    });
+    const H = { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer(), 'Content-Type': 'application/json' };
+    // ── 覆蓋原單：PATCH 既有列（仿 FAI）；local_key 對不到改用 form_no；都對不到才 POST ──
+    if (isUpdate) {
+      let pRes = await fetch(SUPABASE_URL + '/rest/v1/cpk_records?local_key=eq.' + encodeURIComponent(key),
+        { method: 'PATCH', headers: { ...H, 'Prefer': 'return=representation' }, body: JSON.stringify(payload) });
+      let patched = pRes.ok ? await pRes.json() : [];
+      if ((!patched || patched.length === 0) && data.formNo) {
+        pRes = await fetch(SUPABASE_URL + '/rest/v1/cpk_records?form_no=eq.' + encodeURIComponent(data.formNo),
+          { method: 'PATCH', headers: { ...H, 'Prefer': 'return=representation' }, body: JSON.stringify(payload) });
+        patched = pRes.ok ? await pRes.json() : [];
+      }
+      if (!patched || patched.length === 0) {
+        await fetch(SUPABASE_URL + '/rest/v1/cpk_records',
+          { method: 'POST', headers: { ...H, 'Prefer': 'resolution=merge-duplicates' }, body: JSON.stringify(payload) });
+      }
+      console.log('☁ CPK 已更新(覆蓋):', data.formNo || key);
+      return;
+    }
+    const res = await fetch(SUPABASE_URL + '/rest/v1/cpk_records',
+      { method: 'POST', headers: { ...H, 'Prefer': 'resolution=merge-duplicates' }, body: JSON.stringify(payload) });
     if (!res.ok) { const t = await res.text(); console.warn('sbSaveCpkRecord error:', t); }
     else console.log('☁ CPK 已同步:', data.partno);
   } catch(e) { console.warn('sbSaveCpkRecord exception:', e); }
@@ -4472,6 +4482,7 @@ function editRecord(key) {
   if (key.startsWith('cpk_record_')) {
     switchTabForce('cpk');
     cpkLoadDemoRecord(recData);
+    editingCpkKey = key;  // 進入 CPK 編輯模式（存檔時會問覆蓋/另存）
     return;
   }
 
@@ -8426,8 +8437,11 @@ function cpkAddManualPoint() {
   cpkRenderTable();
 }
 
+let editingCpkKey = null;   // 非 null = CPK 編輯模式，值為原記錄 key（存檔時問覆蓋/另存）
+
 function cpkClearAll() {
   if (cpkPoints.length && !confirm('確定清空所有數據？')) return;
+  editingCpkKey = null;  // 清空 → 離開編輯模式
   cpkPoints = [];
   // 清空表頭欄位
   ['cpk-partno','cpk-partname','cpk-supplier','cpk-inspector',
@@ -8719,10 +8733,30 @@ async function cpkSaveRecord() {
     if (el) { el.textContent='⚠ 無量測數據，無法存檔（請至少輸入一筆數值）'; el.style.color='#c0392b'; }
     return;
   }
+  // ── 編輯模式：問「覆蓋原單 vs 另存新檔」（與 FAI 一致）──
+  if (editingCpkKey) {
+    const _dt = document.getElementById('cpk-date').value;
+    showEditChoiceDialog(pn, _dt, (choice) => {
+      if (choice === 'cancel') return;
+      const ek = editingCpkKey;
+      editingCpkKey = null;
+      _cpkDoSave(choice === 'overwrite' ? ek : null);
+    });
+    return;
+  }
+  // ── 一般：另存新記錄 ──
+  _cpkDoSave(null);
+}
+
+// 實際存檔：overwriteKey 有值 → 覆蓋原單（沿用原 key + formNo）；否則另存新記錄
+async function _cpkDoSave(overwriteKey) {
   const now = new Date();
-  const key = CPK_RECORD_PREFIX + pn + '_' + now.toISOString().replace(/[:.]/g,'-');
   const s = getSession();
+  const pn = document.getElementById('cpk-partno').value.trim();
+  const existing = overwriteKey ? (JSON.parse(localStorage.getItem(overwriteKey) || '{}')) : {};
+  const key = overwriteKey || (CPK_RECORD_PREFIX + pn + '_' + now.toISOString().replace(/[:.]/g,'-'));
   const data = {
+    ...(overwriteKey ? existing : {}),
     partno:    pn,
     partname:  document.getElementById('cpk-partname').value,
     supplier:  document.getElementById('cpk-supplier').value,
@@ -8730,26 +8764,30 @@ async function cpkSaveRecord() {
     material:  document.getElementById('cpk-material').value,
     inspector: document.getElementById('cpk-inspector').value,
     date:      document.getElementById('cpk-date').value,
-    lotSize,
+    lotSize:   parseInt(document.getElementById('cpk-lotsize')?.value) || 32,
     toolno:    document.getElementById('cpk-toolno').value,
-    site:      getCurrentSite() || (s?.isSupplier ? s.supplierCode : '') || (s?.isAdmin ? 'ADMIN' : (s?.site || '')),  // 與 FAI _doSaveNewRecord 統一
+    site:      getCurrentSite() || (s?.isSupplier ? s.supplierCode : '') || (s?.isAdmin ? 'ADMIN' : (s?.site || '')),
     points:    JSON.parse(JSON.stringify(cpkPoints)),
-    savedAt:   now.toISOString(),
-    savedBy:   s?.userName || '—',
-    formNo:    await generateFormNoAsync('CPK', 'cpk_records'),
-    overall:   cpkOverall(cpkPoints),  // 存檔時判定（防呆：先看是否在規格內，再看 Cpk）
+    overall:   cpkOverall(cpkPoints),  // 防呆判定：先看是否在規格內，再看 Cpk
+    // 覆蓋 → 沿用原 formNo/savedAt/savedBy 並記錄修改者；另存 → 用新 formNo
+    savedAt:   overwriteKey ? (existing.savedAt || now.toISOString()) : now.toISOString(),
+    savedBy:   overwriteKey ? (existing.savedBy || (s?.userName || '—')) : (s?.userName || '—'),
+    formNo:    overwriteKey ? (existing.formNo || await generateFormNoAsync('CPK','cpk_records')) : await generateFormNoAsync('CPK','cpk_records'),
     ...(s?.isSupplier ? { supplierCode: s.supplierCode } : {}),
+    ...(overwriteKey ? { updatedAt: now.toISOString(), updatedBy: s?.userName || '—' } : {}),
   };
   try {
     localStorage.setItem(key, JSON.stringify(data));
-    sbSaveCpkRecord(key, data).catch(e => console.warn('CPK 雲端同步失敗:', e));
+    sbSaveCpkRecord(key, data, !!overwriteKey).catch(e => console.warn('CPK 雲端同步失敗:', e));
     const el = document.getElementById('cpk-status');
-    el.textContent = `✅ 已儲存　料號：${pn}　${data.date}`;
-    el.style.color = '#1d9e75';
+    if (el) {
+      el.textContent = overwriteKey ? `✅ 已更新原記錄：${data.formNo}` : `✅ 已儲存　料號：${pn}　${data.date}`;
+      el.style.color = '#1d9e75';
+    }
+    if (overwriteKey) setTimeout(() => switchTab('hist'), 1200);
   } catch(e) {
     const el = document.getElementById('cpk-status');
-    el.textContent = '❌ 儲存失敗：' + e.message;
-    el.style.color = '#c0392b';
+    if (el) { el.textContent = '❌ 儲存失敗：' + e.message; el.style.color = '#c0392b'; }
   }
 }
 
@@ -8834,6 +8872,7 @@ function importDemoCpkRecord() {
   const key = 'cpk_record_05360000-003_2026-03-26T00-00-00-000Z';
   try {
     localStorage.setItem(key, JSON.stringify(data));
+    editingCpkKey = null;  // 載入示範數據 → 非編輯模式（存檔將另存新記錄）
     // 先切換到 CPK tab，等 DOM ready 後再載入資料（避免雙重 render 互相覆蓋）
     switchTabForce('cpk');
     setTimeout(() => cpkLoadDemoRecord(data), 100);

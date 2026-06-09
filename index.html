@@ -1910,7 +1910,7 @@ async function sbInit() {
           </div>
           <div class="ef">
             <label>Password 密碼 *</label>
-            <input id="au-password" type="password" placeholder="留空＝預設12345678；自訂須8碼含字母與數字" style="height:30px;border:1px solid #bbb;border-radius:4px;padding:0 8px;font-size:12px;font-family:Arial,sans-serif">
+            <input id="au-password" type="password" placeholder="留空＝預設qms12345；自訂須8碼含字母與數字" style="height:30px;border:1px solid #bbb;border-radius:4px;padding:0 8px;font-size:12px;font-family:Arial,sans-serif">
           </div>
           <div class="ef">
             <label>Role 角色</label>
@@ -2070,7 +2070,7 @@ async function sbInit() {
             <div class="ef"><label>Email 帳號 *</label>
               <input id="su-email" type="email" style="height:28px;border:1px solid #bbb;border-radius:4px;padding:0 8px;font-size:12px;font-family:Arial,sans-serif"></div>
             <div class="ef"><label>Password 密碼 *</label>
-              <input id="su-password" type="password" placeholder="留空＝預設12345678；自訂須8碼含字母與數字" style="height:28px;border:1px solid #bbb;border-radius:4px;padding:0 8px;font-size:12px;font-family:Arial,sans-serif"></div>
+              <input id="su-password" type="password" placeholder="留空＝預設qms12345；自訂須8碼含字母與數字" style="height:28px;border:1px solid #bbb;border-radius:4px;padding:0 8px;font-size:12px;font-family:Arial,sans-serif"></div>
             <div class="ef"><label>Role 角色</label>
               <select id="su-role" style="height:28px;border:1px solid #bbb;border-radius:4px;padding:0 8px;font-size:12px;font-family:Arial,sans-serif">
                 <option value="inspector">🔵 輸入（可填表）</option>
@@ -7904,7 +7904,7 @@ function removeUser(site, userKey) {
 // ══════════════════════════════════════════════
 // 🔑 修改密碼
 // ══════════════════════════════════════════════
-const DEFAULT_PWD = '12345678'; // _2CODE：預設密碼（admin 透過後台 API 設的臨時密碼，不受密碼規則限制；使用者首次登入須改成符合規則的新密碼）
+const DEFAULT_PWD = 'qms12345'; // _2CODE：預設臨時密碼（含字母+數字，符合 Supabase「Letters and digits」；admin API 設密碼也會檢查此規則。使用者首次登入須改成自己的新密碼）
 let _forceChangePwd = false;
 // 密碼規則：至少 8 碼，且需同時含「字母」與「數字」（與 Supabase Auth 的 Letters and digits 一致）
 function pwdValid(p){ return typeof p === 'string' && p.length >= 8 && /[A-Za-z]/.test(p) && /[0-9]/.test(p); }

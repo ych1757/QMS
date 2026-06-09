@@ -3962,9 +3962,6 @@ function getAllRecords() {
       // CPK 記錄格式
       if (k.startsWith('cpk_record_')) {
         const pts = d.points || [];
-        const cpkVals = pts.map(p => cpkCalcStats ? cpkCalcStats(p.values, p.usl, p.lsl, p.nom) : null).filter(Boolean);
-        const anyFail  = cpkVals.some(s => s.cpk != null && s.cpk < 1.0);
-        const anyAlert = cpkVals.some(s => s.cpk != null && s.cpk < 1.33);
         records.push({
           key: k, data: d,
           process:   'CPK',
@@ -3975,7 +3972,7 @@ function getAllRecords() {
           savedAt:   d.savedAt  || '',
           savedBy:   d.savedBy  || '',
           updatedBy: d.updatedBy|| '',
-          overall:   anyFail ? 'REJECT' : anyAlert ? 'ALERT' : 'PASS',
+          overall:   cpkOverall(pts),  // 防呆判定：先看是否在規格內，再看 Cpk
           cpkPass:   pts.filter(p => { const s = cpkCalcStats ? cpkCalcStats(p.values, p.usl, p.lsl, p.nom) : null; return s?.cpk != null && s.cpk >= 1.33; }).length,
           cpkTotal:  pts.length,
           isRecord:  true,
@@ -4351,11 +4348,10 @@ function toggleHistDetail(key) {
     const pts = recData.points || [];
     const cpkDetailRows = pts.map((p, idx) => {
       const st = cpkCalcStats ? cpkCalcStats(p.values, p.usl, p.lsl, p.nom) : null;
-      const pass = st && st.cpk != null && st.cpk >= 1.33;
-      const alert = st && st.cpk != null && st.cpk >= 1.0 && st.cpk < 1.33;
-      const fail = st && st.cpk != null && st.cpk < 1.0;
+      const jg = cpkJudgePoint(p);  // 防呆判定：先看是否在規格內，再看 Cpk
+      const pass = jg === 'PASS', alert = jg === 'ALERT', fail = jg === 'REJECT';
       const resCls = pass ? 'hist-result-pass' : alert ? 'hist-result-alert' : fail ? 'hist-result-fail' : '';
-      const resLbl = pass ? 'Pass' : alert ? 'Alert' : fail ? 'Fail' : '—';
+      const resLbl = pass ? 'Pass' : alert ? 'Alert' : fail ? 'Reject' : '—';
       return `<tr>
         <td>${p.faiNo ?? (idx+1)}</td>
         <td style="text-align:left">${p.moi||'—'}</td>
@@ -8477,6 +8473,30 @@ function cpkCalcStats(vals, usl, lsl, nom) {
   return { n, mean, sigma, cp, ca, cpk, cpk_min, max:Math.max(...v), min:Math.min(...v) };
 }
 
+// ── CPK 單點判定（防呆）──
+// 先看「是否在規格內」，再看 Cpk。回傳 'REJECT' | 'ALERT' | 'PASS' | null(資料/規格不足不判)
+// 防呆①：任一量測值超出 USL/LSL → REJECT（不論 Cpk）
+// 防呆②：Cpk 算不出來（σ=0，數值全相同）→ 不可 PASS，列 ALERT 提醒
+function cpkJudgePoint(pt) {
+  if (!pt) return null;
+  const st = cpkCalcStats(pt.values, pt.usl, pt.lsl, pt.nom);
+  if (!st || pt.usl == null || pt.lsl == null) return null;
+  if (st.max > pt.usl || st.min < pt.lsl) return 'REJECT';   // 防呆①：超規格
+  if (st.cpk == null) return 'ALERT';                         // 防呆②：σ=0 算不出 Cpk
+  if (st.cpk < 1.0)  return 'REJECT';
+  if (st.cpk < 1.33) return 'ALERT';
+  return 'PASS';
+}
+// CPK 整體判定：取所有點中最嚴重者
+function cpkOverall(points) {
+  let anyR = false, anyA = false, judged = false;
+  (points || []).forEach(p => {
+    const j = cpkJudgePoint(p);
+    if (j) { judged = true; if (j === 'REJECT') anyR = true; else if (j === 'ALERT') anyA = true; }
+  });
+  return !judged ? 'PASS' : anyR ? 'REJECT' : anyA ? 'ALERT' : 'PASS';
+}
+
 function cpkCalculateAll() {
   // 先讀取表格中的輸入值
   const lotSize = parseInt(document.getElementById('cpk-lotsize')?.value) || 32;
@@ -8558,19 +8578,24 @@ function cpkCalculateAll() {
       wrap.style.cssText = 'border:1px solid #dde;border-radius:6px;overflow:hidden;background:#fff';
       const titleBar = document.createElement('div');
       titleBar.style.cssText = 'background:#1a4f8a;color:#fff;padding:6px 10px;font-size:11px;font-weight:700;display:flex;justify-content:space-between';
-      const cpkColor = st.cpk>=1.33?'#7fff9a':st.cpk>=1.0?'#ffd67a':'#ff8080';
-      titleBar.innerHTML = `<span>FAI #${pt.faiNo} ${pt.moi||''}</span><span style="color:${cpkColor}">CPK = ${st.cpk.toFixed(3)}</span>`;
+      const cpkColor = (st.cpk!=null&&st.cpk>=1.33)?'#7fff9a':(st.cpk!=null&&st.cpk>=1.0)?'#ffd67a':'#ff8080';
+      titleBar.innerHTML = `<span>FAI #${pt.faiNo} ${pt.moi||''}</span><span style="color:${cpkColor}">CPK = ${st.cpk!=null?st.cpk.toFixed(3):'—'}</span>`;
       wrap.appendChild(titleBar);
       const canvasWrap = document.createElement('div');
       canvasWrap.style.padding = '8px';
-      const canvas = document.createElement('canvas');
-      canvas.id = `cpk-chart-${pi}`;
-      canvas.style.cssText = 'width:100%;display:block';
-      canvas.height = 180;
-      canvasWrap.appendChild(canvas);
+      if (st.sigma > 0) {
+        const canvas = document.createElement('canvas');
+        canvas.id = `cpk-chart-${pi}`;
+        canvas.style.cssText = 'width:100%;display:block';
+        canvas.height = 180;
+        canvasWrap.appendChild(canvas);
+        requestAnimationFrame(() => cpkDrawChart(canvas, pt, st));
+      } else {
+        // σ=0（數值全相同）無離散度 → 無法繪製常態分布，顯示提示而非當掉
+        canvasWrap.innerHTML = '<div style="padding:24px 8px;text-align:center;color:#999;font-size:11px">⚠ 數值無離散（σ=0），無法繪製分布圖<br>請確認量測值是否正確</div>';
+      }
       wrap.appendChild(canvasWrap);
       chartsArea.appendChild(wrap);
-      requestAnimationFrame(() => cpkDrawChart(canvas, pt, st));
     });
   }
 
@@ -8712,11 +8737,7 @@ async function cpkSaveRecord() {
     savedAt:   now.toISOString(),
     savedBy:   s?.userName || '—',
     formNo:    await generateFormNoAsync('CPK', 'cpk_records'),
-    overall:   (() => {  // v121: 存檔時計算判定
-      const vs = cpkPoints.map(p => cpkCalcStats ? cpkCalcStats(p.values, p.usl, p.lsl, p.nom) : null).filter(Boolean);
-      return vs.some(x => x.cpk != null && x.cpk < 1.0) ? 'REJECT'
-           : vs.some(x => x.cpk != null && x.cpk < 1.33) ? 'ALERT' : 'PASS';
-    })(),
+    overall:   cpkOverall(cpkPoints),  // 存檔時判定（防呆：先看是否在規格內，再看 Cpk）
     ...(s?.isSupplier ? { supplierCode: s.supplierCode } : {}),
   };
   try {

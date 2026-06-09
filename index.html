@@ -1910,7 +1910,7 @@ async function sbInit() {
           </div>
           <div class="ef">
             <label>Password 密碼 *</label>
-            <input id="au-password" type="password" placeholder="留空＝預設 12345678（首次登入須改）" style="height:30px;border:1px solid #bbb;border-radius:4px;padding:0 8px;font-size:12px;font-family:Arial,sans-serif">
+            <input id="au-password" type="password" placeholder="留空＝預設12345678；自訂須8碼含字母與數字" style="height:30px;border:1px solid #bbb;border-radius:4px;padding:0 8px;font-size:12px;font-family:Arial,sans-serif">
           </div>
           <div class="ef">
             <label>Role 角色</label>
@@ -2070,7 +2070,7 @@ async function sbInit() {
             <div class="ef"><label>Email 帳號 *</label>
               <input id="su-email" type="email" style="height:28px;border:1px solid #bbb;border-radius:4px;padding:0 8px;font-size:12px;font-family:Arial,sans-serif"></div>
             <div class="ef"><label>Password 密碼 *</label>
-              <input id="su-password" type="password" placeholder="留空＝預設 12345678（首次登入須改）" style="height:28px;border:1px solid #bbb;border-radius:4px;padding:0 8px;font-size:12px;font-family:Arial,sans-serif"></div>
+              <input id="su-password" type="password" placeholder="留空＝預設12345678；自訂須8碼含字母與數字" style="height:28px;border:1px solid #bbb;border-radius:4px;padding:0 8px;font-size:12px;font-family:Arial,sans-serif"></div>
             <div class="ef"><label>Role 角色</label>
               <select id="su-role" style="height:28px;border:1px solid #bbb;border-radius:4px;padding:0 8px;font-size:12px;font-family:Arial,sans-serif">
                 <option value="inspector">🔵 輸入（可填表）</option>
@@ -6961,7 +6961,7 @@ function addUserAccount() {
   // 密碼可留空 → 用預設密碼 DEFAULT_PWD，並要求該員工首次登入修改
   let mustChange = false;
   if (!password) { password = DEFAULT_PWD; mustChange = true; }
-  else if (password.length < 8) { if (st) { st.style.color='#c0392b'; st.textContent = '密碼至少需 8 碼（或留空用預設）'; } return; }
+  else if (!pwdValid(password)) { if (st) { st.style.color='#c0392b'; st.textContent = '密碼至少 8 碼，需含字母與數字（或留空用預設）'; } return; }
 
   if (st) { st.style.color='#888'; st.textContent = '⏳ 建立中...'; }
   // 🔐 _2CODE：透過 Edge Function 在 Auth + profiles 建立帳號（新帳號才能用 Auth 登入）
@@ -7904,8 +7904,10 @@ function removeUser(site, userKey) {
 // ══════════════════════════════════════════════
 // 🔑 修改密碼
 // ══════════════════════════════════════════════
-const DEFAULT_PWD = '12345678'; // _2CODE：預設密碼 8 碼（新增留空/重設時用，使用者首次登入須改）
+const DEFAULT_PWD = '12345678'; // _2CODE：預設密碼（admin 透過後台 API 設的臨時密碼，不受密碼規則限制；使用者首次登入須改成符合規則的新密碼）
 let _forceChangePwd = false;
+// 密碼規則：至少 8 碼，且需同時含「字母」與「數字」（與 Supabase Auth 的 Letters and digits 一致）
+function pwdValid(p){ return typeof p === 'string' && p.length >= 8 && /[A-Za-z]/.test(p) && /[0-9]/.test(p); }
 
 function showChangePwdModal(force) {
   _forceChangePwd = !!force;
@@ -7934,7 +7936,7 @@ async function doChangePassword() {
   const st         = document.getElementById('chg-pwd-status');
 
   if (!oldPwd) { st.textContent = '❌ 請輸入舊密碼'; st.style.color = '#c0392b'; return; }
-  if (newPwd.length < 8) { st.textContent = '❌ 新密碼至少 8 碼'; st.style.color = '#c0392b'; return; }
+  if (!pwdValid(newPwd)) { st.textContent = '❌ 新密碼至少 8 碼，需含字母與數字'; st.style.color = '#c0392b'; return; }
   if (newPwd === DEFAULT_PWD) { st.textContent = '❌ 新密碼不能與預設密碼相同'; st.style.color = '#c0392b'; return; }
   if (newPwd !== confirmPwd) { st.textContent = '❌ 兩次輸入的新密碼不一致'; st.style.color = '#c0392b'; return; }
 
@@ -9481,7 +9483,7 @@ function addSupplierUser() {
   // 密碼可留空 → 用預設密碼 DEFAULT_PWD，並要求首次登入修改
   let mustChange = false;
   if (!pwd) { pwd = DEFAULT_PWD; mustChange = true; }
-  else if (pwd.length < 8) { st.style.color='#c0392b'; st.textContent = '密碼至少 8 碼（或留空用預設）'; return; }
+  else if (!pwdValid(pwd)) { st.style.color='#c0392b'; st.textContent = '密碼至少 8 碼，需含字母與數字（或留空用預設）'; return; }
   st.style.color = '#888'; st.textContent = '⏳ 建立中...';
   // 🔐 _2CODE：透過 Edge Function 在 Auth + profiles 建立供應商帳號
   sbCallAdminFn('create', { email, password: pwd, name, account_type:'supplier', qms_role:role, supplier_code:code, must_change:mustChange }).then(r => {
@@ -9640,8 +9642,8 @@ async function changeAdminPassword() {
   if (!isAdmin()) { alert('此功能僅限管理員使用'); return; }
   const oldPwd = await showCustomPwdDialog('🔑 請輸入目前密碼');
   if (!oldPwd) return;
-  const newPwd = await showCustomPwdDialog('🔑 請輸入新密碼（至少 8 碼）');
-  if (!newPwd || newPwd.length < 8) { alert('密碼至少需 8 碼'); return; }
+  const newPwd = await showCustomPwdDialog('🔑 請輸入新密碼（至少 8 碼，需含字母與數字）');
+  if (!pwdValid(newPwd)) { alert('密碼至少需 8 碼，需含字母與數字'); return; }
   const confirm2 = await showCustomPwdDialog('🔑 請再次輸入新密碼確認');
   if (newPwd !== confirm2) { alert('兩次輸入不一致'); return; }
   // 🔐 _2CODE：改用 Auth 修改 DTO/管理員（ADMIN_EMAIL = yc.huang）的登入密碼
@@ -10124,7 +10126,7 @@ setInterval(() => { checkSessionTimeout(); }, 30 * 60 * 1000);
   <div style="background:#fff;border-radius:10px;padding:24px;width:340px;max-width:90vw;box-shadow:0 8px 30px rgba(0,0,0,0.3)">
     <div style="font-size:16px;font-weight:700;color:#1a4f8a;margin-bottom:16px">🔑 修改密碼 Change Password</div>
     <div id="chg-pwd-force-msg" style="display:none;background:#fff3cd;border:1px solid #ffc107;border-radius:6px;padding:8px 12px;margin-bottom:12px;font-size:11px;color:#856404">
-      ⚠ 首次登入請先修改預設密碼才能繼續使用。
+      ⚠ 首次登入請先修改密碼才能繼續使用（新密碼至少 8 碼，需含字母與數字）。
     </div>
     <div style="margin-bottom:10px">
       <label style="font-size:11px;font-weight:600;color:#555;display:block;margin-bottom:4px">舊密碼 Current Password</label>
@@ -10132,7 +10134,7 @@ setInterval(() => { checkSessionTimeout(); }, 30 * 60 * 1000);
     </div>
     <div style="margin-bottom:10px">
       <label style="font-size:11px;font-weight:600;color:#555;display:block;margin-bottom:4px">新密碼 New Password</label>
-      <input id="chg-new-pwd" type="password" placeholder="至少 8 碼" style="width:100%;height:34px;border:1px solid #bbb;border-radius:4px;padding:0 10px;font-size:13px;font-family:Arial,sans-serif">
+      <input id="chg-new-pwd" type="password" placeholder="至少 8 碼，需含字母與數字" style="width:100%;height:34px;border:1px solid #bbb;border-radius:4px;padding:0 10px;font-size:13px;font-family:Arial,sans-serif">
     </div>
     <div style="margin-bottom:14px">
       <label style="font-size:11px;font-weight:600;color:#555;display:block;margin-bottom:4px">確認新密碼 Confirm Password</label>

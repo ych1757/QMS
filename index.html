@@ -1042,6 +1042,11 @@ async function sbInit() {
       <div class="login-logo-sub">FAI / Cpk 數位檢驗表單　v1.0</div>
     </div>
 
+    <!-- 回 SyncHub 入口（登入畫面，無未存檔資料，直接回） -->
+    <div style="text-align:center;margin:-2px 0 14px">
+      <button onclick="location.href='https://ych1757.github.io/HUB/'" style="height:28px;padding:0 14px;font-size:12px;font-weight:600;border:1px solid #1a4f8a;background:#fff;color:#1a4f8a;border-radius:5px;cursor:pointer;font-family:Arial,sans-serif">🏠 回 SyncHub 入口</button>
+    </div>
+
     <!-- 組織登入 -->
     <div class="login-section">
       <div style="font-size:15px;margin-bottom:6px">🏭 <span style="font-size:13px;font-weight:700;color:#1a4f8a">Site 組織</span></div>
@@ -1169,6 +1174,7 @@ async function sbInit() {
       <button onclick="setLang('vi')"    id="lang-vi"   class="lang-btn"><span class="lang-code">VN</span> Việt</button>
       <button onclick="setLang('th')"    id="lang-th"   class="lang-btn"><span class="lang-code">TH</span> ไทย</button>
       <div style="width:1px;height:18px;background:#ddd;margin:0 2px;flex-shrink:0"></div>
+      <button id="synchub-btn" onclick="goSyncHub()" title="回 SyncHub 入口" style="height:26px;padding:0 10px;font-size:11px;font-weight:600;border:1px solid #1a4f8a;background:#fff;color:#1a4f8a;border-radius:4px;cursor:pointer;font-family:Arial,sans-serif;white-space:nowrap">🏠 SyncHub</button>
       <button id="chg-pwd-btn" onclick="showChangePwdModal()" style="display:none;height:26px;padding:0 10px;font-size:11px;font-weight:600;border:1px solid #BA7517;background:#fff;color:#BA7517;border-radius:4px;cursor:pointer;font-family:Arial,sans-serif;white-space:nowrap">🔑</button>
       <button id="logout-btn" onclick="doLogout()" style="display:none;height:26px;padding:0 10px;font-size:11px;font-weight:600;border:1px solid #c0392b;background:#fff;color:#c0392b;border-radius:4px;cursor:pointer;font-family:Arial,sans-serif;white-space:nowrap">🚪 登出</button>
     </div>
@@ -7891,6 +7897,12 @@ function enterSystem(site, userName, userKey, extra) {
       setTimeout(checkBackupReminder, 2000);
     }
   }, 50);
+}
+
+// 🏠 回 SyncHub 入口（同分頁；提醒未存檔內容不保留）
+function goSyncHub() {
+  if (!confirm('回到 SyncHub 入口？\n（未存檔的內容將不保留）')) return;
+  location.href = 'https://ych1757.github.io/HUB/';
 }
 
 function doLogout() {

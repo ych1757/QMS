@@ -2558,7 +2558,7 @@ function render() {
     const typeCell = `<td style="text-align:center"><span class="type-badge type-${r.type||'FAI'}">${r.type||'FAI'}</span></td>`;
 
     tr.innerHTML = `
-      <td style="text-align:center;font-weight:700;color:#1a4f8a">${idx+1}</td>
+      <td style="text-align:center;font-weight:700;color:#1a4f8a">${(r.fai!==undefined && String(r.fai).trim()!=='') ? r.fai : (idx+1)}</td>
       <td class="lbl"><input value="${r.moi||''}" placeholder="量測儀器" onchange="rows[${idx}].moi=this.value" style="font-size:10px"></td>
       <td style="text-align:center;padding:0;cursor:pointer" onclick="cycleCharacteristic(${idx},this)" title="點擊切換：— / Key / Major / Minor">
         <span style="display:inline-block;font-size:10px;font-family:Arial;font-weight:600;color:${r.characteristic==='Key'?'#c0392b':r.characteristic==='Major'?'#BA7517':r.characteristic==='Minor'?'#1a4f8a':'#999'};min-width:40px">${r.characteristic||'—'}</span>

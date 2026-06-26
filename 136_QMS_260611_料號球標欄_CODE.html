@@ -8260,7 +8260,7 @@ function cpkLoadSpec() {
       const usl = s.usl != null ? +s.usl : (nom != null && pt != null ? +(nom + pt).toFixed(6) : null);
       const lsl = s.lsl != null ? +s.lsl : (nom != null && mt != null ? +(nom - mt).toFixed(6) : null);
       cpkPoints.push({
-        faiNo: i + 1,
+        faiNo: (s.fai !== undefined && String(s.fai).trim() !== '') ? s.fai : (i + 1),  // 用料號的自訂球標，未填才用列號
         moi:   s.moi || '',
         nom,
         pt, mt,

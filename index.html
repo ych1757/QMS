@@ -1809,6 +1809,7 @@ async function sbInit() {
         <thead>
           <tr>
             <th style="width:28px">No.</th>
+            <th id="spec-th-fai" style="width:70px">球標 Dimension</th>
             <th id="spec-th-moi" style="width:160px">量測儀器 Instrument</th>
             <th id="spec-th-type" style="width:52px">類型 Type</th>
             <th id="spec-th-nom" style="width:72px">名目值 Nominal</th>
@@ -2412,7 +2413,7 @@ function buildTableHeader() {
   const sW = sampleCount <= 5 ? 50 : sampleCount <= 10 ? 44 : 36;
   // Cpk 欄已從檢驗填表移除（FAI 只量 3PCS，Cpk 無統計意義；完整 CPK 請用「CPK 分析」頁）
   const cols = [
-    '30px','110px','38px','54px','38px','38px','52px','52px',
+    '58px','110px','38px','54px','38px','38px','52px','52px',
     ...Array(sampleCount).fill(sW+'px'),
     '58px','52px','46px','72px','110px'
   ];
@@ -2421,7 +2422,7 @@ function buildTableHeader() {
     `<th style="width:60px;min-width:60px">S${i+1}<br><span style="font-weight:400;font-size:9px">樣本${i+1}</span></th>`
   ).join('');
   th.innerHTML = `<tr>
-    <th>FAI #<br><span style="font-weight:400;font-size:9px">項次</span></th>
+    <th>球標<br><span style="font-weight:400;font-size:9px">Dimension</span></th>
     <th>Instrument (MOI)<br><span style="font-weight:400;font-size:9px">量測儀器</span></th>
     <th style="min-width:72px;width:72px">Char.<br><span style="font-weight:400;font-size:9px">特性</span></th>
     <th>Type<br><span style="font-weight:400;font-size:9px">類型</span></th>
@@ -2557,7 +2558,7 @@ function render() {
     const typeCell = `<td style="text-align:center"><span class="type-badge type-${r.type||'FAI'}">${r.type||'FAI'}</span></td>`;
 
     tr.innerHTML = `
-      <td style="text-align:center;font-weight:700;color:#1a4f8a">${idx+1}</td>
+      <td style="text-align:center;font-weight:700;color:#1a4f8a">${(r.fai!==undefined && String(r.fai).trim()!=='') ? r.fai : (idx+1)}</td>
       <td class="lbl"><input value="${r.moi||''}" placeholder="量測儀器" onchange="rows[${idx}].moi=this.value" style="font-size:10px"></td>
       <td style="text-align:center;padding:0;cursor:pointer" onclick="cycleCharacteristic(${idx},this)" title="點擊切換：— / Key / Major / Minor">
         <span style="display:inline-block;font-size:10px;font-family:Arial;font-weight:600;color:${r.characteristic==='Key'?'#c0392b':r.characteristic==='Major'?'#BA7517':r.characteristic==='Minor'?'#1a4f8a':'#999'};min-width:40px">${r.characteristic||'—'}</span>
@@ -3137,7 +3138,7 @@ function exportXLSX() {
   // Table header — 樣本欄動態產生
   const sHdrs = Array.from({length:sampleCount}, (_,i) => `S${i+1} 樣本${i+1}`);
   ws1Data.push([
-    'FAI # 項次','Instrument 量測儀器','Type 類型',
+    '球標 Dimension','Instrument 量測儀器','Type 類型',
     'Nominal 名目值','+Tol 上公差','−Tol 下公差','USL 規格上限','LSL 規格下限',
     ...sHdrs,
     'Mean X̄ 平均值','σ 標準差','Cpk 製程能力','%Tol 公差使用率',
@@ -3249,7 +3250,7 @@ function exportXLSX() {
     ['CPK 項目數 Total','合格 Pass (≥1.33)','警告 Alert (1~1.33)','不合格 Reject (<1.0)','整體判定 Overall'],
     [cpkTotal, cpkPass, cpkAlert, cpkFail, overall],
     [],
-    ['FAI # 項次','Instrument 量測儀器','Nominal 名目值','USL 規格上限','LSL 規格下限','Mean X̄ 平均值','σ 標準差','Cpk 製程能力','Result 判定'],
+    ['球標 Dimension','Instrument 量測儀器','Nominal 名目值','USL 規格上限','LSL 規格下限','Mean X̄ 平均值','σ 標準差','Cpk 製程能力','Result 判定'],
     ...cpkRows
   ];
   const ws2 = XLSX.utils.aoa_to_sheet(ws2Data);
@@ -4875,7 +4876,7 @@ function renderSpecRows() {
   const tbody = document.getElementById('spec-tbody');
   tbody.innerHTML = '';
   if (!specRows.length) {
-    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:#bbb;font-size:11px;padding:10px">尚無規格行，按「＋ 新增規格行」開始加入</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;color:#bbb;font-size:11px;padding:10px">尚無規格行，按「＋ 新增規格行」開始加入</td></tr>';
     return;
   }
   specRows.forEach((r, i) => {
@@ -4885,6 +4886,7 @@ function renderSpecRows() {
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td style="color:#999;font-size:10px">${i+1}</td>
+      <td><input value="${r.fai??''}" placeholder="球標" onchange="specRows[${i}].fai=this.value" style="width:100%;text-align:center"></td>
       <td><input value="${r.moi||''}" placeholder="Dial Caliper" onchange="specRows[${i}].moi=this.value"></td>
       <td><select onchange="specRows[${i}].type=this.value;renderSpecRows()" style="border:none;background:transparent;font-size:11px;font-family:Arial,sans-serif;font-weight:700;color:${r.type==='CPK'?'#7b3fa0':'#1a4f8a'}">
         <option ${r.type==='FAI'?'selected':''}>FAI</option>
@@ -4921,7 +4923,8 @@ function savePartSpec() {
     material: document.getElementById('e-material').value.trim(),
     supplier: document.getElementById('e-supplier').value.trim(),
     specs: validSpecs.map((r,i) => ({
-      fai: i+1, moi: r.moi||'Dial Caliper', type: r.type||'FAI',
+      fai: (r.fai !== undefined && String(r.fai).trim() !== '') ? r.fai : (i+1),  // 保留自訂球標（如 8_1），未填才用列號
+      moi: r.moi||'Dial Caliper', type: r.type||'FAI',
       nom: parseFloat(r.nom)||0, pt: parseFloat(r.pt)||0, mt: parseFloat(r.mt)||0,
     }))
   };
@@ -8257,7 +8260,7 @@ function cpkLoadSpec() {
       const usl = s.usl != null ? +s.usl : (nom != null && pt != null ? +(nom + pt).toFixed(6) : null);
       const lsl = s.lsl != null ? +s.lsl : (nom != null && mt != null ? +(nom - mt).toFixed(6) : null);
       cpkPoints.push({
-        faiNo: i + 1,
+        faiNo: (s.fai !== undefined && String(s.fai).trim() !== '') ? s.fai : (i + 1),  // 用料號的自訂球標，未填才用列號
         moi:   s.moi || '',
         nom,
         pt, mt,
@@ -8605,7 +8608,7 @@ function cpkCalculateAll() {
       const titleBar = document.createElement('div');
       titleBar.style.cssText = 'background:#1a4f8a;color:#fff;padding:6px 10px;font-size:11px;font-weight:700;display:flex;justify-content:space-between';
       const cpkColor = (st.cpk!=null&&st.cpk>=1.33)?'#7fff9a':(st.cpk!=null&&st.cpk>=1.0)?'#ffd67a':'#ff8080';
-      titleBar.innerHTML = `<span>FAI #${pt.faiNo} ${pt.moi||''}</span><span style="color:${cpkColor}">CPK = ${st.cpk!=null?st.cpk.toFixed(3):'—'}</span>`;
+      titleBar.innerHTML = `<span>球標 ${pt.faiNo} ${pt.moi||''}</span><span style="color:${cpkColor}">CPK = ${st.cpk!=null?st.cpk.toFixed(3):'—'}</span>`;
       wrap.appendChild(titleBar);
       const canvasWrap = document.createElement('div');
       canvasWrap.style.padding = '8px';

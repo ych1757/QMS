@@ -1875,16 +1875,16 @@ async function sbInit() {
         </select>
       </div>
       <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
-      <table style="width:100%;border-collapse:collapse;font-size:12px;min-width:900px">
+      <table style="width:100%;border-collapse:collapse;font-size:12px;min-width:720px">
         <thead>
           <tr style="background:#555;color:#fff">
-            <th style="padding:7px 12px;text-align:left;width:60px;white-space:nowrap">Site 組織</th>
-            <th style="padding:7px 12px;text-align:left;width:80px;white-space:nowrap">工號 Emp ID</th>
-            <th style="padding:7px 12px;text-align:left;width:100px;white-space:nowrap">Name 姓名</th>
-            <th style="padding:7px 12px;text-align:left;width:180px;white-space:nowrap">Email 帳號</th>
-            <th style="padding:7px 12px;text-align:center;white-space:nowrap">Role 角色</th>
-            <th style="padding:7px 5px;text-align:left;width:62px;white-space:nowrap;font-size:10px">建立</th>
-            <th style="padding:7px 12px;text-align:center;width:100px;white-space:nowrap">Action</th>
+            <th style="padding:7px 6px;text-align:left;width:50px;white-space:nowrap">Site</th>
+            <th style="padding:7px 6px;text-align:left;width:60px;white-space:nowrap">工號</th>
+            <th style="padding:7px 6px;text-align:left;width:76px;white-space:nowrap">姓名</th>
+            <th style="padding:7px 6px;text-align:left;width:150px;white-space:nowrap">Email 帳號</th>
+            <th style="padding:7px 6px;text-align:center;white-space:nowrap">Role 角色</th>
+            <th style="padding:7px 4px;text-align:left;width:56px;white-space:nowrap;font-size:10px">建立</th>
+            <th style="padding:7px 6px;text-align:center;width:92px;white-space:nowrap">Action</th>
           </tr>
         </thead>
         <tbody id="user-mgr-tbody">
@@ -6888,11 +6888,11 @@ async function renderUserMgrTable() {
     const checks = isInactive
       ? `<span style="font-size:11px;color:#bbb;font-style:italic">— 組織已停用 —</span>`
       : PERM_DEFS.map(p => `
-          <label style="display:inline-flex;align-items:center;gap:3px;cursor:pointer;white-space:nowrap;font-size:11px;color:${p.color};font-weight:600;margin-right:6px">
+          <label style="display:inline-flex;align-items:center;gap:2px;cursor:pointer;white-space:nowrap;font-size:10px;color:${p.color};font-weight:600;margin-right:2px">
             <input type="checkbox" id="cb_${sid}_${p.key}"
               ${(bits & p.bit) ? 'checked' : ''}
               onchange="onPermCheck('${r.site}','${r.key}','${p.key}',this.checked,'${sid}')"
-              style="accent-color:${p.color};width:13px;height:13px;cursor:pointer;flex-shrink:0">
+              style="accent-color:${p.color};width:12px;height:12px;cursor:pointer;flex-shrink:0">
             ${p.label}
           </label>`).join('');
     const actionBtns = isInactive
@@ -6908,15 +6908,15 @@ async function renderUserMgrTable() {
     const opacity = isInactive ? 'opacity:0.7;' : '';
     return `
     <tr style="background:${bg};border-bottom:1px solid #eee;${opacity}">
-      <td style="padding:8px 12px;font-weight:700;color:${isInactive?'#999':'#1a4f8a'};vertical-align:middle;white-space:nowrap">${r.site}</td>
-      <td style="padding:8px 12px;vertical-align:middle;white-space:nowrap;font-weight:700;color:#1a4f8a;font-family:'Courier New',monospace">${r.emp_id || '—'}</td>
-      <td style="padding:8px 12px;vertical-align:middle;white-space:nowrap">👤 ${r.name}</td>
-      <td style="padding:8px 12px;vertical-align:middle;font-size:11px;color:#555;min-width:180px">${emailDisplay}</td>
-      <td style="padding:6px 10px;vertical-align:middle;min-width:420px">
-        <div style="display:flex;gap:4px;align-items:center;flex-wrap:nowrap">${checks}</div>
+      <td style="padding:8px 6px;font-weight:700;color:${isInactive?'#999':'#1a4f8a'};vertical-align:middle;white-space:nowrap">${r.site}</td>
+      <td style="padding:8px 6px;vertical-align:middle;white-space:nowrap;font-weight:700;color:#1a4f8a;font-family:'Courier New',monospace">${r.emp_id || '—'}</td>
+      <td style="padding:8px 6px;vertical-align:middle;white-space:nowrap">👤 ${r.name}</td>
+      <td style="padding:8px 6px;vertical-align:middle;font-size:10.5px;color:#555;min-width:120px;word-break:break-all">${emailDisplay}</td>
+      <td style="padding:6px 6px;vertical-align:middle;min-width:300px">
+        <div style="display:flex;gap:1px;align-items:center;flex-wrap:nowrap">${checks}</div>
       </td>
-      <td style="padding:6px 5px;font-size:10px;color:#888;vertical-align:middle;white-space:nowrap">${r.createdAt ? r.createdAt.slice(0,10) : '—'}</td>
-      <td style="padding:8px 12px;text-align:center;vertical-align:middle;white-space:nowrap">${actionBtns}</td>
+      <td style="padding:6px 4px;font-size:10px;color:#888;vertical-align:middle;white-space:nowrap">${r.createdAt ? r.createdAt.slice(0,10) : '—'}</td>
+      <td style="padding:8px 6px;text-align:center;vertical-align:middle;white-space:nowrap">${actionBtns}</td>
     </tr>`;
   }
 

@@ -1875,19 +1875,20 @@ async function sbInit() {
         </select>
       </div>
       <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
-      <table style="width:100%;border-collapse:collapse;font-size:12px;min-width:900px">
+      <table style="width:100%;border-collapse:collapse;font-size:12px;min-width:720px">
         <thead>
           <tr style="background:#555;color:#fff">
-            <th style="padding:7px 12px;text-align:left;width:60px;white-space:nowrap">Site 組織</th>
-            <th style="padding:7px 12px;text-align:left;width:100px;white-space:nowrap">Name 姓名</th>
-            <th style="padding:7px 12px;text-align:left;width:180px;white-space:nowrap">Email 帳號</th>
-            <th style="padding:7px 12px;text-align:center;white-space:nowrap">Role 角色</th>
-            <th style="padding:7px 5px;text-align:left;width:62px;white-space:nowrap;font-size:10px">建立</th>
-            <th style="padding:7px 12px;text-align:center;width:100px;white-space:nowrap">Action</th>
+            <th style="padding:7px 6px;text-align:left;width:50px;white-space:nowrap">Site</th>
+            <th style="padding:7px 6px;text-align:left;width:60px;white-space:nowrap">工號</th>
+            <th style="padding:7px 6px;text-align:left;width:76px;white-space:nowrap">姓名</th>
+            <th style="padding:7px 6px;text-align:left;width:230px;white-space:nowrap">Email 帳號</th>
+            <th style="padding:7px 6px;text-align:center;white-space:nowrap">Role 角色</th>
+            <th style="padding:7px 4px;text-align:left;width:56px;white-space:nowrap;font-size:10px">建立</th>
+            <th style="padding:7px 6px;text-align:center;width:92px;white-space:nowrap">Action</th>
           </tr>
         </thead>
         <tbody id="user-mgr-tbody">
-          <tr><td colspan="4" style="text-align:center;padding:14px;color:#bbb;font-size:12px">尚無人員資料</td></tr>
+          <tr><td colspan="7" style="text-align:center;padding:14px;color:#bbb;font-size:12px">尚無人員資料</td></tr>
         </tbody>
       </table>
       </div>
@@ -6804,12 +6805,45 @@ function setExportStatus(msg, color) {
 // ══════════════════════════════════════════════
 let editingSiteCode = null; // null=新增, code=編輯
 
+// ══ V139：QMS 人員管理直讀 OMS 授權名單（跨專案唯讀）══
+const OMS_IDENTITY_URL = 'https://drfqoraijhzvvllncbei.supabase.co';
+const OMS_IDENTITY_KEY = 'sb_publishable_PG_IHNnOMAe3oTMV6yV25w_-U-FjDwq'; // OMS/synchub 公開 anon key（唯讀用）
+// 讀「OMS 已授權 QMS、在職」的內部員工
+async function loadOmsQmsRoster() {
+  try {
+    const r = await fetch(OMS_IDENTITY_URL + '/rest/v1/identity_access?systems=cs.%5B%22QMS%22%5D&active=eq.true&select=emp_id,name,eng_name,email,factory_code,dept,title',
+      { headers: { apikey: OMS_IDENTITY_KEY, Authorization: 'Bearer ' + OMS_IDENTITY_KEY } });
+    if (!r.ok) { console.warn('讀 OMS 授權名單 HTTP', r.status); return []; }
+    const d = await r.json();
+    return Array.isArray(d) ? d : [];
+  } catch (e) { console.warn('讀 OMS 授權名單失敗（QMS 照常運作）:', e); return []; }
+}
+// 從 OMS 帶入一位 → 在 QMS 建立帳號（含 emp_id），之後可設權限
+async function importFromOms(empId, name, email, factory) {
+  if (!email || !email.includes('@')) { alert('此人在 OMS 沒有有效 Email，無法建立 QMS 帳號'); return; }
+  if (!confirm(`帶入「${name}」(${empId || '無工號'}) 到 QMS？\n\n將建立登入帳號：\n・Email：${email}\n・預設密碼：${DEFAULT_PWD}（首次登入須改）\n・預設權限：查詢＋輸入（帶入後可再調整）\n\n供應商不受影響。`)) return;
+  const r = await sbCallAdminFn('create', {
+    email: String(email).toLowerCase(), password: DEFAULT_PWD, name: name || email,
+    account_type: 'site', qms_role: 'inspector',
+    site_code: factory || null, must_change: true, emp_id: empId || null
+  });
+  if (!r.ok) { alert('帶入失敗：' + (r.msg || '')); return; }
+  renderUserMgrTable();
+}
+function importFromOmsIdx(i) {
+  const g = (window._omsGhosts || [])[i];
+  if (!g) return;
+  importFromOms(g.emp_id, g.name, g.email, g.site);
+}
+
 async function renderUserMgrTable() {
   const filterSite = document.getElementById('user-mgr-site')?.value || '';
   const tbody = document.getElementById('user-mgr-tbody');
   if (!tbody) return;
   // 🔐 _2CODE：從 profiles 載入（透過 admin-users Edge Function），不再讀舊的 qms_users
   let db = {};
+  const qmsEmpIds = new Set();   // V139：已在 QMS 有帳號的工號
+  const qmsEmails = new Set();   // V139：已在 QMS 有帳號的 email（小寫）
   try {
     const lr = await sbCallAdminFn('list');
     if (!lr.ok || !lr.data || !lr.data.profiles) {
@@ -6822,7 +6856,10 @@ async function renderUserMgrTable() {
       if (!db[s]) db[s] = {};
       db[s][p.email] = { name: p.name || p.email, email: p.email,
         role: (p.account_type === 'admin' ? 'admin' : (p.qms_role || 'inspector')),
+        emp_id: p.emp_id || '',
         createdAt: p.created_at || '' };
+      if (p.emp_id) qmsEmpIds.add(p.emp_id);
+      if (p.email)  qmsEmails.add(String(p.email).toLowerCase());
     });
     try { localStorage.setItem(USER_DB_KEY, JSON.stringify(db)); } catch(e) {} // 供 onPermCheck 沿用
   } catch(e) {
@@ -6844,20 +6881,35 @@ async function renderUserMgrTable() {
   loadSiteConfig();
   const activeSiteCodes = new Set(SITE_LIST.filter(s => s.active !== false).map(s => s.code));
 
+  // ── V139：讀 OMS 已授權 QMS、但 QMS 還沒帳號的人（＝未設權限，比照 GHG 自動出現）──
+  let ghostRows = [];
+  let omsNameMap = {}; // V139-1：工號 → {name, eng}（姓名即時讀 OMS，OMS 改名 QMS 跟著變）
+  try {
+    const omsRoster = await loadOmsQmsRoster();
+    omsRoster.forEach(p => { if (p.emp_id) omsNameMap[p.emp_id] = { name: p.name || '', eng: p.eng_name || '' }; });
+    ghostRows = omsRoster
+      .filter(p => !(p.emp_id && qmsEmpIds.has(p.emp_id)) && !(p.email && qmsEmails.has(String(p.email).toLowerCase())))
+      .map(p => ({ site: p.factory_code || '—', emp_id: p.emp_id || '',
+        name: p.name || p.eng_name || p.email || '(無名)', engName: p.eng_name || '', email: p.email || '' }));
+  } catch (e) { console.warn('OMS 未設權限名單載入失敗（QMS 照常）:', e); }
+  window._omsGhosts = ghostRows; // 供帶入按鈕依索引取用
+
   const activeRows   = [];
   const inactiveRows = [];
   Object.entries(db).forEach(([site, users]) => {
     if (filterSite && site !== filterSite) return;
     Object.entries(users).forEach(([key, u]) => {
-      const row = {site, key, name: u.name, email: u.email||'', role: u.role||'inspector', createdAt: u.createdAt||''};
+      const om = u.emp_id && omsNameMap[u.emp_id];
+      const row = {site, key, name: u.name, email: u.email||'', role: u.role||'inspector', emp_id: u.emp_id||'', createdAt: u.createdAt||'',
+        omsName: om ? om.name : '', omsEng: om ? om.eng : ''};
       const siteActive = activeSiteCodes.has(site) || site === '__nosite__';
       if (siteActive) activeRows.push(row);
       else inactiveRows.push(row);
     });
   });
 
-  if (!activeRows.length && !inactiveRows.length) {
-    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:14px;color:#bbb;font-size:12px">尚無人員資料</td></tr>';
+  if (!activeRows.length && !inactiveRows.length && !ghostRows.length) {
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:14px;color:#bbb;font-size:12px">尚無人員資料</td></tr>';
     return;
   }
 
@@ -6886,11 +6938,11 @@ async function renderUserMgrTable() {
     const checks = isInactive
       ? `<span style="font-size:11px;color:#bbb;font-style:italic">— 組織已停用 —</span>`
       : PERM_DEFS.map(p => `
-          <label style="display:inline-flex;align-items:center;gap:3px;cursor:pointer;white-space:nowrap;font-size:11px;color:${p.color};font-weight:600;margin-right:6px">
+          <label style="display:inline-flex;align-items:center;gap:2px;cursor:pointer;white-space:nowrap;font-size:10px;color:${p.color};font-weight:600;margin-right:2px">
             <input type="checkbox" id="cb_${sid}_${p.key}"
               ${(bits & p.bit) ? 'checked' : ''}
               onchange="onPermCheck('${r.site}','${r.key}','${p.key}',this.checked,'${sid}')"
-              style="accent-color:${p.color};width:13px;height:13px;cursor:pointer;flex-shrink:0">
+              style="accent-color:${p.color};width:12px;height:12px;cursor:pointer;flex-shrink:0">
             ${p.label}
           </label>`).join('');
     const actionBtns = isInactive
@@ -6906,18 +6958,43 @@ async function renderUserMgrTable() {
     const opacity = isInactive ? 'opacity:0.7;' : '';
     return `
     <tr style="background:${bg};border-bottom:1px solid #eee;${opacity}">
-      <td style="padding:8px 12px;font-weight:700;color:${isInactive?'#999':'#1a4f8a'};vertical-align:middle;white-space:nowrap">${r.site}</td>
-      <td style="padding:8px 12px;vertical-align:middle;white-space:nowrap">👤 ${r.name}</td>
-      <td style="padding:8px 12px;vertical-align:middle;font-size:11px;color:#555;min-width:180px">${emailDisplay}</td>
-      <td style="padding:6px 10px;vertical-align:middle;min-width:420px">
-        <div style="display:flex;gap:4px;align-items:center;flex-wrap:nowrap">${checks}</div>
+      <td style="padding:8px 6px;font-weight:700;color:${isInactive?'#999':'#1a4f8a'};vertical-align:middle;white-space:nowrap">${r.site}</td>
+      <td style="padding:8px 6px;vertical-align:middle;white-space:nowrap;font-weight:700;color:#1a4f8a;font-family:'Courier New',monospace">${r.emp_id || '—'}</td>
+      <td style="padding:8px 6px;vertical-align:middle;white-space:nowrap">👤 ${((r.omsName||r.name)||'').replace(/</g,'&lt;')}${(r.omsName && r.omsEng && r.omsEng!==r.omsName) ? ` <span style="color:#888;font-weight:400">(${r.omsEng.replace(/</g,'&lt;')})</span>` : ''}</td>
+      <td style="padding:8px 6px;vertical-align:middle;font-size:10.5px;color:#555;min-width:230px;white-space:nowrap">${emailDisplay}</td>
+      <td style="padding:6px 6px;vertical-align:middle;min-width:300px">
+        <div style="display:flex;gap:1px;align-items:center;flex-wrap:nowrap">${checks}</div>
       </td>
-      <td style="padding:6px 5px;font-size:10px;color:#888;vertical-align:middle;white-space:nowrap">${r.createdAt ? r.createdAt.slice(0,10) : '—'}</td>
-      <td style="padding:8px 12px;text-align:center;vertical-align:middle;white-space:nowrap">${actionBtns}</td>
+      <td style="padding:6px 4px;font-size:10px;color:#888;vertical-align:middle;white-space:nowrap">${r.createdAt ? r.createdAt.slice(0,10) : '—'}</td>
+      <td style="padding:8px 6px;text-align:center;vertical-align:middle;white-space:nowrap">${actionBtns}</td>
     </tr>`;
   }
 
-  let html = activeRows.map((r,i) => buildRow(r, i, false)).join('');
+  // V139：未設權限那列（OMS 已授權、QMS 尚無帳號）
+  function buildGhostRow(g, idx) {
+    const esc = s => String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    const nameDisp = esc(g.name) + (g.engName && g.engName !== g.name ? ` <span style="color:#888">(${esc(g.engName)})</span>` : '');
+    return `
+    <tr style="background:#fff6f4;border-bottom:1px solid #f2d0c8">
+      <td style="padding:8px 6px;font-weight:700;color:#c0392b;vertical-align:middle;white-space:nowrap">${esc(g.site)}</td>
+      <td style="padding:8px 6px;vertical-align:middle;white-space:nowrap;font-weight:700;color:#c0392b;font-family:'Courier New',monospace">${esc(g.emp_id) || '—'}</td>
+      <td style="padding:8px 6px;vertical-align:middle;white-space:nowrap">👤 ${nameDisp}</td>
+      <td style="padding:8px 6px;vertical-align:middle;font-size:10.5px;color:#555;min-width:230px;white-space:nowrap">${esc(g.email)}</td>
+      <td style="padding:6px 6px;vertical-align:middle"><span style="display:inline-block;padding:2px 8px;border-radius:10px;background:#c0392b;color:#fff;font-size:11px;font-weight:700;white-space:nowrap">⚠ 未設權限</span></td>
+      <td style="padding:6px 4px;font-size:10px;color:#888;vertical-align:middle">—</td>
+      <td style="padding:8px 6px;text-align:center;vertical-align:middle;white-space:nowrap">
+        <button onclick="importFromOmsIdx(${idx})" style="height:26px;padding:0 12px;font-size:11px;font-weight:700;border:none;background:#1D9E75;color:#fff;border-radius:4px;cursor:pointer;white-space:nowrap">＋ 帶入</button>
+      </td>
+    </tr>`;
+  }
+
+  let html = '';
+  // V139：未設權限（OMS 已授權 QMS、QMS 尚無帳號）置頂
+  if (ghostRows.length) {
+    html += `<tr><td colspan="7" style="padding:8px 8px 6px;font-size:12px;font-weight:700;color:#c0392b;background:#fff3f0;border-top:2px solid #f0b0a0">⚠ 有 ${ghostRows.length} 位已在 OMS 授權 QMS、尚未建立 QMS 帳號 —— 請按「＋ 帶入」建立帳號後設權限</td></tr>`;
+    html += ghostRows.map((g, i) => buildGhostRow(g, i)).join('');
+  }
+  html += activeRows.map((r,i) => buildRow(r, i, false)).join('');
 
   if (inactiveRows.length) {
     html += `<tr><td colspan="6" style="padding:8px 12px 4px;font-size:11px;font-weight:700;color:#BA7517;background:#fff8e8;border-top:2px solid #f0d080">

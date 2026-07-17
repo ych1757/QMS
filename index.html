@@ -581,15 +581,31 @@ async function sbSavePartSpec(partno, spec, scope) {
   } catch(e) { console.warn('sbSavePartSpec exception:', e); }
 }
 
+// ══ V140：分頁撈取（Supabase/PostgREST 單次最多只回 1000 筆）══
+// 原本：fai_records limit=500、cpk_records limit=200、part_specs 無 limit(=吃 1000 上限)
+// → 超過就「悄悄」看不到舊資料、不會報錯。改成每次 1000 筆、撈到沒有為止。
+async function sbFetchAllRows(baseUrl, pageSize) {
+  pageSize = pageSize || 1000;
+  const headers = { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer() };
+  const sep = baseUrl.indexOf('?') >= 0 ? '&' : '?';
+  let out = [], offset = 0;
+  for (let guard = 0; guard < 200; guard++) {   // 上限 200 頁＝20 萬筆，防無限迴圈
+    const res = await fetch(baseUrl + sep + 'limit=' + pageSize + '&offset=' + offset, { headers });
+    if (!res.ok) break;
+    const chunk = await res.json();
+    if (!Array.isArray(chunk) || chunk.length === 0) break;
+    out = out.concat(chunk);
+    if (chunk.length < pageSize) break;         // 最後一頁，收工
+    offset += pageSize;
+  }
+  return out;
+}
+
 async function sbPullAllRecords() {
   if (!_sbReady) return 0;
   try {
-    const res = await fetch(
-      SUPABASE_URL + '/rest/v1/fai_records?select=*&order=saved_at.desc&limit=500',
-      { headers: { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer() } }
-    );
-    if (!res.ok) return 0;
-    const data = await res.json();
+    // V140：改分頁撈全部（原 limit=500 → 超過 500 筆就看不到更舊的記錄）
+    const data = await sbFetchAllRows(SUPABASE_URL + '/rest/v1/fai_records?select=*&order=saved_at.desc');
     let count = 0;
     const _seen = new Set(); // v118: 去重，保留最新（資料已按 saved_at desc 排序）
     (data || []).forEach(row => {
@@ -623,12 +639,8 @@ async function sbPullAllRecords() {
 async function sbPullCpkRecords() {
   if (!_sbReady) return 0;
   try {
-    const res = await fetch(
-      SUPABASE_URL + '/rest/v1/cpk_records?select=*&order=saved_at.desc&limit=200',
-      { headers: { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer() } }
-    );
-    if (!res.ok) return 0;
-    const data = await res.json();
+    // V140：改分頁撈全部（原 limit=200 → 超過 200 筆就看不到更舊的 CPK）
+    const data = await sbFetchAllRows(SUPABASE_URL + '/rest/v1/cpk_records?select=*&order=saved_at.desc');
     let count = 0;
     const _seen = new Set(); // v121: 去重，保留最新
     (data || []).forEach(row => {
@@ -654,12 +666,8 @@ async function sbPullPartSpecs() {
   // shared → 寫入 fai_part_specs（共用）
   if (!_sbReady) return;
   try {
-    const res = await fetch(
-      SUPABASE_URL + '/rest/v1/part_specs?select=*',
-      { headers: { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer() } }
-    );
-    if (!res.ok) return;
-    const data = await res.json();
+    // V140：改分頁撈全部（原本無 limit → 超過 1000 筆會被靜默截斷、料號會少）
+    const data = await sbFetchAllRows(SUPABASE_URL + '/rest/v1/part_specs?select=*');
     if (!data || !data.length) return;
 
     // 依 scope 分組
@@ -1714,7 +1722,7 @@ async function sbInit() {
     </div>
     <div style="font-size:11px;color:#888;margin-top:8px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
       <span>💡 點擊列左側 ▶ 可展開查看詳細量測數據。</span>
-      <button onclick="forceReimportRecords()" style="height:24px;padding:0 10px;font-size:11px;border:1px solid #c0392b;color:#c0392b;background:#fff;border-radius:4px;cursor:pointer;white-space:nowrap">🔄 重新匯入預載記錄</button>
+      <!-- V141（260717）：移除「🔄 重新匯入預載記錄」按鈕——示範資料已停用，按了只會塞回假記錄 -->
     </div>
 
   </div><!-- end tab-hist -->
@@ -6050,9 +6058,12 @@ function updateProcessConfig() {
     'fai_record_IQC_05360000-003_2026-03-05T08-00-00-000Z': {"header":{"process":"IQC","partno":"05360000-003","partname":"KICKSTAND BRACKET, MINI 2 USER TERMINAL","supplier":"SYNX","inspector":"Nick","rev":"A","date":"2026-03-05","material":"PC,10% GLASS FILL","phase":"T1","toolno":"/","lotno":"","poqty":"","dn":"","workorder":"","machine":"","shift":"","process_name":"","finqty":"","wo_fqc":"","customer":"","so":"","shipqty":"","destination":""},"rows":[{"fai":1,"moi":"Optical Comparator","type":"FAI","nom":0,"pt":0.2,"mt":0,"usl":0.2,"lsl":0,"s":[0.167,0.143,0.133],"comment":"VL-800/VR-6000"},{"fai":2,"moi":"Optical Comparator","type":"CPK","nom":65.69,"pt":0.15,"mt":0.15,"usl":65.84,"lsl":65.54,"s":[65.71,65.77,65.71],"comment":"VL-800/VR-6000"},{"fai":3,"moi":"Dial Caliper","type":"FAI","nom":6.83,"pt":0.15,"mt":0.15,"usl":6.98,"lsl":6.68,"s":[6.79,6.79,6.79],"comment":""},{"fai":4,"moi":"Optical Comparator","type":"FAI","nom":3.28,"pt":0.1,"mt":0.1,"usl":3.38,"lsl":3.18,"s":[3.36,3.32,3.35],"comment":"VL-800/VR-6000"},{"fai":5,"moi":"Optical Comparator","type":"CPK","nom":3.02,"pt":0.08,"mt":0.08,"usl":3.1,"lsl":2.94,"s":[3.05,3.05,3.08],"comment":"VL-800/VR-6000"},{"fai":6,"moi":"Optical Comparator","type":"FAI","nom":0,"pt":0.3,"mt":0,"usl":0.3,"lsl":0,"s":[0.287,0.265,0.255],"comment":"VL-800/VR-6000"},{"fai":7,"moi":"Optical Comparator","type":"FAI","nom":0,"pt":0.3,"mt":0,"usl":0.3,"lsl":0,"s":[0.163,0.224,0.286],"comment":"VL-800/VR-6000"},{"fai":8,"moi":"Optical Comparator","type":"CPK","nom":49.63,"pt":0.15,"mt":0.15,"usl":49.78,"lsl":49.48,"s":[49.76,49.75,49.75],"comment":"VL-800/VR-6000"},{"fai":9,"moi":"Optical Comparator","type":"FAI","nom":0,"pt":0.3,"mt":0,"usl":0.3,"lsl":0,"s":[0.122,0.166,0.165],"comment":"VL-800/VR-6000"},{"fai":10,"moi":"Optical Comparator","type":"FAI","nom":0,"pt":0.3,"mt":0,"usl":0.3,"lsl":0,"s":[0.122,0.092,0.094],"comment":"VL-800/VR-6000"},{"fai":11,"moi":"Optical Comparator","type":"FAI","nom":0,"pt":0.3,"mt":0,"usl":0.3,"lsl":0,"s":[0.104,0.109,0.088],"comment":"VL-800/VR-6000"},{"fai":12,"moi":"Dial Caliper","type":"FAI","nom":78.83,"pt":0.2,"mt":0.2,"usl":79.03,"lsl":78.63,"s":[78.87,78.86,78.86],"comment":""},{"fai":13,"moi":"Optical Comparator","type":"FAI","nom":0,"pt":0.5,"mt":0,"usl":0.5,"lsl":0,"s":[0.227,0.221,0.209],"comment":"VL-800/VR-6000"},{"fai":14,"moi":"Dial Caliper","type":"FAI","nom":7.61,"pt":0.1,"mt":0.1,"usl":7.71,"lsl":7.51,"s":[7.62,7.62,7.62],"comment":""},{"fai":15,"moi":"Optical Comparator","type":"FAI","nom":0,"pt":0.3,"mt":0,"usl":0.3,"lsl":0,"s":[0.291,0.287,0.257],"comment":"VL-800/VR-6000"},{"fai":16,"moi":"Optical Comparator","type":"FAI","nom":0,"pt":0.2,"mt":0,"usl":0.2,"lsl":0,"s":[0.076,0.049,0.088],"comment":"VL-800/VR-6000"},{"fai":17,"moi":"Optical Comparator","type":"FAI","nom":2.26,"pt":0.1,"mt":0.1,"usl":2.36,"lsl":2.16,"s":[2.3,2.26,2.27],"comment":"VL-800/VR-6000"},{"fai":18,"moi":"Dial Caliper","type":"FAI","nom":1.5,"pt":0.1,"mt":0.1,"usl":1.6,"lsl":1.4,"s":[1.48,1.48,1.48],"comment":""},{"fai":19,"moi":"Dial Caliper","type":"FAI","nom":1.95,"pt":0.05,"mt":0.05,"usl":2.0,"lsl":1.9,"s":[1.95,1.94,1.94],"comment":""}],"savedAt":"2026-03-05T08:00:00.000Z","overall":"PASS","formNo":"IQC-20260305-0001","isRecord":true,"photos":[]},
     'fai_record_IQC_05360000-004_2026-03-30T08-00-00-000Z': {"header":{"process":"IQC","partno":"05360000-004","partname":"KICKSTAND LEG, MINI 2 USER TERMINAL","supplier":"SYNX","inspector":"Nick","rev":"A","date":"2026-03-30","material":"ZAMAK 3","phase":"Cast part T2","toolno":"/","lotno":"","poqty":"","dn":"","workorder":"","machine":"","shift":"","process_name":"","finqty":"","wo_fqc":"","customer":"","so":"","shipqty":"","destination":""},"rows":[{"fai":1,"moi":"Optical Comparator","type":"FAI","nom":0,"pt":0.2,"mt":0,"usl":0.2,"lsl":0,"s":[0.119,0.116,0.128],"comment":"VL-800/VR-6000"},{"fai":2,"moi":"Optical Comparator","type":"FAI","nom":0,"pt":0.2,"mt":0,"usl":0.2,"lsl":0,"s":[0.089,0.101,0.083],"comment":"VL-800/VR-6000"},{"fai":3,"moi":"Dial Caliper","type":"FAI","nom":6.49,"pt":0.2,"mt":0.2,"usl":6.69,"lsl":6.29,"s":[6.44,6.36,6.36],"comment":""},{"fai":4,"moi":"Dial Caliper","type":"FAI","nom":6.68,"pt":0.2,"mt":0.2,"usl":6.88,"lsl":6.48,"s":[6.67,6.62,6.66],"comment":""},{"fai":5,"moi":"Optical Comparator","type":"FAI","nom":50.54,"pt":0.2,"mt":0.2,"usl":50.74,"lsl":50.34,"s":[50.53,50.55,50.54],"comment":"VL-800/VR-6000"},{"fai":6,"moi":"Dial Caliper","type":"FAI","nom":3.32,"pt":0.1,"mt":0.1,"usl":3.42,"lsl":3.22,"s":[3.27,3.25,3.25],"comment":""},{"fai":7,"moi":"Dial Caliper","type":"FAI","nom":3.31,"pt":0.2,"mt":0.2,"usl":3.51,"lsl":3.11,"s":[3.33,3.28,3.31],"comment":""},{"fai":8,"moi":"Dial Caliper","type":"CPK","nom":2.77,"pt":0.08,"mt":0.08,"usl":2.85,"lsl":2.69,"s":[2.94,2.9,2.93],"comment":""},{"fai":9,"moi":"Dial Caliper","type":"CPK","nom":2.77,"pt":0.08,"mt":0.08,"usl":2.85,"lsl":2.69,"s":[2.96,2.9,2.95],"comment":""},{"fai":10,"moi":"Optical Comparator","type":"FAI","nom":0,"pt":0.4,"mt":0,"usl":0.4,"lsl":0,"s":[0.052,0.047,0.115],"comment":"VL-800/VR-6000"},{"fai":11,"moi":"Optical Comparator","type":"FAI","nom":0,"pt":0.5,"mt":0,"usl":0.5,"lsl":0,"s":[0.08,0.027,0.071],"comment":"VL-800/VR-6000"},{"fai":12,"moi":"Optical Comparator","type":"FAI","nom":0,"pt":0.3,"mt":0,"usl":0.3,"lsl":0,"s":[0.056,0.058,0.058],"comment":"VL-800/VR-6000"},{"fai":13,"moi":"Dial Caliper","type":"CPK","nom":49,"pt":0.2,"mt":0.2,"usl":49.2,"lsl":48.8,"s":[49.14,49.06,49.13],"comment":""},{"fai":14,"moi":"Dial Caliper","type":"CPK","nom":52,"pt":0.3,"mt":0.3,"usl":52.3,"lsl":51.7,"s":[52.08,51.99,52.04],"comment":""}],"savedAt":"2026-03-30T08:00:00.000Z","overall":"REJECT","formNo":"IQC-20260330-0001","isRecord":true,"photos":[]}
   };
-  // 強制寫入（覆蓋舊版錯誤資料）
-  Object.entries(RECORDS).forEach(([k, v]) => {
-    try { localStorage.setItem(k, JSON.stringify(v)); } catch(e) {}
+  // ★ V141（260717）：改為「移除」預載示範記錄 ★
+  // 原本每次開頁會「強制寫入」這 2 筆示範記錄（IQC-20260305-0001 / IQC-20260330-0001，無廠區），
+  // 導致歷史查詢筆數在 21↔23 跳動（開頁塞回來、按「重新同步雲端」又被清掉），使用者困惑。
+  // 系統已上線且有真實記錄，不再需要示範資料 → 開頁時把這 2 筆從本機清乾淨。
+  Object.keys(RECORDS).forEach(k => {
+    try { localStorage.removeItem(k); } catch(e) {}
   });
 })();
 // ══════════════════════════════════════════════

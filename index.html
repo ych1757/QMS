@@ -6846,6 +6846,22 @@ function importFromOmsIdx(i) {
   if (!g) return;
   importFromOms(g.emp_id, g.name, g.email, g.site);
 }
+// V142：把「email 已對上 OMS、但沒工號」的既有帳號一鍵補上工號（只補 emp_id，不動密碼/權限/其他資料）
+async function linkAllOmsEmp() {
+  const list = window._linkable || [];
+  if (!list.length) return;
+  const preview = list.slice(0, 8).map(p => `・${p.name}　→　${p.empId}`).join('\n');
+  if (!confirm(`把 ${list.length} 位既有帳號連結 OMS 工號？\n\n${preview}${list.length > 8 ? '\n…' : ''}\n\n只補工號，不動密碼、權限、其他資料。`)) return;
+  let ok = 0, fail = 0;
+  for (const p of list) {
+    try {
+      const r = await sbCallAdminFn('update', { email: p.email, emp_id: p.empId });
+      if (r && r.ok) ok++; else fail++;
+    } catch (e) { fail++; }
+  }
+  alert(`✅ 連結完成：成功 ${ok} 位` + (fail ? `，失敗 ${fail} 位` : '') + '。');
+  renderUserMgrTable();
+}
 
 async function renderUserMgrTable() {
   const filterSite = document.getElementById('user-mgr-site')?.value || '';
@@ -6895,15 +6911,31 @@ async function renderUserMgrTable() {
   // ── V139：讀 OMS 已授權 QMS、但 QMS 還沒帳號的人（＝未設權限，比照 GHG 自動出現）──
   let ghostRows = [];
   let omsNameMap = {}; // V139-1：工號 → {name, eng}（姓名即時讀 OMS，OMS 改名 QMS 跟著變）
+  let omsEmpByEmail = {}; // V142：email(小寫) → OMS 工號（用來自動連結既有帳號）
   try {
     const omsRoster = await loadOmsQmsRoster();
-    omsRoster.forEach(p => { if (p.emp_id) omsNameMap[p.emp_id] = { name: p.name || '', eng: p.eng_name || '' }; });
+    omsRoster.forEach(p => {
+      if (p.emp_id) omsNameMap[p.emp_id] = { name: p.name || '', eng: p.eng_name || '' };
+      if (p.emp_id && p.email) omsEmpByEmail[String(p.email).toLowerCase()] = p.emp_id;
+    });
     ghostRows = omsRoster
       .filter(p => !(p.emp_id && qmsEmpIds.has(p.emp_id)) && !(p.email && qmsEmails.has(String(p.email).toLowerCase())))
       .map(p => ({ site: p.factory_code || '—', emp_id: p.emp_id || '',
         name: p.name || p.eng_name || p.email || '(無名)', engName: p.eng_name || '', email: p.email || '' }));
   } catch (e) { console.warn('OMS 未設權限名單載入失敗（QMS 照常）:', e); }
   window._omsGhosts = ghostRows; // 供帶入按鈕依索引取用
+
+  // ── V142：可連結工號（既有帳號 email 對到 OMS、但自己 emp_id 是空的 → 一鍵補工號、免跑 SQL）──
+  let linkable = [];
+  Object.entries(db).forEach(([site, users]) => {
+    Object.entries(users).forEach(([key, u]) => {
+      const em = omsEmpByEmail[String(u.email || '').toLowerCase()];
+      if (em && (!u.emp_id || u.emp_id === '')) {
+        linkable.push({ email: u.email, name: u.name, empId: em, site });
+      }
+    });
+  });
+  window._linkable = linkable;
 
   const activeRows   = [];
   const inactiveRows = [];
@@ -7000,6 +7032,10 @@ async function renderUserMgrTable() {
   }
 
   let html = '';
+  // V142：可連結工號提示（既有帳號 email 已對上 OMS、但還沒工號 → 一鍵補、免跑 SQL）
+  if (linkable.length) {
+    html += `<tr><td colspan="7" style="padding:8px 8px 6px;font-size:12px;font-weight:700;color:#0f6e56;background:#eefaf4;border-top:2px solid #9fd8bf">🔗 有 <b>${linkable.length}</b> 位帳號可從 OMS 連結工號（email 已對上、但還沒工號）<button onclick="linkAllOmsEmp()" style="height:24px;padding:0 12px;font-size:11px;font-weight:700;border:none;background:#0f6e56;color:#fff;border-radius:4px;cursor:pointer;margin-left:10px">🔗 一鍵連結全部</button></td></tr>`;
+  }
   // V139：未設權限（OMS 已授權 QMS、QMS 尚無帳號）置頂
   if (ghostRows.length) {
     html += `<tr><td colspan="7" style="padding:8px 8px 6px;font-size:12px;font-weight:700;color:#c0392b;background:#fff3f0;border-top:2px solid #f0b0a0">⚠ 有 ${ghostRows.length} 位已在 OMS 授權 QMS、尚未建立 QMS 帳號 —— 請按「＋ 帶入」建立帳號後設權限</td></tr>`;

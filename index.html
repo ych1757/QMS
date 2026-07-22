@@ -3564,20 +3564,26 @@ function initDashScopeFilter() {
   const wrap = document.getElementById('dash-scope-wrap');
   const sel  = document.getElementById('dash-scope');
   if (!wrap || !sel) return;
-  if (!isAdmin()) { wrap.style.display = 'none'; sel.value = ''; return; }
+  // V143：跨廠查詢者（session.viewSites 有值）也顯示篩選下拉，但只列「自己廠＋被授權範圍」
+  const _sess = getSession();
+  const vScopes = getViewScopes();
+  const isAdm = isAdmin();
+  if (!isAdm && !vScopes.length) { wrap.style.display = 'none'; sel.value = ''; return; }
   wrap.style.display = 'inline-flex';
   const cur = sel.value; // 保留目前選擇
   try { loadSiteConfig(); } catch(e) {}
   const esc = s => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-  let html = '<option value="">— 全部 All —</option>';
-  const sites = (SITE_LIST || []).filter(s => s.active !== false);
+  const ownSite = (_sess && _sess.site && _sess.site !== '__nosite__' && !_sess.isSupplier) ? _sess.site : '';
+  const allow = isAdm ? null : new Set([ownSite, ...vScopes].filter(Boolean)); // null＝admin 不設限
+  let html = `<option value="">${isAdm ? '— 全部 All —' : '— 全部(授權範圍) All Granted —'}</option>`;
+  const sites = (SITE_LIST || []).filter(s => s.active !== false && (!allow || allow.has(s.code)));
   if (sites.length) {
     html += '<optgroup label="📍 廠區 Sites">';
     sites.forEach(s => { html += `<option value="${esc(s.code)}">${esc(s.code)} — ${esc(s.name)}</option>`; });
     html += '</optgroup>';
   }
   let sups = [];
-  try { sups = getSupplierList().filter(s => s && s.active !== false && s.code); } catch(e) {}
+  try { sups = getSupplierList().filter(s => s && s.active !== false && s.code && (!allow || allow.has(s.code))); } catch(e) {}
   if (sups.length) {
     html += '<optgroup label="🏭 供應商 Suppliers">';
     sups.forEach(s => { html += `<option value="${esc(s.code)}">${esc(s.code)} — ${esc(s.name)}</option>`; });
@@ -3585,6 +3591,8 @@ function initDashScopeFilter() {
   }
   sel.innerHTML = html;
   if (cur) sel.value = cur; // 還原先前選擇（若已不存在會自動落回「全部」）
+  else if (!isAdm && ownSite && !sel.dataset.defApplied) sel.value = ownSite; // V143：跨廠查詢者預設看自己廠
+  sel.dataset.defApplied = '1';
 }
 
 function getDashRecords() {
@@ -4055,8 +4063,10 @@ function getAllRecords() {
     } catch(e) {}
   });
   // 組織隔離：過濾掉不屬於當前組織的記錄
+  // V143：跨廠查詢——自己廠之外，被授權的廠區/供應商（session.viewSites）也放行（唯讀由按鈕層＋DB RLS 把關）
   if (filterSite) {
-    return records.filter(r => !r.site || r.site === filterSite);
+    const _vs = new Set(getViewScopes());
+    return records.filter(r => !r.site || r.site === filterSite || _vs.has(r.site));
   }
   // 供應商隔離：只看相符的記錄
   // 修正：推入的 record 物件未帶 supplierCode 欄位，供應商記錄是把供應商碼存在 site，
@@ -4092,6 +4102,29 @@ function initHistSiteFilter() {
     opt.textContent = '🏢 ' + (s.supplierName ? `${code} — ${s.supplierName}` : code);
     sel.appendChild(opt);
     sel.disabled = true;
+  } else if (!isAdminUser && getViewScopes().length) {
+    // V143：跨廠查詢者——下拉開放：全部(授權範圍)＋自己廠＋被授權的廠區/供應商，預設自己廠
+    sel.disabled = false;
+    sel.innerHTML = '';
+    const allOpt = document.createElement('option');
+    allOpt.value = ''; allOpt.textContent = '— 全部(授權範圍) All Granted —';
+    sel.appendChild(allOpt);
+    const ownSite = (s?.site && s.site !== '__nosite__') ? s.site : '';
+    const codes = [];
+    if (ownSite) codes.push(ownSite);
+    getViewScopes().forEach(c => { if (c && !codes.includes(c)) codes.push(c); });
+    const supNames = {};
+    try { (getSupplierList() || []).forEach(x => { if (x && x.code) supNames[x.code] = x.name || ''; }); } catch(e) {}
+    codes.forEach(code => {
+      const si = SITE_LIST.find(sl => sl.code === code);
+      const opt = document.createElement('option');
+      opt.value = code;
+      opt.textContent = si ? `${code} — ${si.name}`
+        : (code in supNames ? `🏢 ${code}${supNames[code] ? ' — ' + supNames[code] : ''}` : code);
+      sel.appendChild(opt);
+    });
+    if (ownSite && !sel.dataset.defApplied) sel.value = ownSite;
+    sel.dataset.defApplied = '1';
   } else if (!isAdminUser && s?.site && s.site !== '__nosite__') {
     // 非 Admin 廠區：鎖定廠區，只顯示自己的廠區
     sel.innerHTML = '';
@@ -4256,8 +4289,8 @@ function sortAndRenderHist() {
           style="border-color:#0f6e56;color:#0f6e56;margin:0">👁 查看</button>
         <button class="rec-act-btn" onclick="printRecord('${rec.key}')"
           style="border-color:#555;color:#555;margin:0">🖨 列印</button>
-        <button class="rec-act-btn rec-load" onclick="editRecord('${rec.key}')" style="margin:0;${(()=>{const c=ROLE_CAPS[getCurrentUserRole()]||{};return c.edit||c.submit?'':'display:none'})()}">✏ 編輯</button>
-        <button class="rec-act-btn rec-del"  onclick="deleteRecord('${rec.key}')" style="margin:0;${(()=>{const c=ROLE_CAPS[getCurrentUserRole()]||{};return c.del?'':'display:none'})()}">✕ 刪除</button>
+        <button class="rec-act-btn rec-load" onclick="editRecord('${rec.key}')" style="margin:0;${(()=>{const c=ROLE_CAPS[getCurrentUserRole()]||{};return (c.edit||c.submit)&&canTouchSite(rec.site)?'':'display:none'})()}">✏ 編輯</button>
+        <button class="rec-act-btn rec-del"  onclick="deleteRecord('${rec.key}')" style="margin:0;${(()=>{const c=ROLE_CAPS[getCurrentUserRole()]||{};return c.del&&canTouchSite(rec.site)?'':'display:none'})()}">✕ 刪除</button>
         </div>
       </td>
     `;
@@ -4393,7 +4426,7 @@ function toggleHistDetail(key) {
 
     const fno = recData.formNo || '—';
     const caps = ROLE_CAPS[getCurrentUserRole()] || ROLE_CAPS.query;
-    const actionBtns = caps.edit
+    const actionBtns = (caps.edit && canTouchSite(recData.site)) /* V143：跨廠記錄一律唯讀 */
       ? `<button onclick="editRecord('${key}')" style="height:28px;padding:0 14px;background:#1a4f8a;color:#fff;border:none;border-radius:4px;font-size:11px;cursor:pointer;font-family:Arial,sans-serif">✏ 帶入編輯</button>`
       : `<span style="font-size:11px;color:#888;background:#f4f6f9;padding:3px 10px;border-radius:4px;border:1px solid #ddd">🔒 唯讀 Read-only</span>`;
 
@@ -4459,7 +4492,7 @@ function toggleHistDetail(key) {
 
   // 依角色決定操作按鈕（動態讀取當前權限，不用快取）
   const caps = ROLE_CAPS[getCurrentUserRole()] || ROLE_CAPS.query;
-  const actionBtns = caps.edit
+  const actionBtns = (caps.edit && canTouchSite(recData.site)) // V143：跨廠記錄一律唯讀
     ? `<button onclick="editRecord('${key}')"
         style="height:28px;padding:0 14px;background:#1a4f8a;color:#fff;border:none;border-radius:4px;font-size:11px;cursor:pointer;font-family:Arial,sans-serif">
         ✏ 帶入編輯
@@ -4493,6 +4526,8 @@ function editRecord(key) {
   let recData;
   try { recData = JSON.parse(localStorage.getItem(key)); } catch(e) { return; }
   if (!recData) return;
+  // V143：跨廠資料唯讀——不是自己廠/供應商的記錄不給帶入編輯（DB 端 RLS 也擋，這裡是介面防呆）
+  if (!canTouchSite(recData.site)) { alert('跨廠區資料為唯讀，僅能查看'); return; }
 
   // CPK 記錄 → 跳到 CPK 分析頁
   if (key.startsWith('cpk_record_')) {
@@ -4646,6 +4681,8 @@ function printRecord(key) {
 }
 
 function deleteRecord(key) {
+  // V143：跨廠資料唯讀——不是自己廠/供應商的記錄不給刪（DB 端 RLS 也擋，這裡是介面防呆）
+  try { const _rd = JSON.parse(localStorage.getItem(key) || 'null'); if (_rd && !canTouchSite(_rd.site)) { alert('跨廠區資料為唯讀，無法刪除'); return; } } catch(e) {}
   if (!confirm('確定刪除此記錄？此操作無法復原。')) return;
 
   const recData = JSON.parse(localStorage.getItem(key) || 'null');
@@ -6829,6 +6866,76 @@ async function loadOmsQmsRoster() {
     return Array.isArray(d) ? d : [];
   } catch (e) { console.warn('讀 OMS 授權名單失敗（QMS 照常運作）:', e); return []; }
 }
+// ── V143：🌐 跨廠區查詢範圍（admin 設定；BU 動態跟隨、供應商可增選）──
+let _scopeEditEmail = null;
+async function loadOmsBuList() {
+  // 讀 OMS factories 的 BU→廠區 對照（唯讀、同一把公開金鑰，跟 loadOmsQmsRoster 同一條路）
+  try {
+    const r = await fetch(OMS_IDENTITY_URL + '/rest/v1/factories?select=code,name,bu&active=eq.true&order=bu,code&limit=1000',
+      { headers: { apikey: OMS_IDENTITY_KEY, Authorization: 'Bearer ' + OMS_IDENTITY_KEY } });
+    if (!r.ok) return [];
+    const rows = await r.json();
+    const byBu = {};
+    (Array.isArray(rows) ? rows : []).forEach(f => {
+      if (!f || !f.code) return;
+      const bu = f.bu || '（未分群）';
+      if (!byBu[bu]) byBu[bu] = [];
+      byBu[bu].push(f.code);
+    });
+    return Object.keys(byBu).map(bu => ({ bu, codes: byBu[bu] }));
+  } catch (e) { console.warn('讀 OMS BU 對照失敗:', e); return []; }
+}
+async function openScopeModal(email) {
+  _scopeEditEmail = email;
+  const modal  = document.getElementById('scope-modal');
+  const buBox  = document.getElementById('scope-bu-list');
+  const supBox = document.getElementById('scope-sup-list');
+  if (!modal || !buBox || !supBox) return;
+  const sc = (window._scopeByEmail || {})[String(email).toLowerCase()] || {};
+  const curBus = sc.bus || [], curSups = sc.sups || [];
+  document.getElementById('scope-user').textContent = email;
+  buBox.innerHTML = '<span style="color:#888">讀取 OMS 事業群清單中…</span>';
+  supBox.innerHTML = '';
+  document.getElementById('scope-status').textContent = '';
+  modal.style.display = 'flex';
+  const esc = s => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const cb = (group, val, labelHtml, checked) =>
+    `<label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+       <input type="checkbox" class="scope-cb-${group}" value="${esc(val)}" ${checked ? 'checked' : ''}
+         style="accent-color:#0f6e56;width:14px;height:14px;flex-shrink:0;cursor:pointer">${labelHtml}</label>`;
+  const buList = await loadOmsBuList();
+  let buHtml = cb('bu', '*', '<b>★ 全集團</b>　<span style="color:#888;font-size:11px">（所有事業群，動態含未來新增）</span>', curBus.includes('*'));
+  buList.forEach(g => {
+    buHtml += cb('bu', g.bu, `${esc(g.bu)}　<span style="color:#888;font-size:11px">（${g.codes.join('、')}）</span>`, curBus.includes(g.bu));
+  });
+  if (!buList.length) buHtml += '<span style="color:#c0392b;font-size:11px">⚠ 讀不到 OMS 事業群清單，稍後再開（不影響既有設定）</span>';
+  buBox.innerHTML = buHtml;
+  let sups = [];
+  try { sups = (getSupplierList() || []).filter(x => x && x.active !== false && x.code); } catch(e) {}
+  let supHtml = cb('sup', '*', '<b>★ 全部供應商</b>　<span style="color:#888;font-size:11px">（動態含未來新增）</span>', curSups.includes('*'));
+  sups.forEach(x => { supHtml += cb('sup', x.code, `${esc(x.code)}${x.name ? ' — ' + esc(x.name) : ''}`, curSups.includes(x.code)); });
+  supBox.innerHTML = supHtml;
+}
+function hideScopeModal() { const m = document.getElementById('scope-modal'); if (m) m.style.display = 'none'; _scopeEditEmail = null; }
+function _collectScope(group) {
+  return Array.from(document.querySelectorAll('.scope-cb-' + group + ':checked')).map(x => x.value);
+}
+async function saveScopeModal(clearAll) {
+  if (!_scopeEditEmail) return;
+  const bus  = clearAll ? [] : _collectScope('bu');
+  const sups = clearAll ? [] : _collectScope('sup');
+  const st = document.getElementById('scope-status');
+  if (st) { st.style.color = '#1a4f8a'; st.textContent = '儲存中…'; }
+  const r = await sbCallAdminFn('setScope', { email: _scopeEditEmail, view_bus: bus, view_sups: sups });
+  if (!r.ok) { if (st) { st.style.color = '#c0392b'; st.textContent = '❌ 儲存失敗：' + (r.msg || ''); } return; }
+  const sites = (r.data && r.data.view_sites) || [];
+  if (st) { st.style.color = '#0f6e56'; st.textContent = '✅ 已儲存，展開為：' + (sites.length ? sites.join('、') : '（無＝回到只看自己廠）') + '　※對方下次登入生效'; }
+  setTimeout(() => { hideScopeModal(); renderUserMgrTable(); }, 1200);
+}
+function clearScopeModal() {
+  if (!confirm('清空此人的跨廠區查詢範圍？（回到只看自己廠區）')) return;
+  saveScopeModal(true);
+}
 // 從 OMS 帶入一位 → 在 QMS 建立帳號（含 emp_id），之後可設權限
 async function importFromOms(empId, name, email, factory) {
   if (!email || !email.includes('@')) { alert('此人在 OMS 沒有有效 Email，無法建立 QMS 帳號'); return; }
@@ -6877,6 +6984,7 @@ async function renderUserMgrTable() {
       tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:14px;color:#c0392b;font-size:12px">載入帳號失敗：' + (lr.msg||'') + '</td></tr>';
       return;
     }
+    window._scopeByEmail = {}; // V143：email(小寫) → 跨廠查詢範圍（🌐 徽章與設定視窗用）
     lr.data.profiles.forEach(p => {
       if (p.account_type === 'supplier') return; // 供應商在另一張表管理
       const s = p.account_type === 'admin' ? '__nosite__' : (p.site_code || '__nosite__');
@@ -6885,6 +6993,8 @@ async function renderUserMgrTable() {
         role: (p.account_type === 'admin' ? 'admin' : (p.qms_role || 'inspector')),
         emp_id: p.emp_id || '',
         createdAt: p.created_at || '' };
+      if (p.email) window._scopeByEmail[String(p.email).toLowerCase()] =
+        { bus: p.view_bus || [], sups: p.view_sups || [], sites: p.view_sites || [] };
       if (p.emp_id) qmsEmpIds.add(p.emp_id);
       if (p.email)  qmsEmails.add(String(p.email).toLowerCase());
     });
@@ -6993,7 +7103,11 @@ async function renderUserMgrTable() {
            style="height:26px;padding:0 8px;font-size:10px;border:1px solid #1D9E75;color:#1D9E75;background:#fff;border-radius:3px;cursor:pointer;font-family:Arial,sans-serif;white-space:nowrap;margin-right:3px">▶ 啟用廠區</button>
          <button onclick="deleteUserConfirm('${r.site}','${r.key}','${r.name}')"
            style="height:26px;padding:0 8px;font-size:10px;border:1px solid #c0392b;color:#c0392b;background:#fff;border-radius:3px;cursor:pointer;font-family:Arial,sans-serif;white-space:nowrap">✕ Del</button>`
-      : `<button onclick="resetUserPassword('${r.site}','${r.key}','${r.name}')"
+      : `${r.role === 'admin' ? '' : (() => { /* V143：🌐 跨廠區查詢範圍設定鈕（admin 帳號本來就看全部，不用設） */
+           const sc = (window._scopeByEmail || {})[String(r.email || r.key).toLowerCase()] || {};
+           const has = (sc.bus && sc.bus.length) || (sc.sups && sc.sups.length);
+           return `<button onclick="openScopeModal('${String(r.email || r.key).replace(/'/g, '')}')" title="🌐 跨廠區查詢範圍"
+             style="height:26px;padding:0 7px;font-size:10px;border:1px solid ${has ? '#0f6e56' : '#bbb'};color:${has ? '#fff' : '#777'};background:${has ? '#0f6e56' : '#fff'};border-radius:3px;cursor:pointer;font-family:Arial,sans-serif;white-space:nowrap;margin-right:3px">🌐${has ? '✓' : ''}</button>`; })()}<button onclick="resetUserPassword('${r.site}','${r.key}','${r.name}')"
            style="height:26px;padding:0 8px;font-size:10px;border:1px solid #1a4f8a;color:#1a4f8a;background:#fff;border-radius:3px;cursor:pointer;font-family:Arial,sans-serif;white-space:nowrap;margin-right:3px">🔑 重設</button>
         <span id="sync_badge_${sid}" style="font-size:10px;color:#1d9e75;font-family:Arial"></span>
          <button onclick="deleteUserConfirm('${r.site}','${r.key}','${r.name}')"
@@ -7730,11 +7844,43 @@ function startTokenAutoRefresh() {
   _tokenTimer = setInterval(() => { sbRefreshToken(); }, 45 * 60 * 1000); // 每 45 分鐘續一次
 }
 
+// ── V143：跨廠區查詢範圍（唯讀）──
+// session.viewSites ＝ 這個人被授權可「查」的 廠區＋供應商 碼清單（由 EF 依 BU/供應商勾選展開）
+function getViewScopes() {
+  try { const s = getSession(); if (s && !s.isAdmin && !s.isSupplier && Array.isArray(s.viewSites)) return s.viewSites; } catch(e) {}
+  return [];
+}
+// 這筆記錄（site 欄＝廠區碼或供應商碼）是不是自己「可寫」的範圍——跨廠一律唯讀
+function canTouchSite(rsite) {
+  const s = getSession(); if (!s) return false;
+  if (s.isAdmin) return true;
+  if (!rsite) return true;                       // 無 site 的舊格式記錄：維持原行為
+  if (s.isSupplier) return rsite === (s.supplierCode || '');
+  return rsite === (s.site || '');
+}
+// 登入後向 EF 要求依「自己存的 BU/供應商勾選」重算可看清單 → BU 動態跟隨的落地
+// （EF 不收任何範圍參數，只能觸發重算 → 使用者無法自我擴權）
+async function sbRefreshViewScope() {
+  try {
+    const s = getSession();
+    if (!s || s.isAdmin || s.isSupplier || !s.token) return;
+    const hasAny = (Array.isArray(s.viewBus) && s.viewBus.length) || (Array.isArray(s.viewSups) && s.viewSups.length)
+                || (Array.isArray(s.viewSites) && s.viewSites.length);
+    if (!hasAny) return; // 沒設跨廠範圍的一般使用者：不多打一次 EF
+    const r = await sbCallAdminFn('refreshScope', {});
+    if (r.ok && r.data && Array.isArray(r.data.view_sites)) {
+      const cur = getSession();
+      if (cur) { cur.viewSites = r.data.view_sites; saveSession(cur); }
+    }
+  } catch(e) { console.warn('跨廠範圍重算失敗（沿用登入快照）:', e); }
+}
+
 // 🔐 _2CODE：登入後重新從雲端拉記錄（登入會清本機快取，需重拉才看得到同廠區/全部記錄）
 async function sbPostLoginRefresh() {
   try {
     if (!_sbReady) { try { _sbReady = await sbTestConnection(); } catch(e){} }
     if (!_sbReady) return;
+    await sbRefreshViewScope(); // V143：先重算跨廠範圍（動態跟隨），資料拉取才會照新範圍放行
     await Promise.allSettled([ sbPullAllRecords(), sbPullCpkRecords(), sbPullPartSpecs() ]);
     const activeTab = document.querySelector('.tab-pane.active')?.id;
     if (activeTab === 'tab-dash') renderDashboard();
@@ -7922,7 +8068,10 @@ async function doLogin() {
   try { localStorage.setItem(USER_DB_KEY, JSON.stringify(db)); } catch(e) {}
 
   enterSystem(realSite, p.name || email, email,
-    { token: r.token, refresh: r.refresh, uid: r.uid, role, mustChange: r.mustChange, isAdmin: false });
+    { token: r.token, refresh: r.refresh, uid: r.uid, role, mustChange: r.mustChange, isAdmin: false,
+      // V143：跨廠查詢範圍（登入快照；sbPostLoginRefresh 會再向 EF 重算一次＝動態跟隨）
+      viewBus: p.view_bus || null, viewSups: p.view_sups || null,
+      viewSites: Array.isArray(p.view_sites) ? p.view_sites : [] });
 }
 
 // ☁ Supabase 登入驗證
@@ -7960,7 +8109,10 @@ function enterSystem(site, userName, userKey, extra) {
   // v119: 保留首次登入時間（頁面重整時不重設，確保 7 天壽命計算正確）
   const _prev = getSession();
   const firstLoginAt = (_prev && _prev.firstLoginAt) ? _prev.firstLoginAt : new Date().toISOString();
-  saveSession(Object.assign({ site, userName, userKey, loginAt: new Date().toISOString(), firstLoginAt }, extra || {}));
+  // V143 修正：重整頁面走 checkSession→enterSystem「不帶 extra」，原寫法會把 session 蓋成只剩基本欄
+  // → token/refresh/角色/跨廠範圍全掉、重整後改用匿名金鑰拉資料（被 RLS 擋）看不到記錄。
+  // 改成「先鋪舊 session、再蓋新值」：重整保留全部欄位；正常登入時 extra 會覆寫所有身分欄位、不受舊值影響。
+  saveSession(Object.assign({}, _prev || {}, { site, userName, userKey, loginAt: new Date().toISOString(), firstLoginAt }, extra || {}));
   // 每次登入清除本機記錄快取，確保從 Supabase 拉取最新資料
   clearLocalCache();
   try { localStorage.setItem(SITE_KEY, site === '__nosite__' ? '' : site); } catch(e) {}
@@ -10348,6 +10500,28 @@ setInterval(() => { checkSessionTimeout(); }, 30 * 60 * 1000);
   </div>
 </div>
 
+
+<!-- ══ V143：🌐 跨廠區查詢範圍設定 ══ -->
+<div id="scope-modal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:9999;align-items:center;justify-content:center">
+  <div style="background:#fff;border-radius:10px;padding:22px;width:440px;max-width:92vw;max-height:86vh;overflow:auto;box-shadow:0 8px 30px rgba(0,0,0,0.3)">
+    <div style="font-size:15px;font-weight:700;color:#1a4f8a;margin-bottom:4px">🌐 跨廠區查詢範圍</div>
+    <div id="scope-user" style="font-size:11px;color:#666;margin-bottom:10px;font-family:'Courier New',monospace"></div>
+    <div style="font-size:11px;color:#856404;background:#fff3cd;border:1px solid #ffc107;border-radius:6px;padding:6px 10px;margin-bottom:12px;line-height:1.6">
+      勾選後此人可<b>唯讀查詢</b>該範圍的儀表板／歷史查詢／CPK；填表・修改・刪除仍只限自己廠區。<br>
+      勾「事業群」＝<b>動態跟隨</b>：該 BU 之後新增／導入 QMS 的廠，自動看得到。設定後<b>對方下次登入生效</b>。
+    </div>
+    <div style="font-size:12px;font-weight:700;color:#0f6e56;margin-bottom:6px">事業群（BU）</div>
+    <div id="scope-bu-list" style="display:flex;flex-direction:column;gap:5px;margin-bottom:14px;font-size:12px"></div>
+    <div style="font-size:12px;font-weight:700;color:#0f6e56;margin-bottom:6px">供應商</div>
+    <div id="scope-sup-list" style="display:flex;flex-direction:column;gap:5px;margin-bottom:12px;font-size:12px"></div>
+    <div id="scope-status" style="font-size:11px;min-height:16px;margin-bottom:8px"></div>
+    <div style="display:flex;gap:8px">
+      <button onclick="saveScopeModal()" style="flex:1;height:34px;background:#0f6e56;color:#fff;border:none;border-radius:4px;font-size:13px;font-weight:600;cursor:pointer;font-family:Arial,sans-serif">💾 儲存</button>
+      <button onclick="clearScopeModal()" style="height:34px;padding:0 12px;background:#fff;color:#c0392b;border:1px solid #c0392b;border-radius:4px;font-size:12px;cursor:pointer;font-family:Arial,sans-serif">清空範圍</button>
+      <button onclick="hideScopeModal()" style="height:34px;padding:0 14px;background:#fff;color:#555;border:1px solid #bbb;border-radius:4px;font-size:13px;cursor:pointer;font-family:Arial,sans-serif">取消</button>
+    </div>
+  </div>
+</div>
 
 <!-- ══ 自訂密碼輸入對話框 ══ -->
 <div id="custom-pwd-modal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:99999;display:none;align-items:center;justify-content:center;">

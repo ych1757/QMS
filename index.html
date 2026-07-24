@@ -1149,16 +1149,15 @@ async function sbInit() {
       </div>
     </div>
 
-    <!-- 管理員登入入口 -->
-    <div id="admin-login-section" style="margin-top:10px;border-top:1px solid #e8e8e8;padding-top:12px">
-      <div style="font-size:15px;margin-bottom:6px">🔐 <span style="font-size:13px;font-weight:600;color:#555">Admin 管理員</span></div>
-      <div id="admin-toggle-row" style="text-align:center">
+    <!-- 管理員登入入口（V148：比照 MHR 收成底部低調小按鈕，取代原本的獨立大區塊；驗證邏輯不變）-->
+    <div id="admin-login-section" style="margin-top:14px;border-top:1px solid #e8e8e8;padding-top:14px;text-align:center">
+      <div id="admin-toggle-row">
         <button onclick="toggleAdminLogin()"
-          style="background:#f4f6f9;border:1px solid #ddd;border-radius:6px;color:#555;font-size:13px;cursor:pointer;padding:8px 16px;width:100%;text-align:center">
-          Login 登入
+          style="background:#f8f9fa;border:1px solid #ccc;border-radius:6px;color:#333;font-size:13px;font-weight:600;cursor:pointer;padding:8px 20px;font-family:Arial,sans-serif">
+          🔑 管理員登入
         </button>
       </div>
-      <div id="admin-login-row" style="display:none;margin-top:8px">
+      <div id="admin-login-row" style="display:none;margin-top:10px;text-align:left">
         <input id="admin-pwd-input" type="password" placeholder="管理員密碼 Admin Password"
           class="login-input" style="margin-bottom:6px"
           onkeydown="if(event.key==='Enter') doAdminLogin()">
@@ -8228,7 +8227,7 @@ async function doLogin() {
   const p = r.profile;
   // 防呆：分頁與帳號類型須相符
   if (p.account_type === 'supplier') { showLoginErr('此為供應商帳號，請改用下方「供應商」登入'); return; }
-  if (p.account_type === 'admin')    { showLoginErr('管理員請改用下方「🔐 Admin 管理員」登入'); return; }
+  if (p.account_type === 'admin')    { showLoginErr('管理員請改用下方「🔑 管理員登入」'); return; }
   // 防呆：若有選組織，須與帳號實際所屬組織一致（選錯擋下）
   if (!siteHidden && site && p.site_code && site !== p.site_code) {
     showLoginErr('此帳號不屬於所選組織，請改選「' + p.site_code + '」'); return;

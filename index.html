@@ -567,7 +567,10 @@ async function sbSavePartSpec(partno, spec, scope) {
       scope:      resolvedScope,
       updated_at: new Date().toISOString(),
     };
-    const res = await fetch(SUPABASE_URL + '/rest/v1/part_specs?on_conflict=partno', { // V144：明帶合併鍵（原本隱性依賴主鍵）
+    // V145：合併鍵改 (partno,scope)——支援「同料號、各歸屬各自規格」並存（大永前段製程檢驗點≠信鋐）。
+    // 此寫法新舊 DB 結構皆相容：遷移前打在既有 UNIQUE(partno,scope)、遷移後打在新複合主鍵；
+    // 撞到「別人歸屬的同號列」會回錯誤（RLS 擋）→ 由下方失敗提示顯性化，不再假裝成功。
+    const res = await fetch(SUPABASE_URL + '/rest/v1/part_specs?on_conflict=partno,scope', {
       method: 'POST',
       headers: {
         'apikey': SUPABASE_KEY,
@@ -577,8 +580,17 @@ async function sbSavePartSpec(partno, spec, scope) {
       },
       body: JSON.stringify(payload)
     });
-    if (!res.ok) { const t = await res.text(); console.warn('sbSavePartSpec error:', t); }
-  } catch(e) { console.warn('sbSavePartSpec exception:', e); }
+    if (!res.ok) {
+      const t = await res.text();
+      console.warn('sbSavePartSpec error:', t);
+      // V145：儲存失敗不再靜默——之前失敗只寫 console、畫面照樣「✔ 已儲存」＝大永同號事件最大的坑
+      try { setMgrStatus('⚠ 料號 ' + partno + ' 雲端同步失敗，目前僅存在本機——請重試，若持續失敗請聯絡管理員', 'err'); } catch(e2) {}
+      try { showSyncBanner('⚠ 料號 ' + partno + ' 雲端同步失敗', 6000); } catch(e3) {}
+    }
+  } catch(e) {
+    console.warn('sbSavePartSpec exception:', e);
+    try { setMgrStatus('⚠ 料號 ' + partno + ' 雲端同步失敗（網路錯誤），目前僅存在本機——請重試', 'err'); } catch(e2) {}
+  }
 }
 
 // ══ V140：分頁撈取（Supabase/PostgREST 單次最多只回 1000 筆）══
@@ -2377,6 +2389,27 @@ function saveSpecDB(db, syncPn) {
 }
 
 let PART_SPECS = loadSpecDB();
+
+// ── V146：admin 料號「一歸屬一列」＋歸屬篩選 ──
+let pnScopeFilter = '';   // 歸屬篩選（''＝全部、'__shared__'＝共用、其餘＝廠區/供應商碼）
+let editingScope  = null; // admin 正在編輯的歸屬（配合 editingPn；非 admin 恆為 null）
+function listAllSpecRows() {
+  // 掃描本機所有料號庫 key → 每個「料號×歸屬」一列（admin 清單用；PART_SPECS 合併版仍留給表單帶出）
+  const rows = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (!k || !k.startsWith(SPEC_DB_KEY)) continue;
+    const scope = k === SPEC_DB_KEY ? '__shared__' : k.replace(SPEC_DB_KEY + '_', '');
+    try {
+      const db = JSON.parse(localStorage.getItem(k) || '{}');
+      Object.entries(db).forEach(([pn, spec]) => rows.push({ pn, scope, spec }));
+    } catch(e) {}
+  }
+  rows.sort((a, b) => a.pn === b.pn ? String(a.scope).localeCompare(String(b.scope)) : String(a.pn).localeCompare(String(b.pn)));
+  return rows;
+}
+function scopeLabel(scope) { return scope === '__shared__' ? '(共用)' : scope; }
+function setPnScopeFilter(v) { pnScopeFilter = v; renderPnList(); }
 
 function specsToRows(specs) {
   return specs.map(s => ({
@@ -4763,22 +4796,72 @@ function renderPnList() {
     }
   }
 
+  // ── V146：admin 歸屬篩選列（表格上方；非 admin 自動移除）──
+  const tableEl = tbody.closest('table');
+  let filterBar = document.getElementById('pn-scope-filterbar');
+  if (isAdm) {
+    if (!filterBar && tableEl && tableEl.parentElement) {
+      filterBar = document.createElement('div');
+      filterBar.id = 'pn-scope-filterbar';
+      filterBar.style.cssText = 'margin:0 0 8px;display:flex;align-items:center;gap:8px;font-size:12px';
+      tableEl.parentElement.insertBefore(filterBar, tableEl);
+    }
+    if (filterBar) {
+      let supList = [];
+      try { supList = (getSupplierList() || []).filter(x => x && x.active !== false && x.code); } catch(e) {}
+      const opts = [['', '— 全部 All —'], ['__shared__', '(共用) Shared']]
+        .concat((SITE_LIST || []).filter(x => x.active !== false).map(x => [x.code, x.code + ' — ' + x.name]))
+        .concat(supList.map(x => [x.code, '🏢 ' + x.code + (x.name ? ' — ' + x.name : '')]));
+      filterBar.innerHTML = '<span style="font-weight:700;color:#1a4f8a">歸屬篩選 Filter by Owner：</span>' +
+        '<select onchange="setPnScopeFilter(this.value)" style="height:28px;border:1px solid #ccc;border-radius:4px;font-size:12px;padding:0 6px">' +
+        opts.map(o => `<option value="${o[0]}" ${pnScopeFilter === o[0] ? 'selected' : ''}>${o[1]}</option>`).join('') +
+        '</select>';
+    }
+  } else if (filterBar) { filterBar.remove(); }
+
+  if (isAdm) {
+    // ── V146：一歸屬一列——同料號各歸屬各自一列，各編各刪、互不相蓋 ──
+    let rows = listAllSpecRows();
+    if (pnScopeFilter) rows = rows.filter(r => r.scope === pnScopeFilter);
+    if (!rows.length) {
+      tbody.innerHTML = `<tr><td colspan="${colCount}" class="empty-hint">${pnScopeFilter ? '此歸屬尚無料號' : '資料庫尚無料號，請在下方填寫後儲存'}</td></tr>`;
+      return;
+    }
+    const esc = v => String(v == null ? '' : v).replace(/'/g, '');
+    tbody.innerHTML = rows.map(r => {
+      const s = r.spec, pn = r.pn;
+      const isShared = r.scope === '__shared__';
+      return `<tr style="border-bottom:2px solid #e0e0e0">
+        <td style="font-weight:700;color:#1a4f8a">${pn}</td>
+        <td>${s.partname||''}</td>
+        <td><span class="pn-badge">${s.rev||''}</span></td>
+        <td><span class="pn-badge" style="background:#f0fff4;color:#1D6E50">${s.material||''}</span></td>
+        <td style="text-align:center"><span class="pn-badge">${(s.specs||[]).length} 項</span></td>
+        <td style="text-align:center"><span style="font-size:10px;font-weight:700;background:${isShared?'#fff3cd':'#e8f0fb'};color:${isShared?'#856404':'#1a4f8a'};border-radius:3px;padding:1px 6px">${scopeLabel(r.scope)}</span></td>
+        <td style="width:160px">
+          <div style="display:flex;gap:4px">
+            <button class="pn-btn pn-btn-edit" style="white-space:nowrap" onclick="editPn('${esc(pn)}','${esc(r.scope)}')">✏ 編輯</button>
+            <button class="pn-btn pn-btn-del" style="white-space:nowrap" onclick="deletePn('${esc(pn)}','${esc(r.scope)}')">🗑 刪除</button>
+          </div>
+        </td>
+      </tr>`;
+    }).join('');
+    return;
+  }
+
+  // ── 非 admin：維持原樣（自己歸屬、一號一列）──
   if (!keys.length) {
     tbody.innerHTML = `<tr><td colspan="${colCount}" class="empty-hint">資料庫尚無料號，請在下方填寫後儲存</td></tr>`;
     return;
   }
   tbody.innerHTML = keys.map(pn => {
     const s = PART_SPECS[pn];
-    const ownerCol = isAdm
-      ? `<td style="text-align:center"><span style="font-size:10px;font-weight:700;background:#e8f0fb;color:#1a4f8a;border-radius:3px;padding:1px 6px">${s._owner||'—'}</span></td>`
-      : '';
     return `<tr style="border-bottom:2px solid #e0e0e0">
       <td style="font-weight:700;color:#1a4f8a">${pn}</td>
       <td>${s.partname||''}</td>
       <td><span class="pn-badge">${s.rev||''}</span></td>
       <td><span class="pn-badge" style="background:#f0fff4;color:#1D6E50">${s.material||''}</span></td>
       <td style="text-align:center"><span class="pn-badge">${(s.specs||[]).length} 項</span></td>
-      ${ownerCol}
       <td style="width:160px">
         <div style="display:flex;gap:4px">
           <button class="pn-btn pn-btn-edit" style="white-space:nowrap" onclick="editPn('${pn}')">✏ 編輯</button>
@@ -4791,6 +4874,7 @@ function renderPnList() {
 
 function clearEditor() {
   editingPn = null;
+  editingScope = null; // V146
   const sp = document.getElementById('scope-panel');
   if (sp) sp.style.display = 'none';
   document.getElementById('editor-title').textContent = 'STEP 2　填寫料號基本資料 Part Info';
@@ -4807,10 +4891,17 @@ function clearEditor() {
   ['sc1','sc2','sc3'].forEach(id => document.getElementById(id).classList.remove('active-step'));
 }
 
-function editPn(pn) {
+function editPn(pn, scope) {
   editingPn = pn;
-  const s = PART_SPECS[pn];
-  document.getElementById('editor-title').textContent = `STEP 2　編輯料號 ${pn}`;
+  editingScope = (isAdmin() && scope) ? scope : null; // V146：admin 記住「編的是哪個歸屬」
+  let s = PART_SPECS[pn];
+  if (editingScope) {
+    // V146：讀「該歸屬」那一份內容（多歸屬並存後，同號各家內容可能不同）
+    const storeKey = editingScope === '__shared__' ? SPEC_DB_KEY : SPEC_DB_KEY + '_' + editingScope;
+    try { const db = JSON.parse(localStorage.getItem(storeKey) || '{}'); if (db[pn]) s = db[pn]; } catch(e) {}
+  }
+  if (!s) return;
+  document.getElementById('editor-title').textContent = `STEP 2　編輯料號 ${pn}` + (editingScope ? `（歸屬：${scopeLabel(editingScope)}）` : '');
   document.getElementById('e-partno').value    = pn;
   document.getElementById('e-partno').readOnly = true;
   document.getElementById('e-partno').style.background = '#f0f5ff';
@@ -4821,7 +4912,7 @@ function editPn(pn) {
   specRows = (s.specs||[]).map(r=>({...r}));
   renderSpecRows();
   // ── 歸屬設定（Admin 才顯示）──
-  renderScopeCheckboxes(pn);
+  renderScopeCheckboxes(pn, editingScope);
   setMgrStatus(`正在編輯料號 ${pn}，修改後按「儲存料號」`, '');
   document.getElementById('sc2').classList.add('active-step');
   document.getElementById('sc3').classList.add('active-step');
@@ -4829,13 +4920,18 @@ function editPn(pn) {
 }
 
 // ── 歸屬設定：渲染 Checkbox 列表 ──
-function renderScopeCheckboxes(pn) {
+function renderScopeCheckboxes(pn, onlyScope) {
   const panel = document.getElementById('scope-panel');
   if (!isAdmin()) { panel.style.display = 'none'; return; }
   panel.style.display = '';
 
-  // 找出此料號目前存在哪些 scope key
+  // 找出要預勾的歸屬
+  // V146：從「歸屬列」進來編輯時只預勾那一個——儲存只寫回該歸屬，不會把同一份內容蓋到其他歸屬
+  //（要把同一份發佈到多個歸屬＝自己手動加勾，屬刻意行為）
   const currentScopes = new Set();
+  if (onlyScope) {
+    currentScopes.add(onlyScope);
+  } else {
   for (let i = 0; i < localStorage.length; i++) {
     const k = localStorage.key(i);
     if (!k || !k.startsWith(SPEC_DB_KEY)) continue;
@@ -4847,10 +4943,13 @@ function renderScopeCheckboxes(pn) {
       }
     } catch(e) {}
   }
+  }
 
-  // 建立 checkbox 清單：廠區 + 供應商 + 共用
+  // 建立 checkbox 清單：廠區 + 供應商（+ 共用僅限維護既有共用列時顯示）
+  // V146-1：「共用」不再開放新設（使用者 2026-07-24 定案：除內建示範外不用共用、各歸屬各自維護規格）
+  //         僅在「編輯既有共用列」（onlyScope='__shared__'）時顯示共用選項，讓內建示範仍可維護
   const allScopes = [
-    { key: '__shared__', label: '(共用) 所有人' },
+    ...(onlyScope === '__shared__' ? [{ key: '__shared__', label: '(共用) 所有人' }] : []),
     ...SITE_LIST.filter(s => s.active !== false).map(s => ({ key: s.code, label: s.code + ' ' + s.name })),
     ...getSupplierList().filter(s => s.active !== false).map(s => ({ key: s.code, label: s.code + ' ' + s.name }))
   ];
@@ -4873,7 +4972,7 @@ function getSelectedScopes() {
   return Array.from(box.querySelectorAll('input[type=checkbox]:checked')).map(cb => cb.value);
 }
 
-function deletePn(pn) {
+function deletePn(pn, scope) {
   const _adm = isAdmin();
   // 🔒 共用料號只有 admin 能刪：非 admin 若該料號存在於「共用」scope，擋下並提示
   if (!_adm) {
@@ -4883,6 +4982,26 @@ function deletePn(pn) {
       setMgrStatus(`料號 ${pn} 為共用料號，僅管理員可刪除，請洽管理員`, 'err');
       return;
     }
+  }
+  // ── V146：admin 從「歸屬列」刪——只刪該歸屬那一份（本機＋雲端），不動其他家的同號料號 ──
+  if (_adm && scope) {
+    if (!confirm(`確定刪除料號 ${pn}（歸屬：${scopeLabel(scope)}）？此操作無法復原。`)) return;
+    const storeKey = scope === '__shared__' ? SPEC_DB_KEY : SPEC_DB_KEY + '_' + scope;
+    try {
+      const db = JSON.parse(localStorage.getItem(storeKey) || '{}');
+      if (db[pn]) { delete db[pn]; localStorage.setItem(storeKey, JSON.stringify(db)); }
+    } catch(e) {}
+    if (_sbReady) {
+      const cloudScope = scope === '__shared__' ? 'shared' : scope;
+      fetch(SUPABASE_URL + '/rest/v1/part_specs?partno=eq.' + encodeURIComponent(pn) + '&scope=eq.' + encodeURIComponent(cloudScope),
+        { method: 'DELETE', headers: { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer() } }
+      ).catch(e => console.warn('料號雲端刪除失敗:', pn, e));
+    }
+    PART_SPECS = loadAllSpecDB();
+    renderPnList();
+    if (editingPn === pn) clearEditor();
+    setMgrStatus(`已刪除料號 ${pn}（${scopeLabel(scope)}）`, 'ok');
+    return;
   }
   if (!confirm(`確定刪除料號 ${pn}？此操作無法復原。`)) return;
 
@@ -4986,30 +5105,16 @@ function savePartSpec() {
     }))
   };
   if (isAdmin()) {
-    // Admin：依歸屬設定寫入／移除對應的 scope key
+    // Admin：依歸屬設定寫入對應的 scope key
     const selectedScopes = getSelectedScopes();
     if (selectedScopes && selectedScopes.length > 0) {
-      // 先清除所有 scope 中此料號的資料
-      for (let i = 0; i < localStorage.length; i++) {
-        const k = localStorage.key(i);
-        if (!k || !k.startsWith(SPEC_DB_KEY)) continue;
-        try {
-          const db = JSON.parse(localStorage.getItem(k) || '{}');
-          if (db[pn]) { delete db[pn]; localStorage.setItem(k, JSON.stringify(db)); }
-        } catch(e) {}
-      }
-      // 再寫入勾選的 scope（修正 v98：每個 scope 分別同步到 Supabase，帶入正確 scope 欄位）
-      // Supabase part_specs 用 partno+scope 唯一，多個 scope 各存一筆
-      // 先刪除 Supabase 中此料號所有舊 scope 記錄
-      fetch(SUPABASE_URL + '/rest/v1/part_specs?partno=eq.' + encodeURIComponent(pn),
-        { method: 'DELETE', headers: { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer() } }
-      ).then(() => {
-        // 再依新勾選的 scope 逐一新增
-        selectedScopes.forEach(scope => {
-          sbSavePartSpec(pn, PART_SPECS[pn], scope === '__shared__' ? 'shared' : scope)
-            .catch(e => console.warn('料號同步失敗:', pn, scope, e));
-        });
-      }).catch(e => console.warn('料號舊 scope 清除失敗:', e));
+      // V146：只「寫入勾選的歸屬」，不再先全域刪除——
+      // 舊寫法「刪光此料號所有歸屬 → 重建勾選的」在多歸屬並存的世界，會把別家（如大永）的同號規格整包蓋掉/刪掉。
+      // 新語意：儲存＝更新勾選歸屬的內容；要移除某歸屬的料號 → 用清單上「該歸屬那一列」的 🗑 刪除。
+      selectedScopes.forEach(scope => {
+        sbSavePartSpec(pn, PART_SPECS[pn], scope === '__shared__' ? 'shared' : scope)
+          .catch(e => console.warn('料號同步失敗:', pn, scope, e));
+      });
 
       selectedScopes.forEach(scope => {
         const storeKey = scope === '__shared__' ? SPEC_DB_KEY : SPEC_DB_KEY + '_' + scope;

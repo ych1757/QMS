@@ -1280,7 +1280,31 @@ async function sbInit() {
         <option>日班</option><option>中班</option><option>夜班</option>
       </select>
     </div>
-    <div class="info-cell field-ipqc" id="f-process-name"><label>Process 工序名稱:</label><input id="h-process" placeholder="製程名稱"></div>
+    <div class="info-cell field-ipqc" id="f-process-name"><label>製程 Process:</label><input id="h-process" list="proc-datalist" placeholder="選擇或輸入製程"></div>
+    <!-- V147:製程建議清單(參照 MHR 製程主檔 20 站;datalist=下拉建議＋可自由輸入,不鎖清單。
+         MHR 製程主檔尚未上雲(已探測),故先內建;日後 MHR 上雲改動態讀=單一正本 -->
+    <datalist id="proc-datalist">
+      <option value="DC 壓鑄 Die Casting"></option>
+      <option value="CN 機加 CNC"></option>
+      <option value="GR 打磨 Grinding"></option>
+      <option value="BL 珠擊 Shot Blasting"></option>
+      <option value="VB 振研 Vibratory"></option>
+      <option value="TH 攻牙 Tapping"></option>
+      <option value="DP 點膠 Dispensing"></option>
+      <option value="PR 印刷 Printing"></option>
+      <option value="LM 鐳雕 Laser Marking"></option>
+      <option value="HT 熱處理 Heat Treatment"></option>
+      <option value="LK 測漏 Leak Test"></option>
+      <option value="IM 射包 Insert Molding"></option>
+      <option value="EP 電鍍 Electroplating"></option>
+      <option value="ED 電著 E-coating"></option>
+      <option value="AN 陽極 Anodizing"></option>
+      <option value="IP 含浸 Impregnation"></option>
+      <option value="CT 皮膜 Coating"></option>
+      <option value="PT 烤漆 Painting"></option>
+      <option value="AS 組立 Assembly"></option>
+      <option value="PK 包裝 Packing"></option>
+    </datalist>
 
     <!-- FQC 專屬 -->
     <div class="info-cell field-fqc" id="f-wo-fqc"><label>Work Order 工單號:</label><input id="h-wo-fqc" placeholder="完工工單號"></div>
@@ -1668,6 +1692,12 @@ async function sbInit() {
           <option value="CPK">📊 CPK 分析</option>
         </select>
       </div>
+      <div class="ef" style="flex:1;min-width:140px">
+        <label>製程 Mfg Process</label>
+        <select id="f-procname" style="width:100%">
+          <option value="">全部</option>
+        </select>
+      </div>
       <div class="ef" style="flex:1;min-width:130px">
         <label>料號 Part No.</label>
         <input id="f-pn" placeholder="料號關鍵字" style="width:100%">
@@ -1715,6 +1745,7 @@ async function sbInit() {
             <th data-sort="formno" onclick="sortHist(this,'formno')" style="white-space:nowrap">表單編號 Form No.</th>
             <th data-sort="site" onclick="sortHist(this,'site')" style="white-space:nowrap">廠區</th>
             <th data-sort="process" onclick="sortHist(this,'process')" style="white-space:nowrap">工序</th>
+            <th data-sort="procName" onclick="sortHist(this,'procName')" style="white-space:nowrap">製程</th>
             <th data-sort="partno" onclick="sortHist(this,'partno')" style="white-space:nowrap">料號 Part No.</th>
             <th style="white-space:nowrap">品名</th>
             <th style="white-space:nowrap">檢驗員</th>
@@ -1726,7 +1757,7 @@ async function sbInit() {
           </tr>
         </thead>
         <tbody id="hist-tbody">
-          <tr><td colspan="12" class="hist-empty">請按「🔎 查詢」載入記錄</td></tr>
+          <tr><td colspan="13" class="hist-empty">請按「🔎 查詢」載入記錄</td></tr>
         </tbody>
       </table>
     </div>
@@ -3164,7 +3195,7 @@ function exportXLSX() {
     extraRows.push(['送貨單號 DN:', safe('h-dn'), '', '材料 Material:', mat]);
   } else if (currentProcess === 'IPQC1' || currentProcess === 'IPQC2') {
     extraRows.push(['工單號 Work Order:', safe('h-workorder'), '', '機台 Machine:', safe('h-machine')]);
-    extraRows.push(['班別 Shift:', safe('h-shift'), '', '工序 Process:', safe('h-process')]);
+    extraRows.push(['班別 Shift:', safe('h-shift'), '', '製程 Process:', safe('h-process')]);
   } else if (currentProcess === 'FQC') {
     extraRows.push(['工單號 Work Order:', safe('h-wo-fqc'), '', '完工數量 Qty:', safe('h-finqty')]);
   } else if (currentProcess === 'OQC') {
@@ -3548,7 +3579,7 @@ function switchTab(tab) {
     }
   });
   if (tab==='mgr')  { PART_SPECS = isAdmin() ? loadAllSpecDB() : loadSpecDB(); renderPnList(); }
-  if (tab==='hist') { cleanDuplicateRecords(); initHistSiteFilter(); runHistQuery(); }
+  if (tab==='hist') { cleanDuplicateRecords(); initHistSiteFilter(); initHistProcFilter(); runHistQuery(); }
   if (tab==='dash') { renderDashboard(); }
   if (tab==='sys')  { renderSysTab(); }
   if (tab==='cpk')  { cpkInitTab(); }
@@ -3580,7 +3611,7 @@ function switchTabForce(tab) {
     }
   });
   if (tab==='mgr')  { PART_SPECS = isAdmin() ? loadAllSpecDB() : loadSpecDB(); renderPnList(); }
-  if (tab==='hist') { cleanDuplicateRecords(); initHistSiteFilter(); runHistQuery(); }
+  if (tab==='hist') { cleanDuplicateRecords(); initHistSiteFilter(); initHistProcFilter(); runHistQuery(); }
   if (tab==='dash') { renderDashboard(); }
   if (tab==='sys')  { renderSysTab(); }
   if (tab==='cpk')  { cpkInitTab(); }
@@ -4054,6 +4085,7 @@ function getAllRecords() {
           cpkPass:   pts.filter(p => { const s = cpkCalcStats ? cpkCalcStats(p.values, p.usl, p.lsl, p.nom) : null; return s?.cpk != null && s.cpk >= 1.33; }).length,
           cpkTotal:  pts.length,
           isRecord:  true,
+          procName:  '', // V147:CPK 記錄無製程欄
           formNo:    d.formNo || `${d.site?d.site+'-':''}CPK-${(d.date||'').replace(/-/g,'').replace(/^20/,'')}-0001`,
           site:      d.site || '',
           supplierCode: d.supplierCode || (_supCodes.has(d.site) ? d.site : '')
@@ -4097,6 +4129,7 @@ function getAllRecords() {
         savedBy:   d.savedBy          || '',
         updatedBy: d.updatedBy        || '',
         overall,
+        procName:  (d.header && d.header.process_name) || '', // V147:製程(沿用既有 header.process_name,舊記錄零遷移)
         cpkPass:   cpkStats.pass,
         cpkTotal:  cpkStats.total,
         isRecord:  !!d.isRecord,
@@ -4193,24 +4226,48 @@ function initHistSiteFilter() {
   }
 }
 
+// V147:製程篩選選項——標準清單(同填表的建議清單)＋記錄中實際出現過的其他值(自由輸入的也篩得到)
+function initHistProcFilter() {
+  const sel = document.getElementById('f-procname');
+  if (!sel) return;
+  const cur = sel.value;
+  const esc = v => String(v == null ? '' : v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+  const std = Array.from(document.querySelectorAll('#proc-datalist option')).map(o => o.value);
+  const seen = new Set(std);
+  const extras = [];
+  try {
+    getAllRecords().forEach(r => {
+      const p = (r.procName || '').trim();
+      if (p && !seen.has(p)) { seen.add(p); extras.push(p); }
+    });
+  } catch(e) {}
+  sel.innerHTML = '<option value="">全部</option>' +
+    std.map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join('') +
+    (extras.length ? '<option disabled>── 記錄中的其他值 ──</option>' +
+      extras.sort().map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join('') : '');
+  if (cur) sel.value = cur;
+}
+
 function runHistQuery() {
   const fKeyword = document.getElementById('f-keyword')?.value.trim().toLowerCase() || '';
   const fSite    = document.getElementById('f-site')?.value     || '';
   const fFormNo  = document.getElementById('f-formno')?.value.trim().toUpperCase() || '';
   const fProc    = document.getElementById('f-proc')?.value     || '';
+  const fProcName= document.getElementById('f-procname')?.value || ''; // V147
   const fPn      = document.getElementById('f-pn')?.value.trim().toLowerCase() || '';
   const fDateFrom= document.getElementById('f-date-from')?.value || '';
   const fDateTo  = document.getElementById('f-date-to')?.value   || '';
   const fResult  = document.getElementById('f-result')?.value   || '';
   let all = getAllRecords();
   if (fKeyword)  all = all.filter(r => {
-    const hay = [r.formNo, r.partno, r.partname, r.inspector, r.supplier]
+    const hay = [r.formNo, r.partno, r.partname, r.inspector, r.supplier, r.procName]
       .map(x => (x||'').toString().toLowerCase()).join(' ');
     return hay.includes(fKeyword);
   });
   if (fSite)     all = all.filter(r => r.site === fSite);
   if (fFormNo)   all = all.filter(r => (r.formNo||'').toUpperCase().includes(fFormNo));
   if (fProc)     all = all.filter(r => r.process === fProc);
+  if (fProcName) all = all.filter(r => (r.procName||'') === fProcName); // V147:製程篩選
   if (fPn)       all = all.filter(r => (r.partno||'').toLowerCase().includes(fPn) || (r.partname||'').toLowerCase().includes(fPn));
   if (fDateFrom) all = all.filter(r => r.date >= fDateFrom);
   if (fDateTo)   all = all.filter(r => r.date <= fDateTo);
@@ -4220,7 +4277,7 @@ function runHistQuery() {
 }
 
 function clearHistFilter() {
-  ['f-keyword','f-site','f-formno','f-proc','f-pn','f-date-from','f-date-to','f-result'].forEach(id => {
+  ['f-keyword','f-site','f-formno','f-proc','f-procname','f-pn','f-date-from','f-date-to','f-result'].forEach(id => {
     const el = document.getElementById(id);
     if (!el) return;
     el.value = '';
@@ -4286,7 +4343,7 @@ function sortAndRenderHist() {
 
   const tbody = document.getElementById('hist-tbody');
   if (!sorted.length) {
-    tbody.innerHTML = `<tr><td colspan="12" class="hist-empty">沒有符合條件的記錄</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="13" class="hist-empty">沒有符合條件的記錄</td></tr>`;
     return;
   }
 
@@ -4317,6 +4374,7 @@ function sortAndRenderHist() {
       <td style="text-align:left;white-space:nowrap">${formNoDisplay}</td>
       <td title="${siteName}">${siteBadge}</td>
       <td><span class="hist-result-badge" style="background:${cfg.badgeBg||'#eee'};color:${cfg.badgeColor||'#333'}">${cfg.badge||rec.process||'—'}</span></td>
+      <td style="font-size:11px;white-space:nowrap">${rec.procName||'—'}</td>
       <td style="font-weight:700;color:#1a4f8a;white-space:nowrap">${rec.partno||'—'}</td>
       <td style="font-size:11px">${rec.partname||'—'}</td>
       <td>${rec.inspector||'—'}</td>
@@ -4477,7 +4535,7 @@ function toggleHistDetail(key) {
     const cpkRow = document.createElement('tr');
     cpkRow.id = detailId;
     cpkRow.className = 'hist-detail';
-    cpkRow.innerHTML = `<td colspan="12">
+    cpkRow.innerHTML = `<td colspan="13">
       <div class="hist-detail-inner">
         <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;flex-wrap:wrap">
           <span style="font-size:13px;font-weight:700;color:#1a4f8a;font-family:'Courier New',monospace;background:#dce6f1;padding:3px 10px;border-radius:4px">📊 ${fno}</span>
@@ -4545,7 +4603,7 @@ function toggleHistDetail(key) {
         🔒 唯讀 Read-only
        </span>`;
 
-  detailRow.innerHTML = `<td colspan="12">
+  detailRow.innerHTML = `<td colspan="13">
     <div class="hist-detail-inner">
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;flex-wrap:wrap">
         <span style="font-size:13px;font-weight:700;color:#1a4f8a;font-family:'Courier New',monospace;background:#dce6f1;padding:3px 10px;border-radius:4px">📋 ${fno}</span>
@@ -5193,7 +5251,7 @@ const I18N = {
     'lbl-workorder':'Work Order 工單號:',
     'lbl-machine':  'Machine 機台:',
     'lbl-shift':    'Shift 班別:',
-    'lbl-process':  'Process 工序名稱:',
+    'lbl-process':  '製程 Process:',
     'lbl-wo-fqc':   'Work Order 工單號:',
     'lbl-finqty':   'Qty 完工數量:',
     'lbl-customer': 'Customer 客戶:',
@@ -5370,7 +5428,7 @@ const I18N = {
     'lbl-workorder':'Work Order 工单号:',
     'lbl-machine':  'Machine 机台:',
     'lbl-shift':    'Shift 班别:',
-    'lbl-process':  'Process 工序名称:',
+    'lbl-process':  '制程 Process:',
     'lbl-wo-fqc':   'Work Order 工单号:',
     'lbl-finqty':   'Qty 完工数量:',
     'lbl-customer': 'Customer 客户:',
@@ -5533,7 +5591,7 @@ const I18N = {
     'lbl-workorder':'Số lệnh sản xuất WO:',
     'lbl-machine':  'Máy móc Machine:',
     'lbl-shift':    'Ca làm việc Shift:',
-    'lbl-process':  'Tên công đoạn Process:',
+    'lbl-process':  'Công đoạn Process:',
     'lbl-wo-fqc':   'Số lệnh sản xuất WO:',
     'lbl-finqty':   'Số lượng hoàn thành Qty:',
     'lbl-customer': 'Khách hàng Customer:',
@@ -5696,7 +5754,7 @@ const I18N = {
     'lbl-workorder':'เลขที่ใบสั่งงาน WO:',
     'lbl-machine':  'เครื่องจักร Machine:',
     'lbl-shift':    'กะ Shift:',
-    'lbl-process':  'ชื่อกระบวนการ Process:',
+    'lbl-process':  'กระบวนการ Process:',
     'lbl-wo-fqc':   'เลขที่ใบสั่งงาน WO:',
     'lbl-finqty':   'จำนวนสำเร็จ Qty:',
     'lbl-customer': 'ลูกค้า Customer:',

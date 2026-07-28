@@ -1066,43 +1066,34 @@ async function sbInit() {
 <div class="login-logo">
       <div style="text-align:center;margin-bottom:12px"><img src="data:image/jpeg;base64,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" alt="Syncmold" style="max-width:220px;height:auto"></div>
       <div class="login-logo-title">QMS 品質管理系統</div>
-      <div class="login-logo-sub">FAI / Cpk 數位檢驗表單　v1.0</div>
+      <div class="login-logo-sub">Quality Management System</div>
     </div>
 
-    <!-- 回 SyncHub 入口（登入畫面，無未存檔資料，直接回） -->
-    <div style="text-align:center;margin:-2px 0 14px">
-      <button onclick="location.href='https://ych1757.github.io/HUB/'" style="height:28px;padding:0 14px;font-size:12px;font-weight:600;border:1px solid #1a4f8a;background:#fff;color:#1a4f8a;border-radius:5px;cursor:pointer;font-family:Arial,sans-serif">🏠 回 SyncHub 入口</button>
-    </div>
 
-    <!-- 組織登入 -->
-    <div class="login-section">
-      <div style="font-size:15px;margin-bottom:6px">🏭 <span style="font-size:13px;font-weight:700;color:#1a4f8a">Site 組織</span></div>
-      <button onclick="toggleSiteLogin()"
-        style="background:#e8f0fb;border:1px solid #c0d4ea;border-radius:6px;color:#1a4f8a;font-size:13px;font-weight:600;cursor:pointer;padding:8px 16px;width:100%;text-align:center">
-        Login 登入
-      </button>
-    </div>
-
-    <div id="site-login-row" style="display:none">
-    <!-- 組織選擇 -->
-    <div class="login-section">
+    <!-- V150：比照 MHR＝單一入口，一進畫面就能輸入，不用先選組織／不用先按 Login。
+         組織下拉隱藏保留（供程式沿用，值恆為空＝由帳號 profile.site_code 決定廠區）。 -->
+    <div id="site-login-row">
+    <!-- 組織選擇（V150 隱藏：身分一律由帳號決定，選單只是舊防呆）-->
+    <div class="login-section" style="display:none">
       <label class="login-label">🏭 Site 組織</label>
       <select id="login-site" class="login-select" onchange="onLoginSiteChange()">
         <option value="">— Select Org 選擇組織 —</option>
       </select>
     </div>
 
-    <!-- Email 輸入 -->
-    <div class="login-section" id="login-email-section" style="display:none">
-      <label class="login-label">📧 Email 帳號</label>
-      <input id="login-email-input" type="email" placeholder="your@email.com"
+    <!-- 工號 / Email 輸入（V149：比照 MHR，內部員工可直接打工號；type 由 email 改 text 才不會被瀏覽器擋）-->
+    <div class="login-section" id="login-email-section">
+      <label class="login-label">👤 工號 / Email</label>
+      <input id="login-email-input" type="text" placeholder="工號 或 your@email.com"
         class="login-input"
-        oninput="clearLoginErr()"
+        oninput="clearLoginErr(); onEmpIdInput()"
         onkeydown="if(event.key==='Enter') document.getElementById('login-password-input')?.focus()">
+      <!-- V151：即時工號回饋（比照 MHR）——打完工號就顯示「✓ 姓名 · Email」，打錯當下就知道 -->
+      <div id="empid-hint" style="font-size:11.5px;margin-top:5px;min-height:16px;line-height:1.5"></div>
     </div>
 
     <!-- 密碼輸入 -->
-    <div class="login-section" id="login-password-section" style="display:none">
+    <div class="login-section" id="login-password-section">
       <label class="login-label">🔒 Password 密碼</label>
       <input id="login-password-input" type="password" placeholder="Password 密碼"
         class="login-input"
@@ -1111,11 +1102,15 @@ async function sbInit() {
     </div>
 
     <div class="login-err" id="login-err"></div>
-    <button class="login-btn" onclick="doLogin()" id="login-btn" style="display:none;margin-top:8px">▶ Enter 進入系統</button>
+    <button class="login-btn" onclick="doLogin()" id="login-btn" style="margin-top:8px">▶ Enter 進入系統</button>
+    <div style="font-size:11px;color:#666;line-height:1.7;margin-top:10px">
+      <b>集團內部</b>可直接打工號；<b>外部供應商</b>請用 Email。
+    </div>
     </div>
 
-    <!-- 供應商登入入口 -->
-    <div id="supplier-login-section" style="margin-top:16px;border-top:1px solid #e8e8e8;padding-top:12px">
+    <!-- 供應商登入入口（V151：全整合單一入口後隱藏——供應商改由上方同一個欄位登入，
+         系統依帳號 profile.account_type 自動判斷是廠區還是供應商。此區塊保留供程式沿用/日後還原。）-->
+    <div id="supplier-login-section" style="display:none;margin-top:16px;border-top:1px solid #e8e8e8;padding-top:12px">
       <div style="font-size:15px;margin-bottom:6px">🏢 <span style="font-size:13px;font-weight:600;color:#0f6e56">Supplier 供應商</span></div>
       <div style="text-align:center">
         <button onclick="toggleSupplierLogin()"
@@ -1163,6 +1158,12 @@ async function sbInit() {
           onkeydown="if(event.key==='Enter') doAdminLogin()">
         <button class="login-btn" onclick="doAdminLogin()" style="background:#555;height:36px;font-size:13px">🔐 管理員進入</button>
       </div>
+    </div>
+
+    <!-- 回 SyncHub（V151：比照 MHR 版面＝移到最底部、文字連結樣式，與分隔線相隔）-->
+    <div style="text-align:center;margin-top:14px;border-top:1px solid #e8e8e8;padding-top:14px">
+      <a href="https://ych1757.github.io/HUB/"
+        style="font-size:13px;color:#1a4f8a;text-decoration:none;font-weight:600">← 回 SyncHub 信錦智匯</a>
     </div>
 
     <div class="login-footer" style="display:none">Powered by Anthropic Claude　｜　QMS v1.0</div>
@@ -8069,16 +8070,20 @@ function initLoginScreen() {
   if (!sel) return;
   const siteRow = document.getElementById('site-login-row');
 
-  if (SITE_LIST.length === 0) {
-    // 未設定廠區：自動展開 site-login-row，隱藏組織選單，直接顯示 email/密碼
+  // V150：單一入口（比照 MHR）——不再「先選組織、再展開輸入」；組織下拉隱藏保留（值恆空），
+  //       廠區一律由登入後的 profile.site_code 決定（本來就是如此，下拉只是舊防呆）。
+  if (true) {
     if (siteRow) siteRow.style.display = '';
     const siteSection = sel.closest('.login-section');
     if (siteSection) siteSection.style.display = 'none';
+    sel.innerHTML = '<option value=""></option>';
+    sel.value = '';
     document.getElementById('login-email-section').style.display    = '';
     document.getElementById('login-password-section').style.display = '';
     document.getElementById('login-btn').style.display              = '';
+    setTimeout(() => document.getElementById('login-email-input')?.focus(), 60);
   } else {
-    // 有廠區：顯示廠區選單（但 site-login-row 仍需點擊展開）
+    // （V150 起不再走此分支）有廠區：顯示廠區選單
     sel.innerHTML = '<option value="">— Select Org 選擇組織 —</option>';
     SITE_LIST.filter(s => s.active !== false).forEach(s => {
       const opt = document.createElement('option');
@@ -8203,20 +8208,85 @@ function showLoginErr(msg){
   window._loginErrTimer=setTimeout(()=>{ if(fx) fx.style.display='none'; }, 4000);
 }
 
+// V149：工號 → Email（查 OMS identity_access，ilike 大小寫不敏感；供應商無工號故不套用此路徑）
+// 回傳 {ok:true, email} / {ok:false, msg}
+async function resolveEmpIdToEmail(empId) {
+  try {
+    const r = await fetch(OMS_IDENTITY_URL + '/rest/v1/identity_access?emp_id=ilike.' +
+      encodeURIComponent(empId) + '&select=emp_id,email,active&limit=1',
+      { headers: { apikey: OMS_IDENTITY_KEY, Authorization: 'Bearer ' + OMS_IDENTITY_KEY } });
+    if (!r.ok) return { ok:false, msg:'無法查詢工號，請改用 Email 登入' };
+    const d = await r.json();
+    const hit = Array.isArray(d) && d[0];
+    if (!hit)        return { ok:false, msg:'查無此工號，請確認後重試，或改用 Email 登入' };
+    if (!hit.email)  return { ok:false, msg:'此工號未設定 Email，請洽管理員' };
+    return { ok:true, email: String(hit.email).trim().toLowerCase() };
+  } catch (e) {
+    console.warn('工號查詢失敗:', e);
+    return { ok:false, msg:'無法查詢工號（網路問題），請改用 Email 登入' };
+  }
+}
+
+// V151：即時工號回饋（比照 MHR）——輸入不含 @ 時查 OMS，顯示「✓ 姓名 · Email」；含 @ 或空白則不顯示
+let _empHintTimer = null;
+function onEmpIdInput() {
+  const el   = document.getElementById('login-email-input');
+  const hint = document.getElementById('empid-hint');
+  if (!el || !hint) return;
+  const v = (el.value || '').trim();
+  if (_empHintTimer) clearTimeout(_empHintTimer);
+  if (!v) { hint.textContent = ''; return; }
+  // V151-1：打 Email 時只回饋「格式」，不查也不揭露是誰
+  //（避免任何人在登入頁猜 email 就能確認某供應商有無此人＝帳號枚舉）
+  if (v.includes('@')) {
+    if (/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v)) { hint.style.color = '#0f6e56'; hint.textContent = '✓ Email 格式正確'; }
+    else { hint.style.color = '#888'; hint.textContent = '請輸入完整 Email'; }
+    return;
+  }
+  hint.style.color = '#888'; hint.textContent = '查詢中…';
+  _empHintTimer = setTimeout(async () => {
+    const cur = (document.getElementById('login-email-input')?.value || '').trim();
+    if (cur !== v) return;                       // 使用者又改了 → 放掉這次結果
+    try {
+      const r = await fetch(OMS_IDENTITY_URL + '/rest/v1/identity_access?emp_id=ilike.' +
+        encodeURIComponent(v) + '&select=emp_id,name,eng_name,email&limit=1',
+        { headers: { apikey: OMS_IDENTITY_KEY, Authorization: 'Bearer ' + OMS_IDENTITY_KEY } });
+      const d = r.ok ? await r.json() : [];
+      const hit = Array.isArray(d) && d[0];
+      const now = (document.getElementById('login-email-input')?.value || '').trim();
+      if (now !== v) return;                     // 回來時已過期 → 不覆蓋
+      if (hit && hit.email) {
+        hint.style.color = '#0f6e56';
+        hint.textContent = '✓ ' + (hit.name || hit.eng_name || hit.emp_id) + ' · ' + hit.email;
+      } else {
+        hint.style.color = '#c0392b';
+        hint.textContent = '✗ 查無此工號（或改用 Email 登入）';
+      }
+    } catch (e) { hint.textContent = ''; }       // 網路問題就安靜，不干擾登入
+  }, 450);
+}
+
 async function doLogin() {
   const siteSel     = document.getElementById('login-site');
   const siteSection = siteSel?.closest('.login-section');
   const siteHidden  = siteSection?.style.display === 'none';
   const site        = siteHidden ? '__nosite__' : (siteSel?.value || '');
 
-  const email    = (document.getElementById('login-email-input')?.value || '').trim().toLowerCase();
+  let email      = (document.getElementById('login-email-input')?.value || '').trim().toLowerCase();
   const password = document.getElementById('login-password-input')?.value || '';
 
   if (!siteHidden && !site) { showLoginErr('Please select a site 請選擇組織'); return; }
-  if (!email)    { showLoginErr('Please enter your email 請輸入 Email'); return; }
+  if (!email)    { showLoginErr('請輸入工號或 Email'); return; }
   if (!password) { showLoginErr('Please enter your password 請輸入密碼'); return; }
 
   const loginBtn = document.getElementById('login-btn');
+  // V149：輸入不含 @ ＝ 當工號 → 先換成 Email 再走原本流程（含 @ 者路徑完全不變＝向後相容）
+  if (!email.includes('@')) {
+    if (loginBtn) loginBtn.textContent = '⏳ 查詢工號...';
+    const rid = await resolveEmpIdToEmail(email);
+    if (!rid.ok) { if (loginBtn) loginBtn.textContent = '▶ Enter 進入系統'; showLoginErr(rid.msg); return; }
+    email = rid.email;
+  }
   if (loginBtn) loginBtn.textContent = '⏳ 驗證中...';
 
   // 🔐 改用 Supabase Auth 驗證
@@ -8225,8 +8295,18 @@ async function doLogin() {
   if (!r.ok) { showLoginErr(r.msg); return; }
 
   const p = r.profile;
-  // 防呆：分頁與帳號類型須相符
-  if (p.account_type === 'supplier') { showLoginErr('此為供應商帳號，請改用下方「供應商」登入'); return; }
+  // V151：全整合單一入口——供應商帳號不再擋下，改「用同一組帳密自動轉走供應商流程」
+  //       （身分一律以 profile.account_type 為準；供應商區塊已隱藏、不需選供應商別）
+  if (p.account_type === 'supplier') {
+    const supEmail = document.getElementById('login-supplier-email');
+    const supPwd   = document.getElementById('login-supplier-pwd');
+    const supSel   = document.getElementById('login-supplier');
+    if (supEmail) supEmail.value = email;
+    if (supPwd)   supPwd.value   = password;
+    if (supSel)   supSel.value   = '';   // 不預選供應商別＝以帳號實際歸屬為準（防呆自動略過）
+    await doSupplierLogin();
+    return;
+  }
   if (p.account_type === 'admin')    { showLoginErr('管理員請改用下方「🔑 管理員登入」'); return; }
   // 防呆：若有選組織，須與帳號實際所屬組織一致（選錯擋下）
   if (!siteHidden && site && p.site_code && site !== p.site_code) {
@@ -9718,7 +9798,8 @@ async function doSupplierLogin() {
   const supplierCode = document.getElementById('login-supplier')?.value || '';
   const email    = (document.getElementById('login-supplier-email')?.value || '').trim().toLowerCase();
   const password = document.getElementById('login-supplier-pwd')?.value || '';
-  if (!supplierCode) { showLoginErr('請選擇供應商'); return; }
+  // V151：單一入口時不需先選供應商別（供應商別由帳號 profile.supplier_code 決定）；
+  //       仍保留舊路徑相容——若供應商區塊被還原顯示、使用者有選，下方防呆照舊生效。
   if (!email)    { showLoginErr('請輸入 Email'); return; }
   if (!password) { showLoginErr('請輸入密碼'); return; }
   // 🔐 _2CODE：改用 Supabase Auth（以下舊邏輯已停用）

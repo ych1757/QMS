@@ -4190,10 +4190,16 @@ function initHistSiteFilter() {
     const codes = [];
     if (ownSite) codes.push(ownSite);
     getViewScopes().forEach(c => { if (c && !codes.includes(c)) codes.push(c); });
+    // V153：這裡原本沒跟 Admin 分支走同一套過濾 ⇒ 停用廠區＋已刪代號全跑出來
+    //   實例(260821)：Gray 的下拉列出 16 個(含 11 個已停用 + 孤兒代號 LS)，Admin 只列 5 個。
+    //   三件一起補，少一件就補不乾淨：①廠區查 active ②供應商也查 active ③兩邊都查無的孤兒代號略過。
+    //   （孤兒＝廠區已被永久刪除，但帳號 viewSites 還留著那個 code；選了也只會查無資料。）
     const supNames = {};
-    try { (getSupplierList() || []).forEach(x => { if (x && x.code) supNames[x.code] = x.name || ''; }); } catch(e) {}
+    try { (getSupplierList() || []).forEach(x => { if (x && x.code && x.active !== false) supNames[x.code] = x.name || ''; }); } catch(e) {}
     codes.forEach(code => {
-      const si = SITE_LIST.find(sl => sl.code === code);
+      const isOwn = (code === ownSite);        // 自己廠一律保留(比照分支③不過濾自己廠，避免看不到自己的資料)
+      const si = SITE_LIST.find(sl => sl.code === code && (isOwn || sl.active !== false));
+      if (!si && !(code in supNames) && !isOwn) return;   // ★孤兒/已停用代號：不列
       const opt = document.createElement('option');
       opt.value = code;
       opt.textContent = si ? `${code} — ${si.name}`
@@ -7920,7 +7926,10 @@ function syncUserToSupabase(siteCode, email, userData) {
 // ══════════════════════════════════════════════
 // 🔐 Supabase Auth 整合（_2CODE）
 // ══════════════════════════════════════════════
-const ADMIN_EMAIL = 'yc.huang@syncmold.com.tw'; // DTO/管理員固定 email
+// V154：管理員登入＝專用虛擬帳號（使用者 8/19 定調，四系統一致；OMS/GHG 已同此做法）
+// 禁止寫死個人 email 當 admin ⇒ 個人帳號才能自由指派任意角色做測試。
+// 帳號建在 QMS 專案(vwusebvv) Auth，與 MHR 共用；各自在 profiles / mhr_profiles 掛角色。
+const ADMIN_EMAIL = 'admin@id.syncmold.com.tw'; // 管理員專用虛擬帳號（非個人）
 
 // 用 email+密碼向 Supabase Auth 登入，並讀取自己的 profile
 async function sbAuthLogin(email, password) {
@@ -10252,7 +10261,7 @@ async function changeAdminPassword() {
   if (!pwdValid(newPwd)) { alert('密碼至少需 8 碼，需含字母與數字'); return; }
   const confirm2 = await showCustomPwdDialog('🔑 請再次輸入新密碼確認');
   if (newPwd !== confirm2) { alert('兩次輸入不一致'); return; }
-  // 🔐 _2CODE：改用 Auth 修改 DTO/管理員（ADMIN_EMAIL = yc.huang）的登入密碼
+  // 🔐 _2CODE：改用 Auth 修改管理員（ADMIN_EMAIL＝虛擬帳號 admin@id）的登入密碼
   const r = await sbAuthChangePassword(ADMIN_EMAIL, oldPwd, newPwd);
   if (!r.ok) { alert('❌ ' + (r.msg === '舊密碼錯誤' ? '目前密碼錯誤' : r.msg)); return; }
   alert('✅ 管理員密碼已更新，下次登入請用新密碼');

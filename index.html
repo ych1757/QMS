@@ -8,7 +8,7 @@
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{overflow-x:hidden;max-width:100vw}
 body{font-family:Arial,sans-serif;background:#f4f6f9;color:#222;font-size:13px}
-.page{max-width:1100px;margin:24px auto;background:#fff;border:1px solid #ccc;padding:20px 24px 32px;box-shadow:0 2px 8px rgba(0,0,0,0.08)}
+.page{max-width:1100px;margin:10px auto;background:#fff;border:1px solid #ccc;padding:12px 18px 16px;box-shadow:0 2px 8px rgba(0,0,0,0.08)}/*V159:留白讓給資料區*/
 
 /* ── 登入畫面 ── */
 #login-screen{position:fixed;top:0;left:0;width:100%;height:100%;background:linear-gradient(135deg,#0f3460 0%,#1a4f8a 60%,#1d9e75 100%);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px}
@@ -90,7 +90,7 @@ body{font-family:Arial,sans-serif;background:#f4f6f9;color:#222;font-size:13px}
 }
 
 /* Header */
-.logo-bar{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;padding-bottom:10px;border-bottom:2px solid #1a4f8a}
+.logo-bar{display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;padding-bottom:4px;border-bottom:2px solid #1a4f8a}/*V160:留白再縮*/
 .logo-title{font-size:20px;font-weight:700;color:#1a4f8a;letter-spacing:0.02em}
 .logo-sub{font-size:12px;color:#666;margin-top:2px}
 .doc-meta{text-align:right;font-size:11px;color:#666;line-height:1.7;min-width:0;flex-shrink:1}
@@ -187,7 +187,7 @@ table.main tr:hover td.s-col.oos{background:#ffcaca}
 }
 
 /* Process type selector */
-.process-bar{display:flex;flex-direction:column;gap:6px;padding:8px 12px;background:#f8f9fa;border:1px solid #dde;border-radius:6px;margin-bottom:12px}
+.process-bar{display:flex;flex-direction:column;gap:4px;padding:5px 10px;background:#f8f9fa;border:1px solid #dde;border-radius:6px;margin-bottom:6px}/*V160*/
 .process-bar label{font-size:12px;font-weight:700;color:#444;white-space:nowrap}
 .proc-btn{height:30px;padding:0 14px;font-size:12px;font-weight:600;border:1px solid #bbb;background:#fff;color:#555;border-radius:4px;cursor:pointer;font-family:Arial,sans-serif;white-space:nowrap}
 .proc-btn:hover{background:#e8eef5}
@@ -328,21 +328,21 @@ input.spec-inp[type=number] { -moz-appearance:textfield; appearance:textfield; }
 .save-status.ok{color:#1D9E75;font-weight:700}
 .save-status.err{color:#c0392b;font-weight:700}
 /* History / Query */
-.hist-filter{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;background:#f8f9fa;border:1px solid #dde;border-radius:6px;padding:12px 14px;margin-bottom:14px}
+.hist-filter{display:flex;flex-wrap:wrap;gap:7px;align-items:flex-end;background:#f8f9fa;border:1px solid #dde;border-radius:6px;padding:8px 10px;margin-bottom:8px}/*V160*/
 .hist-filter .ef label{font-size:11px;color:#555;font-weight:600;margin-bottom:3px;display:block}
 .hist-filter .ef input,.hist-filter .ef select{height:30px;padding:0 8px;border:1px solid #ccc;border-radius:4px;font-size:12px;font-family:Arial,sans-serif;width:100%}
-.hist-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px}
-.hist-stat-card{background:#fff;border:1px solid #dde;border-radius:6px;padding:10px 14px;text-align:center}
-.hist-stat-label{font-size:10px;color:#888;margin-bottom:4px}
-.hist-stat-val{font-size:22px;font-weight:700;color:#1a4f8a}
+.hist-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:8px}/*V159*/
+.hist-stat-card{background:#fff;border:1px solid #dde;border-radius:6px;padding:5px 10px;display:flex;align-items:center;justify-content:space-between;gap:8px}/*V160:欄名左·數字右，一行搞定*/
+.hist-stat-label{font-size:11px;color:#888;margin-bottom:0;white-space:nowrap}/*V160*/
+.hist-stat-val{font-size:24px;font-weight:800;color:#1a4f8a;line-height:1.1}/*V161:數字加大醒目*/
 .hist-stat-val.pass{color:#1D9E75}.hist-stat-val.fail{color:#c0392b}.hist-stat-val.warn{color:#BA7517}
 .hist-table{width:100%;border-collapse:separate;border-spacing:0;font-size:12px}
-.hist-table th{background:#1a4f8a;color:#fff;padding:7px 10px;text-align:left;font-size:11px;font-weight:700;position:sticky;top:0;z-index:2;white-space:nowrap}
+.hist-table th{background:#1a4f8a;color:#fff;padding:4px 5px;text-align:left;font-size:11px;font-weight:700;position:sticky;top:0;z-index:2;white-space:nowrap}
 .hist-table th.sort-asc::after{content:' ▲'}
 .hist-table th.sort-desc::after{content:' ▼'}
 .hist-table th[data-sort]{cursor:pointer}
 .hist-table th[data-sort]:hover{background:#153f70}
-.hist-table td{padding:7px 10px;border-bottom:0.5px solid #e8e8e8;vertical-align:middle}
+.hist-table td{padding:4px 5px;border-bottom:0.5px solid #e8e8e8;vertical-align:middle}/*V160:欄距瘦身，一頁放得下*/
 .hist-table tr:hover td{background:#f0f5ff}
 .hist-table tr.expanded td{background:#e8f0fb}
 .hist-result-badge{display:inline-block;padding:2px 8px;border-radius:3px;font-size:10px;font-weight:700}
@@ -362,7 +362,7 @@ input.spec-inp[type=number] { -moz-appearance:textfield; appearance:textfield; }
 .rec-act-btn:hover{opacity:0.75}
 .col-resizer:hover{background:rgba(26,79,138,0.2)}
 .hist-empty{text-align:center;padding:40px;color:#aaa;font-size:13px}
-.hist-wrap{max-height:520px;overflow-y:auto;border:1px solid #dde;border-radius:4px}
+.hist-wrap{overflow-y:auto;border:1px solid #dde;border-radius:4px}/*V159:拿掉 520px 上限，改由 inline calc(100vh-300px) 決定＝視窗越高看越多列*/
 /* Photo attachment */
 .photo-section{border:1px solid #ccd;border-radius:4px;overflow:hidden;margin-bottom:14px}
 .photo-hdr{display:flex;align-items:center;justify-content:space-between;background:#555;color:#fff;padding:5px 12px;font-size:12px;font-weight:700;cursor:pointer}
@@ -414,6 +414,12 @@ input.spec-inp[type=number] { -moz-appearance:textfield; appearance:textfield; }
      🔗 Supabase 雲端同步層 v2.0
      ══════════════════════════════════════════════════════ -->
 <script>
+// ── V155：系統版號（單一出處，每次出版只改這一行）──
+// 用途＝跟使用者溝通「你看到的畫面是不是最新版」，不是品質文件的表單版次
+//（表單版次 Rev 另有其用途、目前維持 V1.0 不動，日後各廠區若有自己的表單版次需求再談）
+// 顯示位置：① 瀏覽器分頁標題 ② 登入畫面副標下方 ③ 主畫面右上（列印時自動隱藏）
+const APP_VER = 'V162';   // ★★ 每出一版必須同步改這一行（比照 MHR 的做法），否則畫面版號會對不上檔案版號
+
 const SUPABASE_URL = 'https://vwusebvvsqyjydddupit.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_Ju-c9cuXYJil7PEJ1-NspA_ASzfIzi5';
 
@@ -1067,6 +1073,7 @@ async function sbInit() {
       <div style="text-align:center;margin-bottom:12px"><img src="data:image/jpeg;base64,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" alt="Syncmold" style="max-width:220px;height:auto"></div>
       <div class="login-logo-title">QMS 品質管理系統</div>
       <div class="login-logo-sub">Quality Management System</div>
+      <div class="login-logo-sub" id="login-ver" style="margin-top:2px;color:#aaa"></div><!-- V155：系統版號 -->
     </div>
 
 
@@ -1083,7 +1090,7 @@ async function sbInit() {
 
     <!-- 工號 / Email 輸入（V149：比照 MHR，內部員工可直接打工號；type 由 email 改 text 才不會被瀏覽器擋）-->
     <div class="login-section" id="login-email-section">
-      <label class="login-label">👤 工號 / Email</label>
+      <label class="login-label">工號 / Email</label>
       <input id="login-email-input" type="text" placeholder="工號 或 your@email.com"
         class="login-input"
         oninput="clearLoginErr(); onEmpIdInput()"
@@ -1094,15 +1101,15 @@ async function sbInit() {
 
     <!-- 密碼輸入 -->
     <div class="login-section" id="login-password-section">
-      <label class="login-label">🔒 Password 密碼</label>
-      <input id="login-password-input" type="password" placeholder="Password 密碼"
+      <label class="login-label">密碼 Password</label>
+      <input id="login-password-input" type="password" placeholder="密碼 Password"
         class="login-input"
         oninput="clearLoginErr()"
         onkeydown="if(event.key==='Enter') doLogin()">
     </div>
 
     <div class="login-err" id="login-err"></div>
-    <button class="login-btn" onclick="doLogin()" id="login-btn" style="margin-top:8px">▶ Enter 進入系統</button>
+    <button class="login-btn" onclick="doLogin()" id="login-btn" style="margin-top:8px">登入 Login</button>
     <div style="font-size:11px;color:#666;line-height:1.7;margin-top:10px">
       <b>集團內部</b>可直接打工號；<b>外部供應商</b>請用 Email。
     </div>
@@ -1178,7 +1185,7 @@ async function sbInit() {
   <!-- 備份提醒 Banner（v100）-->
   <div id="backup-reminder-banner" style="display:none;background:#fff3cd;border:1px solid #ffc107;border-radius:6px;padding:8px 14px;margin-bottom:10px;display:flex;align-items:center;flex-wrap:wrap;gap:6px" class="no-print"></div>
 
-  <div class="no-print" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;gap:8px;flex-wrap:wrap">
+  <div class="no-print" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;gap:8px;flex-wrap:wrap">
 
     <!-- 左側：登入者資訊（登入後顯示）-->
     <div id="login-badge" style="display:none;align-items:center;gap:6px;flex-wrap:wrap">
@@ -1194,8 +1201,9 @@ async function sbInit() {
     </div>
     <span id="site-badge" style="display:none"></span>
 
-    <!-- 右側：語言 + 登出 -->
+    <!-- 右側：語言 + 登出（V161：系統版號上移到這裡，原在 Rev 下方）-->
     <div style="display:flex;gap:4px;align-items:center;flex-wrap:nowrap">
+      <span id="sys-ver" style="color:#999;font-size:11px;white-space:nowrap;margin-right:6px"></span>
       <button onclick="setLang('zh-TW')" id="lang-zhtw" class="lang-btn active-lang"><span class="lang-code">TW</span> 繁體</button>
       <button onclick="setLang('zh-CN')" id="lang-zhcn" class="lang-btn"><span class="lang-code">CN</span> 简体</button>
       <button onclick="setLang('vi')"    id="lang-vi"   class="lang-btn"><span class="lang-code">VN</span> Việt</button>
@@ -1706,21 +1714,20 @@ async function sbInit() {
         <label>日期起 Date From</label>
         <input id="f-date-from" type="date" style="width:100%">
       </div>
-      <div class="ef" style="flex:1;min-width:130px">
-        <label>日期迄 Date To</label>
-        <input id="f-date-to" type="date" style="width:100%">
+      <div class="ef" style="flex:1.4;min-width:200px;display:flex;flex-direction:row;align-items:center;gap:6px"><!-- V161：文字後方接輸入框 -->
+        <label style="margin-bottom:0;white-space:nowrap">日期迄 Date To</label>
+        <input id="f-date-to" type="date" style="flex:1;width:auto">
       </div>
-      <div class="ef" style="flex:1;min-width:120px">
-        <label>判定 Result</label>
-        <select id="f-result" style="width:100%">
+      <div class="ef" style="flex:1;min-width:170px;display:flex;flex-direction:row;align-items:center;gap:6px"><!-- V161：文字後方接輸入框 -->
+        <label style="margin-bottom:0;white-space:nowrap">判定 Result</label>
+        <select id="f-result" style="flex:1;width:auto">
           <option value="">全部</option>
           <option value="PASS">✅ Pass</option>
           <option value="ALERT">⚠ Alert</option>
           <option value="REJECT">❌ Reject</option>
         </select>
       </div>
-      <div class="ef" style="flex:0;min-width:140px;display:flex;flex-direction:column;justify-content:flex-end">
-        <label style="font-size:11px;color:transparent;display:block">_</label>
+      <div class="ef" style="flex:0;min-width:140px;display:flex;flex-direction:row;align-items:center"><!-- V161：拆掉透明假label，列高跟著同列篩選降下來 -->
         <div style="display:flex;gap:6px">
           <button class="btn btn-blue" onclick="runHistQuery()" style="height:30px;font-size:12px;flex:1;white-space:nowrap">🔎 查詢</button>
           <button class="btn" onclick="clearHistFilter()" style="height:30px;font-size:12px;flex:1;white-space:nowrap">清除</button>
@@ -1737,7 +1744,7 @@ async function sbInit() {
     </div>
 
     <!-- 查詢結果表格 -->
-    <div class="hist-wrap" style="overflow:auto;max-height:65vh;-webkit-overflow-scrolling:touch">
+    <div class="hist-wrap" style="overflow:auto;max-height:calc(100vh - 170px);min-height:340px;-webkit-overflow-scrolling:touch">
       <table class="hist-table">
         <thead>
           <tr>
@@ -3651,14 +3658,14 @@ function initDashScopeFilter() {
   const ownSite = (_sess && _sess.site && _sess.site !== '__nosite__' && !_sess.isSupplier) ? _sess.site : '';
   const allow = isAdm ? null : new Set([ownSite, ...vScopes].filter(Boolean)); // null＝admin 不設限
   let html = `<option value="">${isAdm ? '— 全部 All —' : '— 全部(授權範圍) All Granted —'}</option>`;
-  const sites = (SITE_LIST || []).filter(s => s.active !== false && (!allow || allow.has(s.code)));
+  const sites = activeSites().filter(s => !allow || allow.has(s.code));   // V158:共用來源
   if (sites.length) {
     html += '<optgroup label="📍 廠區 Sites">';
     sites.forEach(s => { html += `<option value="${esc(s.code)}">${esc(s.code)} — ${esc(s.name)}</option>`; });
     html += '</optgroup>';
   }
   let sups = [];
-  try { sups = getSupplierList().filter(s => s && s.active !== false && s.code && (!allow || allow.has(s.code))); } catch(e) {}
+  sups = activeSuppliers().filter(s => !allow || allow.has(s.code));      // V158:共用來源
   if (sups.length) {
     html += '<optgroup label="🏭 供應商 Suppliers">';
     sups.forEach(s => { html += `<option value="${esc(s.code)}">${esc(s.code)} — ${esc(s.name)}</option>`; });
@@ -4052,6 +4059,34 @@ function calcOverallFromRows(rowList) {
   return anyReject ? 'REJECT' : anyAlert ? 'ALERT' : 'PASS';
 }
 
+// ══ V156：未量測項目提示（使用者 260821 需求）══
+// 情境：該驗 8 項只驗 5 項、那 5 項都合規 ⇒ 整體判定仍是 PASS（getJudge 對空列回「—」、
+//       calcOverallFromRows 只看 Fail/Alert ⇒ 未量測列被忽略）。這在查詢時看不出來。
+// 做法：**純視覺標示，判定邏輯一個字都不動**（使用者明確要求：不因為沒數值就判不良）。
+// 規則：一列的樣本格「全部沒有有效數字」＝該項未量測；只填一格另一格空的不算（那是樣本數少）。
+// 特性：即時計算、不存欄位 ⇒ 事後補齊數值，重整後標記自動消失；舊記錄一樣算得出來。
+function countUnmeasured(rowList) {
+  let total = 0, un = 0;
+  (rowList || []).forEach(r => {
+    if (!r || !r.type) return;                       // 非檢驗列不計入
+    total++;
+    const v = (r.s || []).filter(x => x !== null && x !== '' && !isNaN(x));
+    if (!v.length) un++;
+  });
+  return { total, un };
+}
+// CPK 記錄用（結構是 points[].values，不是 rows[].s）
+function countUnmeasuredPts(points) {
+  let total = 0, un = 0;
+  (points || []).forEach(p => {
+    if (!p) return;
+    total++;
+    const v = (p.values || []).filter(x => x !== null && x !== '' && !isNaN(x));
+    if (!v.length) un++;
+  });
+  return { total, un };
+}
+
 function getAllRecords() {
   // 資料隔離：非 Admin 只能看自己組織/供應商的資料
   const sess = getSession();
@@ -4082,6 +4117,8 @@ function getAllRecords() {
           savedBy:   d.savedBy  || '',
           updatedBy: d.updatedBy|| '',
           overall:   cpkOverall(pts),  // 防呆判定：先看是否在規格內，再看 Cpk
+          unmeasured: countUnmeasuredPts(pts).un,      // V156：未量測項目數（純標示）
+          rowsTotal:  countUnmeasuredPts(pts).total,
           cpkPass:   pts.filter(p => { const s = cpkCalcStats ? cpkCalcStats(p.values, p.usl, p.lsl, p.nom) : null; return s?.cpk != null && s.cpk >= 1.33; }).length,
           cpkTotal:  pts.length,
           isRecord:  true,
@@ -4129,6 +4166,8 @@ function getAllRecords() {
         savedBy:   d.savedBy          || '',
         updatedBy: d.updatedBy        || '',
         overall,
+        unmeasured: countUnmeasured(d.rows || []).un,        // V156：未量測項目數（純標示）
+        rowsTotal:  countUnmeasured(d.rows || []).total,
         procName:  (d.header && d.header.process_name) || '', // V147:製程(沿用既有 header.process_name,舊記錄零遷移)
         cpkPass:   cpkStats.pass,
         cpkTotal:  cpkStats.total,
@@ -4195,10 +4234,10 @@ function initHistSiteFilter() {
     //   三件一起補，少一件就補不乾淨：①廠區查 active ②供應商也查 active ③兩邊都查無的孤兒代號略過。
     //   （孤兒＝廠區已被永久刪除，但帳號 viewSites 還留著那個 code；選了也只會查無資料。）
     const supNames = {};
-    try { (getSupplierList() || []).forEach(x => { if (x && x.code && x.active !== false) supNames[x.code] = x.name || ''; }); } catch(e) {}
+    activeSuppliers().forEach(x => { supNames[x.code] = x.name || ''; });   // V158:共用來源
     codes.forEach(code => {
       const isOwn = (code === ownSite);        // 自己廠一律保留(比照分支③不過濾自己廠，避免看不到自己的資料)
-      const si = SITE_LIST.find(sl => sl.code === code && (isOwn || sl.active !== false));
+      const si = isOwn ? (SITE_LIST||[]).find(sl => sl.code === code) : activeSites().find(sl => sl.code === code);  // V158:共用來源(自己廠例外)
       if (!si && !(code in supNames) && !isOwn) return;   // ★孤兒/已停用代號：不列
       const opt = document.createElement('option');
       opt.value = code;
@@ -4223,12 +4262,22 @@ function initHistSiteFilter() {
     const allOpt = document.createElement('option');
     allOpt.value = ''; allOpt.textContent = '— All Orgs 全部 —';
     sel.appendChild(allOpt);
-    SITE_LIST.filter(si => si.active !== false).forEach(si => {
+    activeSites().forEach(si => {                                          // V158:共用來源
       const opt = document.createElement('option');
       opt.value = si.code;
       opt.textContent = `${si.code} — ${si.name}`;
       sel.appendChild(opt);
     });
+    // V157：admin 分支原本只列 SITE_LIST、漏了供應商 ⇒ 表格裡明明有 SDY/YUKE 的記錄卻篩不出來。
+    //        補上（比照儀表板 dash-scope 與分支②的做法，同樣只列 active 的）。
+    try {
+      activeSuppliers().forEach(x => {                                    // V158:共用來源
+        const opt = document.createElement('option');
+        opt.value = x.code;
+        opt.textContent = `🏢 ${x.code}${x.name ? ' — ' + x.name : ''}`;
+        sel.appendChild(opt);
+      });
+    } catch(e) { console.warn('供應商選項載入失敗:', e); }
   }
 }
 
@@ -4384,7 +4433,7 @@ function sortAndRenderHist() {
       <td style="font-weight:700;color:#1a4f8a;white-space:nowrap">${rec.partno||'—'}</td>
       <td style="font-size:11px">${rec.partname||'—'}</td>
       <td>${rec.inspector||'—'}</td>
-      <td><span class="hist-result-badge ${resultCls}">${rec.overall||'—'}</span></td>
+      <td><span class="hist-result-badge ${resultCls}">${rec.overall||'—'}</span>${rec.unmeasured ? `<div style="font-size:10px;color:#BA7517;font-weight:700;white-space:nowrap;margin-top:2px" title="有項目沒有輸入數值；判定僅依已量測的項目計算">⚠ ${rec.unmeasured}/${rec.rowsTotal}<br>未測</div>` : ''}</td>
       <td style="text-align:center">${cpkStr}</td>
       <td style="font-size:10px;white-space:nowrap">${rec.date||'—'}</td>
       <td style="font-size:11px;color:#666;white-space:nowrap">
@@ -4574,12 +4623,16 @@ function toggleHistDetail(key) {
       const oos=v!==null&&!isNaN(v)&&r.usl!==null&&r.lsl!==null&&(+v>r.usl||+v<r.lsl);
       return `<td style="${oos?'background:#fde8e8;color:#c0392b;font-weight:700':''}">${v??''}</td>`;
     }).join('');
-    return `<tr>
+    // V156：這一列完全沒有數值＝未量測 → 淡黃底＋判定改標「未量測」（判定邏輯不變，只是顯示得明確）
+    const _un = r.type && !(r.s||[]).filter(x => x!==null && x!=='' && !isNaN(x)).length;
+    return `<tr${_un ? ' style="background:#fffbe6"' : ''}>
       <td>${r.fai||''}</td><td style="text-align:left">${r.moi||''}</td><td>${r.type||''}</td>
       <td>${r.nom??''}</td><td>${r.usl??''}</td><td>${r.lsl??''}</td>
       ${sVals}
       <td>${st?st.mean.toFixed(3):'—'}</td>
-      <td><span class="hist-result-badge ${resCls}">${jg.label}</span></td>
+      <td>${_un
+        ? `<span class="hist-result-badge" style="background:#fff3cd;color:#8a6d00;border:1px solid #e0c860">未量測</span>`
+        : `<span class="hist-result-badge ${resCls}">${jg.label}</span>`}</td>
     </tr>`;
   }).join('');
 
@@ -4872,9 +4925,9 @@ function renderPnList() {
     }
     if (filterBar) {
       let supList = [];
-      try { supList = (getSupplierList() || []).filter(x => x && x.active !== false && x.code); } catch(e) {}
+      supList = activeSuppliers();                                            // V158:共用來源
       const opts = [['', '— 全部 All —'], ['__shared__', '(共用) Shared']]
-        .concat((SITE_LIST || []).filter(x => x.active !== false).map(x => [x.code, x.code + ' — ' + x.name]))
+        .concat(activeSites().map(x => [x.code, x.code + ' — ' + x.name]))      // V158:共用來源
         .concat(supList.map(x => [x.code, '🏢 ' + x.code + (x.name ? ' — ' + x.name : '')]));
       filterBar.innerHTML = '<span style="font-weight:700;color:#1a4f8a">歸屬篩選 Filter by Owner：</span>' +
         '<select onchange="setPnScopeFilter(this.value)" style="height:28px;border:1px solid #ccc;border-radius:4px;font-size:12px;padding:0 6px">' +
@@ -5014,8 +5067,8 @@ function renderScopeCheckboxes(pn, onlyScope) {
   //         僅在「編輯既有共用列」（onlyScope='__shared__'）時顯示共用選項，讓內建示範仍可維護
   const allScopes = [
     ...(onlyScope === '__shared__' ? [{ key: '__shared__', label: '(共用) 所有人' }] : []),
-    ...SITE_LIST.filter(s => s.active !== false).map(s => ({ key: s.code, label: s.code + ' ' + s.name })),
-    ...getSupplierList().filter(s => s.active !== false).map(s => ({ key: s.code, label: s.code + ' ' + s.name }))
+    ...activeSites().map(s => ({ key: s.code, label: s.code + ' ' + s.name })),        // V158:共用來源
+    ...activeSuppliers().map(s => ({ key: s.code, label: s.code + ' ' + s.name }))     // V158:共用來源
   ];
 
   const box = document.getElementById('scope-checkboxes');
@@ -6311,6 +6364,27 @@ const DEFAULT_SITE_LIST = [
 
 let SITE_LIST = [];
 
+// ══ V158：啟用中的廠區／供應商 —— 所有「選項清單」的單一出處 ══
+// 【為什麼要收斂】啟用/停用是系統層級的設計，篩選本來就該一致連動。
+//   但原本這條規則散在 16 個地方各自寫一次 `filter(active !== false)`
+//   ⇒ 有人新增下拉忘了寫就漏一個：V153 補了「跨廠查詢者」那處、V157 才發現
+//     「admin 歷史查詢」連供應商都沒列。這是打地鼠，不是修 bug。
+// 【規則】凡是「給使用者選的清單」（下拉、勾選、篩選）一律呼叫這兩個函式，不要自己寫 filter。
+//   反之「管理頁 CRUD／查名字／反查代號」要看得到停用的，**不可**用這兩個（例：設定頁要能
+//   顯示已停用廠區才能重新啟用；舊記錄的供應商碼即使已停用也要認得出來）。
+function activeSites() {
+  return (SITE_LIST || []).filter(s => s && s.code && s.active !== false);
+}
+function activeSuppliers() {
+  try { return (getSupplierList() || []).filter(s => s && s.code && s.active !== false); }
+  catch(e) { console.warn('讀供應商清單失敗:', e); return []; }
+}
+// 某個代號現在還是「啟用中的廠區或供應商」嗎？（用來排除已停用／已刪除的孤兒代號）
+function isActiveScope(code) {
+  if (!code) return false;
+  return activeSites().some(s => s.code === code) || activeSuppliers().some(s => s.code === code);
+}
+
 function loadSiteConfig() {
   try {
     const saved = localStorage.getItem(SITE_CONFIG_KEY);
@@ -7091,7 +7165,7 @@ async function openScopeModal(email) {
   if (!buList.length) buHtml += '<span style="color:#c0392b;font-size:11px">⚠ 讀不到 OMS 事業群清單，稍後再開（不影響既有設定）</span>';
   buBox.innerHTML = buHtml;
   let sups = [];
-  try { sups = (getSupplierList() || []).filter(x => x && x.active !== false && x.code); } catch(e) {}
+  sups = activeSuppliers();                                               // V158:共用來源
   let supHtml = cb('sup', '*', '<b>★ 全部供應商</b>　<span style="color:#888;font-size:11px">（動態含未來新增）</span>', curSups.includes('*'));
   sups.forEach(x => { supHtml += cb('sup', x.code, `${esc(x.code)}${x.name ? ' — ' + esc(x.name) : ''}`, curSups.includes(x.code)); });
   supBox.innerHTML = supHtml;
@@ -7196,7 +7270,7 @@ async function renderUserMgrTable() {
     });
   }
   loadSiteConfig();
-  const activeSiteCodes = new Set(SITE_LIST.filter(s => s.active !== false).map(s => s.code));
+  const activeSiteCodes = new Set(activeSites().map(s => s.code));   // V158:共用來源
 
   // ── V139：讀 OMS 已授權 QMS、但 QMS 還沒帳號的人（＝未設權限，比照 GHG 自動出現）──
   let ghostRows = [];
@@ -7366,7 +7440,7 @@ function toggleAddUserForm() {
     if (sel) {
       sel.innerHTML = '<option value="">— 選擇組織 —</option>';
       loadSiteConfig();
-      SITE_LIST.filter(s => s.active !== false).forEach(s => {
+      activeSites().forEach(s => {   // V158:共用來源
         const opt = document.createElement('option');
         opt.value = s.code;
         opt.textContent = `${s.code} — ${s.name}`;
@@ -7695,7 +7769,7 @@ function exportUserPermissionsXlsx() {
   const includeDisabled = document.getElementById('export-include-disabled')?.checked || false;
   const db = getUserDB();
   loadSiteConfig();
-  const activeSiteCodes = new Set(SITE_LIST.filter(s => s.active !== false).map(s => s.code));
+  const activeSiteCodes = new Set(activeSites().map(s => s.code));   // V158:共用來源
   const rows = [];
   // ── 組織人員 ──
   Object.entries(db).forEach(([site, users]) => {
@@ -8094,7 +8168,7 @@ function initLoginScreen() {
   } else {
     // （V150 起不再走此分支）有廠區：顯示廠區選單
     sel.innerHTML = '<option value="">— Select Org 選擇組織 —</option>';
-    SITE_LIST.filter(s => s.active !== false).forEach(s => {
+    activeSites().forEach(s => {   // V158:共用來源
       const opt = document.createElement('option');
       opt.value = s.code;
       opt.textContent = `${s.code.padEnd(6, '\u2007')}${s.name}`;
@@ -8293,14 +8367,14 @@ async function doLogin() {
   if (!email.includes('@')) {
     if (loginBtn) loginBtn.textContent = '⏳ 查詢工號...';
     const rid = await resolveEmpIdToEmail(email);
-    if (!rid.ok) { if (loginBtn) loginBtn.textContent = '▶ Enter 進入系統'; showLoginErr(rid.msg); return; }
+    if (!rid.ok) { if (loginBtn) loginBtn.textContent = '登入 Login'; showLoginErr(rid.msg); return; }
     email = rid.email;
   }
   if (loginBtn) loginBtn.textContent = '⏳ 驗證中...';
 
   // 🔐 改用 Supabase Auth 驗證
   const r = await sbAuthLogin(email, password);
-  if (loginBtn) loginBtn.textContent = '▶ Enter 進入系統';
+  if (loginBtn) loginBtn.textContent = '登入 Login';
   if (!r.ok) { showLoginErr(r.msg); return; }
 
   const p = r.profile;
@@ -8316,7 +8390,8 @@ async function doLogin() {
     await doSupplierLogin();
     return;
   }
-  if (p.account_type === 'admin')    { showLoginErr('管理員請改用下方「🔑 管理員登入」'); return; }
+  // V162：比照 MHR——管理員帳號從統一欄位直接登入（原本擋下改放行；🔑 鈕改為幫忙帶入帳號）
+  if (p.account_type === 'admin')    { enterAdminSession(r, email); return; }
   // 防呆：若有選組織，須與帳號實際所屬組織一致（選錯擋下）
   if (!siteHidden && site && p.site_code && site !== p.site_code) {
     showLoginErr('此帳號不屬於所選組織，請改選「' + p.site_code + '」'); return;
@@ -9723,12 +9798,13 @@ function toggleSiteLogin() {
 }
 
 function toggleAdminLogin() {
-  const row = document.getElementById('admin-login-row');
-  if (!row) return;
-  row.style.display = row.style.display === 'none' ? '' : 'none';
-  if (row.style.display !== 'none') {
-    setTimeout(() => document.getElementById('admin-pwd-input')?.focus(), 50);
-  }
+  // V162：比照 MHR fillAdmin——把虛擬管理員帳號帶入上方統一欄位，密碼打在同一格
+  //（不再展開獨立密碼區；admin-login-row 區塊保留隱藏供日後還原）
+  const e = document.getElementById('login-email-input');
+  if (e) e.value = ADMIN_EMAIL;
+  clearLoginErr();
+  try { onEmpIdInput(); } catch(err) {}
+  setTimeout(() => document.getElementById('login-password-input')?.focus(), 50);
 }
 
 // ══════════════════════════════════════════════
@@ -9775,7 +9851,7 @@ function toggleSupplierLogin() {
     const sel = document.getElementById('login-supplier');
     if (sel) {
       sel.innerHTML = '<option value="">— Select Supplier 選擇供應商 —</option>';
-      getSupplierList().filter(s => s.active !== false).forEach(s => {
+      activeSuppliers().forEach(s => {   // V158:共用來源
         const opt = document.createElement('option');
         opt.value = s.code;
         opt.textContent = `${s.code.padEnd(8, '\u2007')}${s.name}`;
@@ -10074,7 +10150,7 @@ function toggleAddSupplierUserForm() {
     // 填充供應商下拉選單
     const sel = document.getElementById('su-supplier');
     if (sel) {
-      const list = getSupplierList().filter(s => s.active !== false);
+      const list = activeSuppliers();   // V158:共用來源
       sel.innerHTML = list.map(s => `<option value="${s.code}">${s.code} — ${s.name}</option>`).join('');
       // 預選當前展開的供應商
       const panel = document.getElementById('supplier-users-panel');
@@ -10137,12 +10213,34 @@ function refreshSupplierLoginList() {
   const sel = document.getElementById('login-supplier');
   if (!sel || document.getElementById('supplier-login-row')?.style.display === 'none') return;
   sel.innerHTML = '<option value="">— Select Supplier 選擇供應商 —</option>';
-  getSupplierList().filter(s => s.active !== false).forEach(s => {
+  activeSuppliers().forEach(s => {   // V158:共用來源
     const opt = document.createElement('option');
     opt.value = s.code;
     opt.textContent = `${s.code} — ${s.name}`;
     sel.appendChild(opt);
   });
+}
+
+// V162：管理員 session 建立抽成共用——「統一欄位打 admin@id 直接登入(比照 MHR)」與舊 doAdminLogin 都走這裡
+function enterAdminSession(r, email) {
+  if (r.profile.account_type !== 'admin') { showLoginErr('此帳號非管理員'); return; }
+  saveSession({ site: '__admin__', userName: 'Admin', userKey: email || ADMIN_EMAIL, isAdmin: true, role: 'admin',
+    token: r.token, refresh: r.refresh, uid: r.uid,
+    loginAt: new Date().toISOString(), firstLoginAt: new Date().toISOString() });
+  clearLocalCache();
+  try { localStorage.removeItem(SITE_KEY); } catch(e) {}
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('main-page').style.display = '';
+  const lo = document.getElementById('logout-btn'); if (lo) lo.style.display = '';
+  const bg = document.getElementById('login-badge'); if (bg) bg.style.display = 'flex';
+  const bs = document.getElementById('badge-site');
+  if (bs) { bs.textContent = '⚙'; bs.style.display = ''; bs.style.background = '#555'; }
+  const bu = document.getElementById('badge-user'); if (bu) bu.textContent = '⚫ Admin';
+  applyRolePermissions();
+  switchTab('sys');
+  renderSysTab();
+  sbPostLoginRefresh();
+  setTimeout(checkBackupReminder, 2000);
 }
 
 async function doAdminLogin() {
@@ -10152,24 +10250,7 @@ async function doAdminLogin() {
   {
     const r = await sbAuthLogin(ADMIN_EMAIL, pwd);
     if (!r.ok) { showLoginErr('密碼錯誤 Wrong password'); return; }
-    if (r.profile.account_type !== 'admin') { showLoginErr('此帳號非管理員'); return; }
-    saveSession({ site: '__admin__', userName: 'Admin', userKey: ADMIN_EMAIL, isAdmin: true, role: 'admin',
-      token: r.token, refresh: r.refresh, uid: r.uid,
-      loginAt: new Date().toISOString(), firstLoginAt: new Date().toISOString() });
-    clearLocalCache();
-    try { localStorage.removeItem(SITE_KEY); } catch(e) {}
-    document.getElementById('login-screen').style.display = 'none';
-    document.getElementById('main-page').style.display = '';
-    const lo = document.getElementById('logout-btn'); if (lo) lo.style.display = '';
-    const bg = document.getElementById('login-badge'); if (bg) bg.style.display = 'flex';
-    const bs = document.getElementById('badge-site');
-    if (bs) { bs.textContent = '⚙'; bs.style.display = ''; bs.style.background = '#555'; }
-    const bu = document.getElementById('badge-user'); if (bu) bu.textContent = '⚫ Admin';
-    applyRolePermissions();
-    switchTab('sys');
-    renderSysTab();
-    sbPostLoginRefresh();
-    setTimeout(checkBackupReminder, 2000);
+    enterAdminSession(r, ADMIN_EMAIL);
     return;
   }
   // 管理員登入
@@ -10620,6 +10701,22 @@ function applyRolePermissions() {
 setProcess('IQC');
 buildTableHeader();
 render();
+// ── V155：把系統版號注入三個顯示點（都吃 APP_VER 常數，改版只需改那一行）──
+try {
+  document.title = document.title + '　' + APP_VER;
+  const _lv = document.getElementById('login-ver'); if (_lv) _lv.textContent = '系統版本 ' + APP_VER;
+  const _sv = document.getElementById('sys-ver');   if (_sv) _sv.textContent = '系統 ' + APP_VER;
+  // V161：瀏覽器會把「分頁標題」印在報表頁首 ⇒ 列印瞬間把標題尾巴的版號拿掉、印完還原
+  //（使用者 260826 列印預覽抓到 V160 從頁首漏進報表；畫面內的 #sys-ver 本來就 no-print 沒事）
+  let _verStripped = false;
+  window.addEventListener('beforeprint', () => {
+    const suf = '　' + APP_VER;
+    if (document.title.endsWith(suf)) { document.title = document.title.slice(0, -suf.length); _verStripped = true; }
+  });
+  window.addEventListener('afterprint', () => {
+    if (_verStripped) { document.title = document.title + '　' + APP_VER; _verStripped = false; }
+  });
+} catch(e) { console.warn('版號顯示失敗:', e); }
 if (currentLang !== 'zh-TW') setLang(currentLang);
 else applyI18n();
 checkSession();

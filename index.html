@@ -421,7 +421,7 @@ input.spec-inp[type=number] { -moz-appearance:textfield; appearance:textfield; }
 // 用途＝跟使用者溝通「你看到的畫面是不是最新版」，不是品質文件的表單版次
 //（表單版次 Rev 另有其用途、目前維持 V1.0 不動，日後各廠區若有自己的表單版次需求再談）
 // 顯示位置：① 瀏覽器分頁標題 ② 登入畫面副標下方 ③ 主畫面右上（列印時自動隱藏）
-const APP_VER = 'V166-2';   // ★★ 每出一版必須同步改這一行（比照 MHR 的做法），否則畫面版號會對不上檔案版號
+const APP_VER = 'V167-2';   // ★★ 每出一版必須同步改這一行（比照 MHR 的做法），否則畫面版號會對不上檔案版號
 
 const SUPABASE_URL = 'https://vwusebvvsqyjydddupit.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_Ju-c9cuXYJil7PEJ1-NspA_ASzfIzi5';
@@ -656,7 +656,17 @@ async function sbPullAllRecords() {
       try { localStorage.setItem(localKey, JSON.stringify(rec)); count++; } catch(e) {}
     });
     return count;
-  } catch(e) { return 0; }
+  } catch(e) {
+    // ══ V167-2：錯誤要往外丟，不可吞掉 ══
+    //  舊版 `catch(e){ return 0; }` 把失敗變成「成功拉到 0 筆」⇒ 呼叫端分不出
+    //  「真的沒資料」和「根本沒拉到」。這正好**抵消掉 V144 的修正**——V144 特地讓
+    //  sbFetchAllRows 在 HTTP 失敗時 throw（Kenneth 料號靜默失敗事件的教訓），
+    //  結果被這一行吃回去。實測：雲端回 500 → 本機被 clearLocalCache 清空、
+    //  畫面卻顯示綠色「✅ 已同步：FAI 0 筆、CPK 0 筆」。
+    //  ⚠ 另兩個呼叫點都用 Promise.allSettled（不會因 reject 中斷），改丟安全。
+    console.warn('sbPullAllRecords 失敗:', e);
+    throw e;
+  }
 }
 
 async function sbPullCpkRecords() {
@@ -680,7 +690,7 @@ async function sbPullCpkRecords() {
       try { localStorage.setItem(localKey, JSON.stringify(rec)); count++; } catch(e) {}
     });
     return count;
-  } catch(e) { return 0; }
+  } catch(e) { console.warn('sbPullCpkRecords 失敗:', e); throw e; }   // V167-2：同上，不吞錯誤
 }
 
 async function sbPullPartSpecs() {
@@ -1054,7 +1064,15 @@ async function sbInit() {
     ]);
     const faiCount = faiResult.status === 'fulfilled' ? faiResult.value : 0;
     const cpkCount = cpkResult.status === 'fulfilled' ? cpkResult.value : 0;
-    showSyncBanner('✅ 雲端同步完成：FAI ' + faiCount + ' 筆、CPK ' + cpkCount + ' 筆', 3000);
+    // V167-2：同一個謊的第二處——舊版不論成敗一律報「✅ 完成」，拉失敗時就變成
+    //   綠燈說「同步完成 0 筆」。allSettled 已經把成敗記在 status 裡，照實說即可。
+    const _pullFailed = (faiResult.status === 'rejected') || (cpkResult.status === 'rejected');
+    if (_pullFailed) {
+      console.warn('雲端記錄拉取失敗:', faiResult.reason || cpkResult.reason);
+      showSyncBanner('⚠ 雲端記錄拉取失敗，畫面可能不完整——請按「🔄 重新同步雲端」重試', 6000);
+    } else {
+      showSyncBanner('✅ 雲端同步完成：FAI ' + faiCount + ' 筆、CPK ' + cpkCount + ' 筆', 3000);
+    }
     // ── 同步完成後刷新儀表板和歷史查詢（修正 v99）──
     // Pull 完雲端資料後，localStorage 已更新，需要重新渲染才能顯示最新資料
     const activeTab = document.querySelector('.tab-pane.active')?.id;
@@ -1784,7 +1802,7 @@ async function sbInit() {
       <span style="font-size:11px;color:#666;font-weight:600">📦 資料備份 / 跨裝置同步：</span>
       <button onclick="exportRecords()" style="height:28px;padding:0 14px;font-size:11px;font-weight:600;background:#1a4f8a;color:#fff;border:none;border-radius:4px;cursor:pointer;white-space:nowrap">⬇ 備份 JSON</button>
       <button onclick="exportRecordsCSV()" style="height:28px;padding:0 14px;font-size:11px;font-weight:600;background:#0f6e56;color:#fff;border:none;border-radius:4px;cursor:pointer;white-space:nowrap">📊 匯出查詢結果 Excel</button>
-      <button onclick="document.getElementById('import-records-file').click()" style="height:28px;padding:0 14px;font-size:11px;font-weight:600;background:#555;color:#fff;border:none;border-radius:4px;cursor:pointer;white-space:nowrap">⬆ 匯入 JSON</button>
+      <button id="import-records-btn" onclick="triggerImportRecords()" style="height:28px;padding:0 14px;font-size:11px;font-weight:600;background:#555;color:#fff;border:none;border-radius:4px;cursor:pointer;white-space:nowrap">⬆ 匯入 JSON</button>
       <button id="resync-btn" onclick="resyncFromCloud()" style="height:28px;padding:0 14px;font-size:11px;font-weight:600;background:#BA7517;color:#fff;border:none;border-radius:4px;cursor:pointer;white-space:nowrap">🔄 重新同步雲端</button>
       <input type="file" id="import-records-file" accept=".json" style="display:none" onchange="importRecords(this)">
       <span id="export-import-status" style="font-size:11px;color:#1d9e75"></span>
@@ -6935,7 +6953,32 @@ function exportRecords() {
   setExportStatus(`✅ 已匯出 ${keys.length} 筆記錄 → ${filename}`, '#1d9e75');
 }
 
+// ══ V167：匯入權限守門 ══
+//  背景：ROLE_CAPS 裡 `importData` 只有 admin 是 true（supervisor 以下全 false），
+//    但 260902 查證發現 **`exportData`／`importData` 這兩個旗標全檔只有定義、沒有任何一行檢查**
+//    ⇒ 連「查詢」角色都能按「⬆ 匯入 JSON」把記錄塞進來。本版把宣告好的規則補上執行。
+//  ⚠ 只補 importData，**exportData 維持全開不動**（那是原設計：匯出的內容就是他螢幕上
+//    本來看得到的資料，且「📊 匯出查詢結果 Excel」是檢驗員日常在用的功能）。
+//  影響評估：匯入原本就只寫本機 localStorage、重複的 key 直接略過不覆蓋、不上雲，
+//    所以舊行為最多是汙染匯入者自己的瀏覽器；本版是把權限模型補齊，不是修資料外洩。
+//  作法照本檔既有慣例（applyRolePermissions）：按鈕不隱藏，變淡＋data-need-cap，點了跳權限提示。
+function triggerImportRecords() {
+  const caps = ROLE_CAPS[getCurrentUserRole()] || ROLE_CAPS.query;
+  if (!caps.importData) {
+    showNoPermToast('匯入記錄 需要管理員權限');
+    return;
+  }
+  document.getElementById('import-records-file').click();
+}
+
 function importRecords(input) {
+  // 第二道：就算有人直接觸發 file input（開發者工具／舊快取頁），這裡也擋
+  const caps = ROLE_CAPS[getCurrentUserRole()] || ROLE_CAPS.query;
+  if (!caps.importData) {
+    showNoPermToast('匯入記錄 需要管理員權限');
+    input.value = '';   // 清掉，否則同一個檔案下次選不會觸發 onchange
+    return;
+  }
   const file = input.files[0];
   if (!file) return;
   const reader = new FileReader();
@@ -8487,15 +8530,30 @@ function showLoginErr(msg){
 // 回傳 {ok:true, email} / {ok:false, msg}
 // V163：查 OMS 該 email 有沒有 QMS 授權。回 {decided, allowed}
 //  decided=false ＝「查不到／網路異常」，呼叫端要走 fail-safe（不可當成沒授權）
+// ══ V167-1：修掉 ILIKE 萬用字元問題 ══
+//  ⚠ SQL 的 ILIKE 裡 `_` ＝任意一個字元、`%` ＝任意字串。舊版直接把使用者的 email
+//    當成 pattern 丟進去 ⇒ **email 含底線的人會匹配到別人**。
+//    實例（260903 查 OMS 全 146 筆）：`patrick_huang@syncmold.com.tw`（QMS 已授權）
+//    這個 pattern 會匹配 `patrickX huang@…` 任何單一字元；而貴司信箱慣例正是「名.姓@」
+//    ⇒ 哪天有人建了 `patrick.huang@` 就會互相誤中。當下只匹配到他自己，屬潛伏狀態。
+//  ⚠ 舊版還加了 `limit=1`：萬用字元命中多列時，第一筆不保證是本人 ⇒ 會拿別人的授權來判定。
+//  修法（刻意不靠跳脫字元）：
+//    ① 查詢仍用 ilike——它只會「多撈」不會「少撈」，所以**不可能**因此把該進的人擋掉；
+//       改用 eq. 反而危險，因為 eq. 大小寫敏感，OMS 端大小寫不一致就會漏擋（該進的進不來）。
+//    ② limit 放寬到 20，避免第一筆不是本人。
+//    ③ **撈回來後在前端做精確比對**：去空白、轉小寫後必須完全相等才算數。這才是真正的把關。
 async function sbCheckOmsAuth(email) {
-  if (!email) return { decided: false, allowed: false };
+  const target = String(email || '').trim().toLowerCase();
+  if (!target) return { decided: false, allowed: false };
   try {
     const r = await fetch(OMS_IDENTITY_URL + '/rest/v1/identity_access?email=ilike.' +
-      encodeURIComponent(String(email).trim()) + '&select=email,systems,active&limit=1',
+      encodeURIComponent(String(email).trim()) + '&select=email,systems,active&limit=20',
       { headers: { apikey: OMS_IDENTITY_KEY, Authorization: 'Bearer ' + OMS_IDENTITY_KEY } });
     if (!r.ok) return { decided: false, allowed: false };
     const d = await r.json();
-    const hit = Array.isArray(d) && d[0];
+    const rows = Array.isArray(d) ? d : [];
+    // ③ 精確比對：ilike 可能因萬用字元多撈，這裡只認 email 完全相同的那一列
+    const hit = rows.find(x => String(x && x.email || '').trim().toLowerCase() === target);
     if (!hit) return { decided: true, allowed: false };            // OMS 名單查無此人＝未授權
     if (hit.active === false) return { decided: true, allowed: false };
     const sys = Array.isArray(hit.systems) ? hit.systems.map(x => String(x).toUpperCase()) : [];
@@ -9654,7 +9712,9 @@ async function resyncFromCloud() {
     if (st) { st.textContent = `✅ 已同步：FAI ${n1||0} 筆、CPK ${n2||0} 筆`; st.style.color = '#1d9e75'; }
   } catch(e) {
     console.warn('resyncFromCloud error:', e);
-    if (st) { st.textContent = '⚠ 同步失敗，請稍後再試'; st.style.color = '#c0392b'; }
+    // V167-2：本機快取在拉取前就被 clearLocalCache 清掉了 ⇒ 失敗時畫面會是空的，
+    //   訊息必須說明白，否則使用者會以為記錄不見了（資料其實還在雲端）。
+    if (st) { st.textContent = '⚠ 同步失敗：本機快取已清空、雲端未拉回。資料仍在雲端，請確認網路後再按一次「重新同步雲端」'; st.style.color = '#c0392b'; }
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = '🔄 重新同步雲端'; }
   }
@@ -10889,6 +10949,15 @@ function applyRolePermissions() {
     excelBtn.style.display = '';
     excelBtn.style.opacity = caps.submit ? '1' : '0.5';
     excelBtn.setAttribute('data-need-cap', 'submit');
+  }
+
+  // V167：匯入 JSON（僅 admin）——比照上面幾顆的做法：顯示但變淡，點了由 triggerImportRecords 攔截
+  const importBtn = document.getElementById('import-records-btn');
+  if (importBtn) {
+    importBtn.style.display = '';
+    importBtn.style.opacity = caps.importData ? '1' : '0.5';
+    importBtn.title = caps.importData ? '' : '需要管理員權限';
+    importBtn.setAttribute('data-need-cap', 'importData');
   }
 
   // 料號管理儲存

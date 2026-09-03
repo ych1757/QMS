@@ -7154,7 +7154,9 @@ function exportRecordsCSV() {
   const allRecs = histData;
 
   if (!allRecs.length) {
-    setExportStatus('⚠ 沒有查詢結果可匯出——本功能匯出的是「查詢結果」，請先按「🔎 查詢」', '#c0392b');
+    // V168：訊息要對兩種情況都成立——「還沒查」和「查了但 0 筆」。
+    //   歷史查詢頁進入時會自動查一次 ⇒ 實務上多半是後者，寫「請先按查詢」會誤導。
+    setExportStatus('⚠ 目前查詢結果 0 筆，沒有東西可匯出（本功能匯出的是「查詢結果」；要整包請用「⬇ 備份 JSON」）', '#c0392b');
     return;
   }
 

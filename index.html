@@ -186,6 +186,18 @@ table.main tr:hover td.s-col.oos{background:#ffcaca}
   /* 隱藏表單內操作按鈕 */
   .info-cell button{display:none!important}
   #print-date::before{content:'Printed: '}
+  /* ══ V168：CPK 分布圖卡片不可被分頁切開 ══
+     症狀（使用者 260903 列印實測）：卡片的標題列（球標 N・CPK 值）留在上一頁底部、
+     canvas 圖被擠到下一頁 ⇒ 兩邊都不完整，看起來像「有標題沒有圖」＋「有圖沒有標題」。
+     成因：全檔原本一條分頁規則都沒有；#cpk-charts-area 是 grid，卡片是它的直接子元素，
+           瀏覽器預設可以從卡片中間切開。
+     修法：整張卡片標成不可切割 ⇒ 放不下就整張推到下一頁（使用者要求「強制換到下頁完整呈現」）。
+     ⚠ 只影響列印（在 @media print 內），畫面顯示完全不動。
+     ⚠ 舊語法 page-break-inside 一併寫，避免舊版瀏覽器不吃新語法。 */
+  #cpk-charts-area > div{break-inside:avoid;page-break-inside:avoid}
+  #cpk-charts-area canvas{break-inside:avoid;page-break-inside:avoid}
+  /* 圖表區整體也避免緊接在頁尾起頭（免得只擠得下一張卡片的邊框） */
+  #cpk-charts-area{break-inside:auto}
   #print-formno,#cpk-print-formno{-webkit-print-color-adjust:exact;print-color-adjust:exact;background:#e8f0fb!important;border:1.5px solid #1a4f8a!important}
 }
 
@@ -421,7 +433,7 @@ input.spec-inp[type=number] { -moz-appearance:textfield; appearance:textfield; }
 // 用途＝跟使用者溝通「你看到的畫面是不是最新版」，不是品質文件的表單版次
 //（表單版次 Rev 另有其用途、目前維持 V1.0 不動，日後各廠區若有自己的表單版次需求再談）
 // 顯示位置：① 瀏覽器分頁標題 ② 登入畫面副標下方 ③ 主畫面右上（列印時自動隱藏）
-const APP_VER = 'V167-2';   // ★★ 每出一版必須同步改這一行（比照 MHR 的做法），否則畫面版號會對不上檔案版號
+const APP_VER = 'V168-1';   // ★★ 每出一版必須同步改這一行（比照 MHR 的做法），否則畫面版號會對不上檔案版號
 
 const SUPABASE_URL = 'https://vwusebvvsqyjydddupit.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_Ju-c9cuXYJil7PEJ1-NspA_ASzfIzi5';
@@ -2615,6 +2627,13 @@ function calcStats(s, usl, lsl) {
   return {mean, sigma, cpk, pctTol};
 }
 
+// ══ V168-1：Mean/σ/%Tol 的顯示格式收斂成單一出處 ══
+//  完整重繪 render() 與逐格更新 renderCalc() 兩邊都用這三支 ⇒ 格式不可能各改各的而漂移。
+//  （呼應「規則收斂到單一出處」：同一條規則用在多處就抽出來，別複製貼上。）
+const fmtMean  = st => st ? st.mean.toFixed(3) : '\u2014';
+const fmtSigma = st => (st && st.sigma) ? st.sigma.toFixed(4) : '\u2014';
+const fmtPct   = st => (st && st.pctTol !== null) ? st.pctTol.toFixed(1) + '%' : '\u2014';
+
 function getJudge(type, stats, usl, lsl, s) {
   const v = s.filter(x=>x!==null&&x!==''&&!isNaN(x)).map(Number);
 
@@ -2693,9 +2712,9 @@ function render() {
       <td style="background:#f0fff4;font-weight:600">${r.usl!==null?r.usl:''}</td>
       <td style="background:#f0fff4;font-weight:600">${r.lsl!==null?r.lsl:''}</td>
       ${sHtml}
-      <td style="font-weight:700">${stats?stats.mean.toFixed(3):'—'}</td>
-      <td>${stats&&stats.sigma?stats.sigma.toFixed(4):'—'}</td>
-      <td>${stats&&stats.pctTol!==null?stats.pctTol.toFixed(1)+'%':'—'}</td>
+      <td style="font-weight:700" id="mean_${idx}">${fmtMean(stats)}</td>
+      <td id="sigma_${idx}">${fmtSigma(stats)}</td>
+      <td id="pct_${idx}">${fmtPct(stats)}</td>
       <td><span class="badge ${judge.cls}" id="judge_${idx}">${judge.label}</span></td>
       <td class="lbl"><input value="${r.comment||''}" onchange="rows[${idx}].comment=this.value" style="font-size:10px"></td>
     `;
@@ -2748,6 +2767,21 @@ function renderCalc(idx) {
     inp.parentElement.className = 's-col' + (oos ? ' oos' : '');
     inp.className = 's-inp' + (oos ? ' oos-inp' : '');
   }
+  // ══ V168-1：Mean / σ / %Tol 也要跟著更新 ══
+  //  症狀（Noris 260902 列印、使用者 260903 重現）：在填表頁改樣本值後，
+  //    判定 badge 和超規底色會即時變，**但 Mean/σ/%Tol 停在上一次完整重繪的值**
+  //    ⇒ 畫面上四個欄位互相矛盾（例：三個樣本都在規格內、判定 OK，
+  //       Mean 卻還是舊的 6.280＝超出 USL，%Tol 143.3%）。
+  //    完整重繪只在改名目值/公差、換樣本數、載入記錄時才發生，打字時不會。
+  //  ⚠ 為什麼嚴重：**列印／存 PDF／截圖走的就是這個畫面** ⇒ 會產出數字自相矛盾的品質報表送出去。
+  //  ⚠ 存進 DB 的資料本身沒問題（Mean/σ/%Tol 不落地，是每次渲染現算），Excel 匯出也會重算；
+  //    壞的只有「輸入當下、還沒重繪」的那個畫面。
+  //  這一行以上的 stats 本來就算好了，舊版卻只拿去餵判定，三個數字一格都沒寫回去。
+  const setCell = (id, txt) => { const el = document.getElementById(id); if (el) el.textContent = txt; };
+  setCell(`mean_${idx}`,  fmtMean(stats));
+  setCell(`sigma_${idx}`, fmtSigma(stats));
+  setCell(`pct_${idx}`,   fmtPct(stats));
+
   // 更新判定 badge
   const badgeEl = document.getElementById(`judge_${idx}`);
   if (badgeEl) { badgeEl.textContent = judge.label; badgeEl.className = 'badge ' + judge.cls; }
@@ -4753,39 +4787,47 @@ function loadRecord(key) { editRecord(key); } // 向下相容
 
 // ── 備份提醒機制（方案 B，v100）──
 // 記錄上次備份時間，超過 30 天顯示提醒
+// ══ V168：備份提醒啟用（使用者 260903 定案＝B 案）══
+//  背景：這條提醒自 v100 寫好後**從未跳出來過**——checkBackupReminder() 只在
+//    exportRecords() 裡被呼叫，而那時 qms_last_backup 剛被設成現在 ⇒ 必定走隱藏分支。
+//    （V166-2 只是把那個「永遠看得見的空黃盒」關掉，沒有啟用提醒本身。）
+//  本版三件事：
+//    ① **只提醒管理員** —— 資料的家在 Supabase（V134 起），備份是管理職責，
+//       不該去煩現場檢驗員；也符合使用者原本的認知「備份只對 ADMIN 提示」。
+//    ② display 用 'flex' —— banner 的排版屬性（align-items/flex-wrap/gap）是為 flex 寫的；
+//       V166-2 拿掉重複宣告後，`display=''` 會退回 div 預設的 block，排版會跑掉。
+//    ③ **「忽略」的檢查移到最前面** —— 舊版把它放在「從未備份過」那條 early return **之後**，
+//       等於沒備份過的人按了忽略、下次登入照跳，忽略不了。啟用前必須先修，否則會一直被煩。
+//  門檻維持原設計：從未備份過→提醒；距上次備份 ≥30 天→提醒；按忽略後 7 天內不再提醒。
 function checkBackupReminder() {
-  const lastBackup = localStorage.getItem('qms_last_backup');
   const banner = document.getElementById('backup-reminder-banner');
   if (!banner) return;
-
-  if (!lastBackup) {
-    // 從未備份過
-    banner.style.display = '';
+  const hide = () => { banner.style.display = 'none'; banner.innerHTML = ''; };
+  const show = (msg) => {
+    banner.style.display = 'flex';
     banner.innerHTML = `
-      <span style="font-size:13px">⚠ 尚未進行過資料備份，建議立即備份以防資料遺失</span>
+      <span style="font-size:13px">${msg}</span>
       <button onclick="exportRecords()" style="height:26px;padding:0 12px;background:#c0392b;color:#fff;border:none;border-radius:4px;font-size:11px;cursor:pointer;margin-left:12px;font-weight:700">立即備份</button>
       <button onclick="dismissBackupReminder()" style="height:26px;padding:0 10px;background:transparent;color:#c0392b;border:1px solid #c0392b;border-radius:4px;font-size:11px;cursor:pointer;margin-left:6px">忽略</button>
     `;
-    return;
-  }
+  };
 
-  // 修正：忽略後 7 天內不再提醒（用獨立 key，不竄改真實備份時間）
+  // ① 只提醒管理員
+  if (getCurrentUserRole() !== 'admin') { hide(); return; }
+
+  // ③ 「忽略」後 7 天內不再提醒（獨立 key，不竄改真實備份時間）
   const dismissedAt = localStorage.getItem('qms_backup_dismissed_at');
   if (dismissedAt) {
     const daysSinceDismiss = Math.floor((Date.now() - new Date(dismissedAt)) / (1000 * 60 * 60 * 24));
-    if (daysSinceDismiss < 7) { banner.style.display = 'none'; return; }
+    if (daysSinceDismiss < 7) { hide(); return; }
   }
+
+  const lastBackup = localStorage.getItem('qms_last_backup');
+  if (!lastBackup) { show('⚠ 尚未進行過資料備份，建議立即備份以防資料遺失'); return; }
+
   const daysSince = Math.floor((Date.now() - new Date(lastBackup)) / (1000 * 60 * 60 * 24));
-  if (daysSince >= 30) {
-    banner.style.display = '';
-    banner.innerHTML = `
-      <span style="font-size:13px">⚠ 距上次備份已 <b>${daysSince}</b> 天，建議立即備份</span>
-      <button onclick="exportRecords()" style="height:26px;padding:0 12px;background:#c0392b;color:#fff;border:none;border-radius:4px;font-size:11px;cursor:pointer;margin-left:12px;font-weight:700">立即備份</button>
-      <button onclick="dismissBackupReminder()" style="height:26px;padding:0 10px;background:transparent;color:#c0392b;border:1px solid #c0392b;border-radius:4px;font-size:11px;cursor:pointer;margin-left:6px">忽略</button>
-    `;
-  } else {
-    banner.style.display = 'none';
-  }
+  if (daysSince >= 30) show(`⚠ 距上次備份已 <b>${daysSince}</b> 天，建議立即備份`);
+  else hide();
 }
 
 function dismissBackupReminder() {
@@ -7124,11 +7166,19 @@ function exportRecordsXLSX() {
 
 // CSV 匯出（依當前查詢結果，不依賴外部套件）
 function exportRecordsCSV() {
-  // 使用當前查詢結果（histData），而非全部記錄
-  const allRecs = histData.length ? histData : getAllRecords();
+  // ══ V168：行為對齊按鈕標籤「匯出查詢結果」══
+  //  舊版寫 `histData.length ? histData : getAllRecords()`——註解明明寫著「而非全部記錄」，
+  //  那個 fallback 卻正好推翻它。兩種情況會踩到（使用者 260903 實測抓到第一種）：
+  //    ① 還沒按「🔎 查詢」(histData 空) → 靜默匯出**全部**記錄
+  //    ② **查詢結果剛好 0 筆 → 也匯出全部** ← 更糟：以為篩到沒東西，實際拿到整包
+  //  跟同日修的 resyncFromCloud 同一類：fallback 悄悄做了比標籤承諾更大的事。
+  //  ⇒ 拿掉 fallback。要整包請用旁邊的「⬇ 備份 JSON」，那顆才是「全部」。
+  const allRecs = histData;
 
   if (!allRecs.length) {
-    setExportStatus('⚠ 無符合條件的記錄，請先執行查詢', '#c0392b');
+    // V168：訊息要對兩種情況都成立——「還沒查」和「查了但 0 筆」。
+    //   歷史查詢頁進入時會自動查一次 ⇒ 實務上多半是後者，寫「請先按查詢」會誤導。
+    setExportStatus('⚠ 目前查詢結果 0 筆，沒有東西可匯出（本功能匯出的是「查詢結果」；要整包請用「⬇ 備份 JSON」）', '#c0392b');
     return;
   }
 
@@ -10970,6 +11020,10 @@ function applyRolePermissions() {
 
   // 儲存 caps 供其他地方使用
   window._currentCaps = caps;
+
+  // V168：備份提醒——掛在這裡＝每次登入／角色變動都會重算（單一出處，不用逐個登入路徑補）
+  //  舊版只有 exportRecords() 會呼叫它 ⇒ 登入時根本不跑，提醒等於死碼。
+  try { checkBackupReminder(); } catch(e) { console.warn('checkBackupReminder:', e); }
 
   // 顯示角色標示
   const badgeUser = document.getElementById('badge-user');

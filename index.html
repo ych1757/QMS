@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>FAI Inspection Data Sheet — 05360000-004</title>
+<title>QMS 品質管理系統</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{overflow-x:hidden;max-width:100vw}
@@ -186,6 +186,13 @@ table.main tr:hover td.s-col.oos{background:#ffcaca}
   /* 隱藏表單內操作按鈕 */
   .info-cell button{display:none!important}
   #print-date::before{content:'Printed: '}
+  /* ══ V169-1：列印 CPK 報告時隱藏「IQC 來料檢驗報告」表頭 ══
+     使用者 260904：印 CPK 卻掛著「IQC Incoming Quality Control 來料檢驗報告」＋
+     右側「Doc No: IQC-REPORT」，會讓人誤以為是進料檢驗；而下面「📊 CPK REPORT 製程能力分析」
+     那一整塊本身就是完整表頭（含表單編號/料號/檢驗員/日期），不缺資訊。
+     ⚠ 列印日期不會不見——瀏覽器頁首左上角本來就會印。
+     只在列印時生效（body.printing-cpk 由 _cpkDoPrint / printAsPDF 掛上、印完移除），畫面顯示不動。 */
+  body.printing-cpk .logo-bar{display:none!important}
   /* ══ V168：CPK 分布圖卡片不可被分頁切開 ══
      症狀（使用者 260903 列印實測）：卡片的標題列（球標 N・CPK 值）留在上一頁底部、
      canvas 圖被擠到下一頁 ⇒ 兩邊都不完整，看起來像「有標題沒有圖」＋「有圖沒有標題」。
@@ -198,6 +205,11 @@ table.main tr:hover td.s-col.oos{background:#ffcaca}
   #cpk-charts-area canvas{break-inside:avoid;page-break-inside:avoid}
   /* 圖表區整體也避免緊接在頁尾起頭（免得只擠得下一張卡片的邊框） */
   #cpk-charts-area{break-inside:auto}
+  /* V169-8（使用者 260904 選乙案）：螢幕一行 2 張（min 460px），但 A4 只有 794px，
+     跟著變寬會掉成一行 1 張、20 個球標要印 7 頁。列印固定回 min 300px ⇒ 一頁仍 6 張。
+     ⚠ 只改版型不夠——圖是照「畫的當下」的卡片寬度產生的，寬度一變會被壓扁，
+       所以另有 beforeprint 會以列印寬度重畫一次（見 cpkRedrawCharts 附近）。 */
+  #cpk-charts-area{grid-template-columns:repeat(auto-fill,minmax(300px,1fr))!important}
   #print-formno,#cpk-print-formno{-webkit-print-color-adjust:exact;print-color-adjust:exact;background:#e8f0fb!important;border:1.5px solid #1a4f8a!important}
 }
 
@@ -433,7 +445,7 @@ input.spec-inp[type=number] { -moz-appearance:textfield; appearance:textfield; }
 // 用途＝跟使用者溝通「你看到的畫面是不是最新版」，不是品質文件的表單版次
 //（表單版次 Rev 另有其用途、目前維持 V1.0 不動，日後各廠區若有自己的表單版次需求再談）
 // 顯示位置：① 瀏覽器分頁標題 ② 登入畫面副標下方 ③ 主畫面右上（列印時自動隱藏）
-const APP_VER = 'V168-1';   // ★★ 每出一版必須同步改這一行（比照 MHR 的做法），否則畫面版號會對不上檔案版號
+const APP_VER = 'V169-9';   // ★★ 每出一版必須同步改這一行（比照 MHR 的做法），否則畫面版號會對不上檔案版號
 
 const SUPABASE_URL = 'https://vwusebvvsqyjydddupit.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_Ju-c9cuXYJil7PEJ1-NspA_ASzfIzi5';
@@ -917,13 +929,22 @@ async function sbSaveSite(site) {
       sort_order: site.sort || 0,
       updated_at: new Date().toISOString()
     };
-    await fetch(SUPABASE_URL + '/rest/v1/qms_site_config?on_conflict=code', {
+    const res = await fetch(SUPABASE_URL + '/rest/v1/qms_site_config?on_conflict=code', {
       method: 'POST',
       headers: { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer(),
         'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates' },
       body: JSON.stringify(payload)
     });
-  } catch(e) { console.warn('廠區同步失敗:', e); }
+    // ══ V169：HTTP 失敗要往外丟 ══
+    //  ⚠ fetch 只有「網路層失敗」才 reject；HTTP 401/403/409 都算正常回應
+    //    ⇒ 舊版沒檢查 res.ok，catch 永遠不會觸發、呼叫端的 .catch() 也接不到，
+    //      失敗完全靜默。⚙設定 頁的手動「上傳」還因此把失敗算成成功（siteOk++）。
+    //  （這是本檔第四個同型缺陷：V144 sbFetchAllRows／V167-2 resyncFromCloud／sbInit 橫幅／本處。）
+    if (!res.ok) {
+      const _b = await res.text().catch(() => '');
+      throw new Error('廠區同步失敗 HTTP ' + res.status + (_b ? ' ' + _b.slice(0, 200) : ''));
+    }
+  } catch(e) { console.warn('廠區同步失敗:', e); throw e; }
 }
 
 // ══ 廠區設定：刪除單筆從 Supabase ══
@@ -945,7 +966,7 @@ async function sbPullSiteConfig() {
     const data = await res.json();
     if (!data || !data.length) return;
     const list = data.map(r => ({ code: r.code, name: r.name, lang: r.lang, active: r.active, sort: r.sort_order }));
-    saveSiteConfig(list);
+    saveSiteConfig(list, false);   // V169：剛從雲端拉下來的，不要再推回去
     console.log('☁ 廠區設定已同步:', list.length, '筆');
   } catch(e) { console.warn('廠區設定同步失敗:', e); }
 }
@@ -956,13 +977,17 @@ async function sbSaveSupplier(supplier) {
   try {
     const payload = { code: supplier.code, name: supplier.name,
       active: supplier.active !== false, updated_at: new Date().toISOString() };
-    await fetch(SUPABASE_URL + '/rest/v1/qms_supplier_list?on_conflict=code', {
+    const res = await fetch(SUPABASE_URL + '/rest/v1/qms_supplier_list?on_conflict=code', {
       method: 'POST',
       headers: { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer(),
         'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates' },
       body: JSON.stringify(payload)
     });
-  } catch(e) { console.warn('供應商同步失敗:', e); }
+    if (!res.ok) {   // V169：同 sbSaveSite，HTTP 失敗不可吞掉
+      const _b = await res.text().catch(() => '');
+      throw new Error('供應商同步失敗 HTTP ' + res.status + (_b ? ' ' + _b.slice(0, 200) : ''));
+    }
+  } catch(e) { console.warn('供應商同步失敗:', e); throw e; }
 }
 
 // ══ 供應商清單：從 Supabase 拉取 ══
@@ -975,7 +1000,7 @@ async function sbPullSupplierList() {
     const data = await res.json();
     if (!data || !data.length) return;
     const list = data.map(r => ({ code: r.code, name: r.name, active: r.active }));
-    saveSupplierList(list);
+    saveSupplierList(list, false);   // V169：剛從雲端拉下來的，不要再推回去
     console.log('☁ 供應商清單已同步:', list.length, '筆');
   } catch(e) { console.warn('供應商清單同步失敗:', e); }
 }
@@ -1799,7 +1824,7 @@ async function sbInit() {
             <th style="white-space:nowrap">品名</th>
             <th style="white-space:nowrap">檢驗員</th>
             <th data-sort="result" onclick="sortHist(this,'result')" style="white-space:nowrap">判定</th>
-            <th style="white-space:nowrap">CPK</th>
+            <th style="white-space:nowrap" title="達標球標數 / 總球標數（Cpk ≥ 1.33 視為達標）">CPK<br><span style="font-size:9px;font-weight:400;opacity:.8">達標/總數</span></th>
             <th data-sort="date" onclick="sortHist(this,'date')" style="white-space:nowrap;min-width:80px">檢驗日期</th>
             <th data-sort="savedAt" onclick="sortHist(this,'savedAt')" style="white-space:nowrap">儲存時間</th>
             <th style="white-space:nowrap">操作</th>
@@ -2339,7 +2364,7 @@ async function sbInit() {
 
     <!-- 分布圖區 -->
     <div id="cpk-results-area" style="display:none">
-      <div id="cpk-charts-area" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px"></div>
+      <div id="cpk-charts-area" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(460px,1fr));gap:16px"></div>
     </div>
 
   </div><!-- end tab-cpk -->
@@ -3205,7 +3230,11 @@ function saveNCR() {
 }
 
 function printNCR() {
-  window.print();
+  // V169-1：NCR 也給個看得出來的標題（原本直接 print，檔名會變成寫死的預設值）
+  const no = (document.getElementById('ncr-no') || {}).value
+          || (document.getElementById('ncr-no') || {}).textContent || '';
+  const pn = (document.getElementById('h-partno') || {}).value || '';
+  printWithTitle(buildPrintTitle('NCR', pn, no));
 }
 
 function syncSpec(idx) {
@@ -4185,6 +4214,12 @@ function getAllRecords() {
           overall:   cpkOverall(pts),  // 防呆判定：先看是否在規格內，再看 Cpk
           unmeasured: countUnmeasuredPts(pts).un,      // V156：未量測項目數（純標示）
           rowsTotal:  countUnmeasuredPts(pts).total,
+          // V169-4：這筆實際量了幾筆樣本（取各球標中最多的那個＝這筆是用 n=? 跑的）
+          //  ⚠ 為什麼要標：程式自己的註解就寫著「完整 CPK 計算需 ≥ 32 筆」，
+          //    但 CPK 分析頁沒擋、歷史查詢也看不出來 ⇒ n=3 跑出來的 Cpk（甚至 −2.5）
+          //    會被當成製程能力報告用。純標示，不改任何判定。
+          sampleN: Math.max(0, ...pts.map(p => (p.values || [])
+                     .filter(x => x != null && x !== '' && !isNaN(x)).length)),
           cpkPass:   pts.filter(p => { const s = cpkCalcStats ? cpkCalcStats(p.values, p.usl, p.lsl, p.nom) : null; return s?.cpk != null && s.cpk >= 1.33; }).length,
           cpkTotal:  pts.length,
           isRecord:  true,
@@ -4500,7 +4535,9 @@ function sortAndRenderHist() {
       <td style="font-size:11px">${rec.partname||'—'}</td>
       <td>${rec.inspector||'—'}</td>
       <td><span class="hist-result-badge ${resultCls}">${rec.overall||'—'}</span>${rec.unmeasured ? `<div style="font-size:10px;color:#BA7517;font-weight:700;white-space:nowrap;margin-top:2px" title="有項目沒有輸入數值；判定僅依已量測的項目計算">⚠ ${rec.unmeasured}/${rec.rowsTotal}<br>未測</div>` : ''}</td>
-      <td style="text-align:center">${cpkStr}</td>
+      <td style="text-align:center">${cpkStr}${(rec.process === 'CPK' && rec.sampleN > 0 && rec.sampleN < 32)
+        ? `<div style="font-size:10px;color:#BA7517;font-weight:700;white-space:nowrap;margin-top:2px" title="這筆只量了 ${rec.sampleN} 筆樣本，未達製程能力分析建議的 32 筆；Cpk 僅供參考，不宜當製程能力報告">⚠ n=${rec.sampleN}</div>`
+        : ''}</td>
       <td style="font-size:10px;white-space:nowrap">${rec.date||'—'}</td>
       <td style="font-size:11px;color:#666;white-space:nowrap">
         <div>📁 ${savedStr}</div>
@@ -4839,15 +4876,43 @@ function dismissBackupReminder() {
 
 // 🖨 列印 / 存成 PDF（v90）
 // 提示使用者選擇「Microsoft Print to PDF」或「另存為 PDF」選項
-function printAsPDF() {
-  // 在頁面標題加上表單編號，方便 PDF 存檔時辨識
-  const formNo = document.getElementById('form-no-display')?.textContent
-    || document.querySelector('.form-no')?.textContent || '';
+// ══ V169-1：列印／存 PDF 的標題收斂成單一出處 ══
+//  瀏覽器的**頁首**與**「另存為 PDF」的預設檔名**都取自 document.title。
+//  ⚠ 舊版四條列印路徑中三條完全沒設標題（printRecord 的 FAI 分支、_cpkDoPrint、printNCR），
+//    唯一有設的 printAsPDF 又是抓 `#form-no-display`／`.form-no`——**這兩個元素不存在**
+//    ⇒ 全部回頭用 <title> 那個寫死的「FAI Inspection Data Sheet — 05360000-004」。
+//    使用者 260904 實測：印料號 56500000-001 的 FAI，存出來的檔名卻是 05360000-004。
+//  格式：`料號 — 表單編號`；CPK 前面加 `CPK` 以資區別；NCR 加 `NCR`。
+//  ⚠ 與 V161 的「列印時剝除分頁標題版號」相容：本函式設的標題不帶 APP_VER 尾碼，
+//    beforeprint 的 endsWith 檢查不會成立 ⇒ 不會誤剝、afterprint 也不會誤加。
+function printWithTitle(title) {
   const origTitle = document.title;
-  if (formNo && formNo.trim()) document.title = formNo.trim();
+  const t = String(title || '').trim();
+  if (t) document.title = t;
   window.print();
-  // 列印對話框關閉後還原標題
-  setTimeout(() => { document.title = origTitle; }, 2000);
+  setTimeout(() => { document.title = origTitle; }, 2000);   // 列印對話框關閉後還原
+}
+
+// 組標題：把空值濾掉再用「 — 」串起來
+function buildPrintTitle(prefix, partno, formNo) {
+  return [prefix, String(partno || '').trim(), String(formNo || '').trim()]
+    .filter(Boolean).join(' — ');
+}
+
+function printAsPDF() {
+  // V169-1：依目前所在分頁決定標題與是否隱藏 IQC 表頭
+  const onCpk = !!document.querySelector('#tab-cpk.tab-pane.active');
+  if (onCpk) {
+    const pn = (document.getElementById('cpk-partno') || {}).value || '';
+    const fn = ((document.getElementById('cpk-print-formno') || {}).textContent || '').replace(/^\s*📋\s*/, '');
+    document.body.classList.add('printing-cpk');
+    printWithTitle(buildPrintTitle('CPK', pn, fn));
+    setTimeout(() => document.body.classList.remove('printing-cpk'), 2000);
+  } else {
+    const pn = (document.getElementById('h-partno') || {}).value || '';
+    const fn = ((document.getElementById('print-formno') || {}).textContent || '').replace(/^\s*📋\s*/, '');
+    printWithTitle(buildPrintTitle('', pn, fn));
+  }
 }
 
 // V166-1：CPK 列印選項對話框（樣式比照存檔時的 showEditChoiceDialog）
@@ -4898,8 +4963,11 @@ function _cpkDoPrint(recData, wantChart) {
     // 等表格渲染完才算得到值（cpkCalculateAll 是從 #cpkv_x_y 輸入格讀數）
     if (wantChart) cpkCalculateAll();
     setTimeout(() => {
-      window.print();
+      // V169-1：隱藏「IQC 來料檢驗報告」表頭＋設定看得出是 CPK 的標題／PDF 檔名
+      document.body.classList.add('printing-cpk');
+      printWithTitle(buildPrintTitle('CPK', recData.partno, cpkFormNo));
       setTimeout(() => {
+        document.body.classList.remove('printing-cpk');
         if (cpkFormNoEl) { cpkFormNoEl.style.display = 'none'; cpkFormNoEl.textContent = ''; }
         if (chartsArea) chartsArea.innerHTML = '';   // 印完清掉，不留給下一筆
         switchTabForce('hist');
@@ -4962,7 +5030,9 @@ function printRecord(key) {
 
   // 等頁面渲染完成後列印，列印完切回歷史查詢並清空填表頁
   setTimeout(() => {
-    window.print();
+    // V169-1：設定標題 ⇒ 瀏覽器頁首與「另存 PDF」檔名才會帶正確料號與單號
+    //  （舊版直接 window.print()，兩者都會用 <title> 那個寫死的預設值）
+    printWithTitle(buildPrintTitle('', (recData.header || {}).partno, formNo));
     // 列印對話框關閉後切回歷史查詢
     setTimeout(() => {
       // 隱藏表單編號
@@ -6536,12 +6606,28 @@ function loadSiteConfig() {
   return SITE_LIST;
 }
 
-function saveSiteConfig(list) {
+// ══ V169：加 syncCloud 參數（預設 true，11 個既有編輯呼叫點行為不變）══
+//  ⚠ 舊版的迴圈：sbPullSiteConfig() 從雲端拉下來 → 呼叫本函式存本機 →
+//    本函式又把整份清單「原封不動推回雲端」⇒ **拉下來立刻推回去**。
+//    而 sbInit() 是 setTimeout(sbInit, 1000)＝載入後 1 秒自動跑、**那時還沒登入**
+//    ⇒ sbAuthBearer() 拿不到 session、退回 anon key ⇒ 19 筆寫入（16 廠區＋3 供應商）
+//      以 anon 身分發出 ⇒ 全被 401 擋下（Console 每次載入噴一整排紅字）。
+//  ⚠ 那些 401 本身無害（推的是剛讀下來的同一份資料，失敗也沒有任何損失），
+//    但它們**製造噪音、會掩蓋真正的錯誤**，而且每次載入白跑 19 次。
+//  ⇒ 拉取路徑改傳 syncCloud=false，只存本機不回推。
+function saveSiteConfig(list, syncCloud) {
+  if (syncCloud === undefined) syncCloud = true;
   SITE_LIST = list;
   try { localStorage.setItem(SITE_CONFIG_KEY, JSON.stringify(list)); } catch(e) {}
-  // ☁ 同步每筆廠區到 Supabase（新增/修改時）
-  if (_sbReady) {
-    list.forEach(s => sbSaveSite(s).catch(e => console.warn('廠區同步失敗:', s.code, e)));
+  // ☁ 同步每筆廠區到 Supabase（只有「真的編輯」時才推，拉取回來不推）
+  if (_sbReady && syncCloud) {
+    Promise.allSettled(list.map(s => sbSaveSite(s))).then(rs => {
+      const bad = rs.map((r, i) => r.status === 'rejected' ? list[i].code : null).filter(Boolean);
+      if (!bad.length) return;
+      // V169：失敗要看得見——本機已存但雲端沒進去，不講的話別台電腦會看到舊資料
+      console.warn('廠區同步失敗:', bad, (rs.find(r => r.status === 'rejected') || {}).reason);
+      try { showSyncToast('⚠ 廠區設定有 ' + bad.length + ' 筆未同步到雲端（' + bad.join('、') + '）——本機已存，請確認已登入管理員後重試', true); } catch(e) {}
+    });
   }
   renderSiteSelect();
 }
@@ -9185,6 +9271,13 @@ function cpkLoadSpec() {
   setV('cpk-supplier', sp.supplier||'');
   // 只帶 CPK 類型的量測點，保留原始 FAI# 編號
   const allSpecs = sp.specs || [];
+  //  V169-8：換料號 ⇒ 量測點整組換掉，舊圖立刻作廢。
+  //  這裡刻意「只作廢不重算」——料號是逐字輸入的，每打一個字重畫 20 幾張圖太重。
+  //  ⚠ 措辭要精確：這條路徑（cpkLoadSpec）只帶「規格」（球標／名目值／上下限），
+  //    values 是空陣列 ⇒ 這時候按「計算」不會有任何東西。必須先填量測值。
+  cpkInvalidateCharts('料號已變更，量測值輸入完成後再按「📊 計算 + 分布圖」');
+  const _fn1 = document.getElementById('cpk-print-formno');
+  if (_fn1) { _fn1.textContent = ''; _fn1.style.display = 'none'; }
   cpkPoints = [];
   allSpecs.forEach((s, i) => {
     if (s.type === 'CPK') {
@@ -9406,6 +9499,9 @@ function cpkClearAll() {
   document.getElementById('cpk-results-area').style.display = 'none';
   const el = document.getElementById('cpk-status');
   if (el) el.textContent = '';
+  cpkInvalidateCharts('');   // V169-8：清空 → 分布圖也要清掉，不能留著上一筆的
+  const _fn0 = document.getElementById('cpk-print-formno');
+  if (_fn0) { _fn0.textContent = ''; _fn0.style.display = 'none'; }
   cpkRenderTable();
 }
 
@@ -9534,7 +9630,10 @@ function cpkCalculateAll() {
   const chartsArea = document.getElementById('cpk-charts-area');
   if (chartsArea) {
     chartsArea.innerHTML = '';
-    chartsArea.style.gridTemplateColumns = 'repeat(auto-fill,minmax(300px,1fr))';
+    // V169-8：最小欄寬 300→460 ⇒ 你的螢幕（約 1172px）由一行 3 張變 2 張。
+    //  卡片 380→578px，刻度變細（球標14 由 0.05→0.02）、統計列也不再擠。
+    //  ⚠ 列印另有版型（見 @media print 與 beforeprint），不受這行影響。
+    chartsArea.style.gridTemplateColumns = 'repeat(auto-fill,minmax(460px,1fr))';
     cpkPoints.forEach((pt, pi) => {
       const st = cpkCalcStats(pt.values, pt.usl, pt.lsl, pt.nom);
       if (!st) return;
@@ -9552,6 +9651,7 @@ function cpkCalculateAll() {
         canvas.id = `cpk-chart-${pi}`;
         canvas.style.cssText = 'width:100%;display:block';
         canvas.height = 180;
+        canvas.__pt = pt; canvas.__st = st;   // V169-8：供 cpkRedrawCharts() 用（列印切換版型時重畫）
         canvasWrap.appendChild(canvas);
         requestAnimationFrame(() => cpkDrawChart(canvas, pt, st));
       } else {
@@ -9569,23 +9669,154 @@ function cpkCalculateAll() {
   if (el) { el.textContent = `✅ 計算完成 ${cpkPoints.length} 個量測點`; el.style.color='#1d9e75'; }
 }
 
+// ══ V169-8：分布圖的「重畫」與「作廢」兩支共用函式 ══
+//  背景（使用者 260904 發現）：#cpk-charts-area 舊版只有 cpkCalculateAll() 會清空 ⇒
+//    換料號／從查詢帶入別筆／按「清空」之後，上一次的分布圖照樣留在畫面上，
+//    而且**列印會照印** ⇒ 印出表頭是新料號、圖是舊料號的報表。
+function cpkRedrawCharts() {
+  document.querySelectorAll('#cpk-charts-area canvas').forEach(cv => {
+    if (cv.__pt && cv.__st) {
+      try { cpkDrawChart(cv, cv.__pt, cv.__st); } catch(e) { console.warn('cpkRedrawCharts:', e); }
+    }
+  });
+}
+function cpkInvalidateCharts(msg) {
+  const a = document.getElementById('cpk-charts-area');
+  if (!a) return;
+  //  ⚠ 不是靜靜消失 —— 要講清楚下一步按什麼，否則使用者只會覺得圖不見了。
+  a.innerHTML = msg
+    ? '<div style="grid-column:1/-1;padding:16px;text-align:center;color:#BA7517;font-size:12px;'
+      + 'background:#fffaf0;border:1px dashed #e0c48a;border-radius:6px">⚠ ' + msg + '</div>'
+    : '';
+}
+
+// ══ V169-8：列印前以「列印版型的欄寬」重畫，印完還原 ══
+//  canvas 的點陣是照畫的當下的卡片寬度產生的。螢幕 578px、列印 351px，
+//  不重畫就是把 1156×528 的圖塞進窄框 ⇒ 壓扁＋字被縮到約 5pt。
+window.addEventListener('beforeprint', () => {
+  const a = document.getElementById('cpk-charts-area');
+  if (!a || !a.querySelector('canvas')) return;
+  a.style.gridTemplateColumns = 'repeat(auto-fill,minmax(300px,1fr))';
+  void a.offsetWidth;              // 強制重排，讓 offsetWidth 反映新欄寬
+  cpkRedrawCharts();
+});
+window.addEventListener('afterprint', () => {
+  const a = document.getElementById('cpk-charts-area');
+  if (!a || !a.querySelector('canvas')) return;
+  a.style.gridTemplateColumns = 'repeat(auto-fill,minmax(460px,1fr))';
+  void a.offsetWidth;
+  cpkRedrawCharts();
+});
+
+// V169-3：把任意範圍換算成人看得懂的刻度間隔（1 / 2 / 5 × 10ⁿ）
+//  舊版是把 X 軸硬切 4 等分 ⇒ 刻度變成 2.66 / 2.72 / 2.77 / 2.82 / 2.88 這種
+//  不整齊的數字，四捨五入到 2 位後連間隔看起來都不一致，也沒辦法跟別的尺寸比。
+function cpkNiceStep(range, targetTicks) {
+  const raw = range / (targetTicks || 4);
+  if (!(raw > 0) || !isFinite(raw)) return 1;
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const n = raw / mag;
+  // ⚠ 取「最接近」的整齊值，不是一律進位：
+  //   一律進位的話 raw=0.0545 會跳到 0.1（整條軸只剩 2 個刻度，太粗）；
+  //   取最接近則落在 0.05，公差 0.16 的尺寸剛好 4 格、USL 落在刻度上。
+  return (n < 1.5 ? 1 : n < 3 ? 2 : n < 7 ? 5 : 10) * mag;
+}
+
 function cpkDrawChart(canvas, pt, st) {
   const vals = pt.values.filter(v => v != null && !isNaN(v));
   if (vals.length < 2) return;
   const {mean, sigma, usl, lsl, cp, cpk} = { usl:pt.usl, lsl:pt.lsl, ...st };
-  const nBins = Math.min(Math.max(Math.round(Math.sqrt(vals.length)), 5), 12);
+  // ══ V169-2：直方圖分箱改「對齊量測解析度」（A+ 案）══
+  //  ⚠ 舊版把**整條 X 軸**等分成 √n 格。但 X 軸一定要涵蓋 LSL/USL 再各加 18% 留白，
+  //    而實務上量測值多半集中在規格帶的 20~30% 內 ⇒ 格子被空白區稀釋得極寬。
+  //    實測（SH-CPK-260901-0006 四個球標）：32 筆資料**全部只落在 0.9~1.4 格**，
+  //    畫出來就是一兩根巨柱＋大片空白，完全看不出分布。
+  //  ⇒ 改成 bin 只在「資料實際範圍」內切，X 軸維持涵蓋規格（CPK 圖的重點就是
+  //    看資料相對規格在哪，軸縮到只剩資料範圍反而看不出離規格多遠）。
+  //  ⚠ 而且格寬**對齊量測解析度**（CMM 讀到小數第 2 位 ⇒ 0.01）：
+  //    每個實際量得到的數值各佔一格 = 這份資料能呈現的最細且不造假的分箱。
+  //    若硬切更細（例如固定 10 格 → 格寬 0.005），會有格子**物理上不可能有資料**，
+  //    畫出來是 [2,7,0,0,11,7,0,0,4,1] 這種梳子狀假象，放進品質報告會誤導。
+  //  ⚠ 保險：格數超過 20（解析度很細又範圍很寬）就退回「資料範圍等分 √n 格」。
+  const vMin = Math.min(...vals), vMax = Math.max(...vals);
   const dataMin = Math.min(...vals, lsl ?? mean-3*sigma);
   const dataMax = Math.max(...vals, usl ?? mean+3*sigma);
   const pad = (dataMax-dataMin)*0.18;
-  const xMin = dataMin-pad, xMax = dataMax+pad;
-  const binW = (xMax-xMin)/nBins;
+  // ══ V169-6：X 軸刻度要配合「量測精度」，不能只按公差上下限切 ══
+  //  症狀（使用者 260904 提出，球標 21-x 實例）：量測值是小數三位（0.193/0.195/0.198），
+  //    公差卻是 0.000~0.200 ⇒ X 軸被公差帶撐開，三個值全部塞進同一格刻度裡看不出分布。
+  //  ⚠ 為什麼不能「只把刻度調密」就好（實測過，不是猜的）：
+  //    X 軸總寬 0.272、繪圖區 416px、刻度標籤「0.188」約 22px。
+  //    刻度細到 0.01 ⇒ 28 格、間距 15px ⇒ 標籤互相重疊；細到 0.005 ⇒ 55 格、間距 8px。
+  //    也就是說**不縮 X 軸的話，刻度最細只能到精度的 20~100 倍**，這是幾何限制不是實作選擇。
+  //  ⇒ 資料佔不到畫面 25% 時，把 X 軸收到資料附近；刻度自然落到精度的 2~20 倍。
+  //  ⚠ 縮視野會讓規格線掉出畫面，那是 CPK 圖的核心資訊，所以配套兩件（缺一不可）：
+  //    (a) 出界的 LSL/USL 改在圖邊緣用三角＋數值標出（見下方 markers 區塊）
+  //    (b) 底部加「公差全景條」，畫完整公差帶＋資料落點＋佔比（見函式尾端）
+  //    沒有 (a)(b) 的話，放大後的圖會讓人誤判變異變大、也看不出離規格多遠。
+  let xMin = dataMin-pad, xMax = dataMax+pad;
+  if (vMax > vMin && (vMax - vMin) < (xMax - xMin) * 0.25) {
+    const _c = (vMin + vMax) / 2;
+    const _half = Math.max((vMax - vMin) * 0.75, 3 * sigma);
+    let _a = _c - _half, _b = _c + _half;
+    // 規格線只差一點點就進得來的話就拉進來，不要為了放大白白犧牲規格線
+    if (lsl != null && lsl < _a && lsl > _c - _half * 1.6) _a = lsl - _half * 0.10;
+    if (usl != null && usl > _b && usl < _c + _half * 1.6) _b = usl + _half * 0.10;
+    xMin = _a; xMax = _b;
+  }
+  // 量測解析度＝所有數值中小數位數最多的那個（2.81 / 48.94 → 0.01）
+  const _dec = Math.max(0, ...vals.map(v => {
+    const t = String(v), i = t.indexOf('.');
+    return i < 0 ? 0 : t.length - i - 1;
+  }));
+  const _res = Math.pow(10, -_dec);
+  const _resBins = Math.round((vMax - vMin) / _res) + 1;
+  let nBins, binW, binMin;
+  if (vMax > vMin && _resBins >= 3 && _resBins <= 20) {
+    nBins = _resBins; binW = _res; binMin = vMin - _res/2;   // 讓每個量測值落在格子正中
+  } else {
+    nBins = Math.min(Math.max(Math.round(Math.sqrt(vals.length)), 5), 12);
+    binW = (vMax > vMin) ? (vMax - vMin) / nBins : (xMax - xMin) / nBins;
+    binMin = (vMax > vMin) ? vMin : xMin;
+  }
+  // ⚠ V169-2 保護：柱子不能細到看不見。
+  //  bin 改在「資料範圍」內切之後，若資料只佔整條軸的一小段（＝製程能力很好、
+  //  Cpk 很高），每根柱子的像素寬可能不到 1px ⇒ fillRect 拿到負寬度、整排柱子消失。
+  //  （舊版 bin 橫跨整條軸不會有這問題，是本版改法引入的，邊界測試抓到。）
+  //  依實際可用繪圖寬度回推「每根至少 4px」能容納幾格，超過就降格數。
+  const _pwEst = ((canvas.offsetWidth || 300) - 54);
+  const _dataPx = _pwEst * (vMax - vMin) / (xMax - xMin);
+  const _maxBins = Math.max(3, Math.floor(_dataPx / 4));
+  if (nBins > _maxBins) {
+    nBins = _maxBins;
+    binW = (vMax > vMin) ? (vMax - vMin) / nBins : (xMax - xMin) / nBins;
+    binMin = (vMax > vMin) ? vMin : xMin;
+  }
+
   const bins = Array(nBins).fill(0);
-  vals.forEach(v => { const bi = Math.min(Math.floor((v-xMin)/binW), nBins-1); bins[bi]++; });
+  vals.forEach(v => {
+    const bi = Math.min(Math.max(Math.floor((v - binMin) / binW), 0), nBins - 1);
+    bins[bi]++;
+  });
   const ctx = canvas.getContext('2d');
   const W = canvas.offsetWidth || 300;
-  const H = 220;
-  canvas.width = W; canvas.height = H;
-  const ml=38, mr=16, mt=52, mb=32;
+  const H = 264;   // V169-6：220 + 44（底部公差全景條）
+  // ══ V169-7：畫布改用高像素密度 ══
+  //  症狀（使用者 260904）：分布圖的字和細線看起來糊。
+  //  成因：舊版點陣尺寸＝CSS 尺寸（1 CSS px 配 1 個實體點）。在 Windows 顯示縮放
+  //    125%／150%、或 HiDPI 螢幕上，瀏覽器得把它「放大」才填滿版位 ⇒ 內插模糊。
+  //    列印更嚴重：印表機約 300dpi，螢幕才 96dpi，等於放大三倍。
+  //  作法：點陣放大 _dpr 倍，CSS 尺寸維持原樣，transform 一起放大
+  //    ⇒ 底下所有繪圖座標**完全不用改**，仍然以 CSS px 為單位。
+  //  倍率下限 2（涵蓋 125%／150% 縮放與列印）、上限 3
+  //    （一份 CPK 常有 20+ 張圖，倍率 4 會吃掉上百 MB，辦公室機器扛不住）。
+  const _dpr = Math.max(2, Math.min(window.devicePixelRatio || 1, 3));
+  canvas.width = Math.round(W * _dpr); canvas.height = Math.round(H * _dpr);
+  // V169-8：高度改 auto —— 列印時欄寬會變（578→351px），固定 264px 會把圖橫向壓扁；
+  //  auto 讓瀏覽器照點陣的長寬比等比縮放。螢幕上算出來仍然剛好是 H，版面不變。
+  canvas.style.height = 'auto';
+  ctx.setTransform(_dpr, 0, 0, _dpr, 0, 0);
+  const ml=38, mr=16, mt=52, mb=76;   // V169-6：mb 32→76，繪圖區高度 ph 維持 136 不變
   const pw=W-ml-mr, ph=H-mt-mb;
   const toX = x => ml+(x-xMin)/(xMax-xMin)*pw;
   const normalY = x => vals.length*binW*(1/(sigma*Math.sqrt(2*Math.PI)))*Math.exp(-0.5*((x-mean)/sigma)**2);
@@ -9594,12 +9825,49 @@ function cpkDrawChart(canvas, pt, st) {
   const toY = y => mt+ph-(y/yScale)*ph;
   ctx.clearRect(0,0,W,H);
   ctx.fillStyle='#fafbff'; ctx.fillRect(0,0,W,H);
-  if (lsl != null) { ctx.fillStyle='rgba(192,57,43,0.07)'; ctx.fillRect(ml,mt,Math.max(0,toX(lsl)-ml),ph); }
-  if (usl != null) { ctx.fillStyle='rgba(192,57,43,0.07)'; ctx.fillRect(toX(usl),mt,W-mr-toX(usl),ph); }
+  if (lsl != null) { const _xl = Math.min(toX(lsl), W-mr);   // V169-6：夾住，見上方說明
+    ctx.fillStyle='rgba(192,57,43,0.07)'; ctx.fillRect(ml,mt,Math.max(0,_xl-ml),ph); }
+  if (usl != null) { const _xu = Math.max(toX(usl), ml);
+    ctx.fillStyle='rgba(192,57,43,0.07)'; ctx.fillRect(_xu,mt,Math.max(0,W-mr-_xu),ph); }
+  // ══ V169-8：被縮視野擋在畫面外的規格線，在該側留一段超規帶殘影 ══
+  //  症狀（使用者 260904）：「有些有上限有些沒有，但都沒有下限的線條」。
+  //  成因＝縮視野：離資料近的那條規格線留在畫面內（球標 8 的 USL 2.850），
+  //    遠的那條出框只剩一個小三角 ⇒ 那一側完全空白，讀起來像「這個尺寸沒有下限」。
+  //  ⇒ 出框那側保留 7px 的粉紅殘段（配合下面的邊界虛線），讓兩側永遠都有東西：
+  //    實線＝限值就在這裡；虛線＋箭頭＋數值＝限值在這個方向、只是離得遠。
+  ctx.fillStyle='rgba(192,57,43,0.07)';
+  if (lsl != null && lsl < xMin) ctx.fillRect(ml, mt, 7, ph);
+  if (usl != null && usl > xMax) ctx.fillRect(W-mr-7, mt, 7, ph);
+  // ══ V169-6（B 案）：左側 Y 軸刻度＋淡橫格線 ══
+  //  舊版完全沒有 Y 軸，柱子高度讀不出筆數。ml=38 這段左留白本來就空著沒畫東西，
+  //  刻度塞進去 ⇒ 繪圖區一點寬度都沒被吃掉。
+  (function(){
+    const _sy = Math.max(1, Math.round(cpkNiceStep(yScale, 4)));
+    ctx.font='9px Arial'; ctx.textAlign='right';
+    for (let yv = 0; yv <= yScale + 0.001; yv += _sy) {
+      const y = toY(yv);
+      ctx.strokeStyle='#e6ebf3'; ctx.lineWidth=1;
+      ctx.beginPath(); ctx.moveTo(ml, y); ctx.lineTo(W-mr, y); ctx.stroke();
+      ctx.fillStyle='#999'; ctx.fillText(String(Math.round(yv)), ml-4, y+3);
+    }
+    ctx.strokeStyle='#c8d0dc'; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(ml, mt); ctx.lineTo(ml, mt+ph); ctx.stroke();
+  })();
+  const _cntLabels = [], _lblBoxes = [];   // V169-6：柱頂筆數延後到最後才畫（見迴圈內說明）；_lblBoxes 收 Mean/LSL/USL 標籤盒位置供避讓
   bins.forEach((cnt,bi) => {
-    const x1=toX(xMin+bi*binW), x2=toX(xMin+(bi+1)*binW);
-    ctx.fillStyle='rgba(26,79,138,0.55)'; ctx.fillRect(x1+0.5,toY(cnt),x2-x1-1,toY(0)-toY(cnt));
-    ctx.strokeStyle='rgba(26,79,138,0.8)'; ctx.lineWidth=0.5; ctx.strokeRect(x1+0.5,toY(cnt),x2-x1-1,toY(0)-toY(cnt));
+    const x1=toX(binMin+bi*binW), x2=toX(binMin+(bi+1)*binW);   // V169-2：柱子畫在資料實際位置
+    const bwPx = Math.max(1, x2-x1-1);   // V169-2：至少 1px，避免負寬度整根不見
+    ctx.fillStyle='rgba(26,79,138,0.55)'; ctx.fillRect(x1+0.5,toY(cnt),bwPx,toY(0)-toY(cnt));
+    ctx.strokeStyle='rgba(26,79,138,0.8)'; ctx.lineWidth=0.5; ctx.strokeRect(x1+0.5,toY(cnt),bwPx,toY(0)-toY(cnt));
+    // ══ V169-5／V169-6：柱頂標出筆數 ══
+    //  V169-6 起左邊雖然有 Y 軸刻度，但要數格線才知道是 7 還 8；直接標在柱頂最快。
+    //  ⚠ 柱子太窄（<5px）就不標，否則數字會互相疊到看不清；cnt=0 也不標。
+    //    （門檻 V169-6 由 8→5：實測 380px 卡片柱寬只有 2.8~6.5px，門檻 8 等於永遠不標。）
+    //  ⚠ 這裡只「收集」不畫 —— Mean／LSL／USL 的白底標籤盒是後面才畫的，
+    //    在這裡畫會被盒子蓋掉上緣（實測「10」被切掉 4px）。統一到函式尾端最後畫。
+    if (cnt > 0 && bwPx >= 5) {
+      _cntLabels.push([String(cnt), x1 + 0.5 + bwPx/2, Math.max(mt + 10, toY(cnt) - 2)]);
+    }
   });
   ctx.beginPath(); ctx.strokeStyle='#c0392b'; ctx.lineWidth=1.8;
   for (let xi=0;xi<=pw;xi++) { const xv=xMin+(xi/pw)*(xMax-xMin); xi===0?ctx.moveTo(ml+xi,toY(normalY(xv))):ctx.lineTo(ml+xi,toY(normalY(xv))); }
@@ -9609,7 +9877,32 @@ function cpkDrawChart(canvas, pt, st) {
     { val: lsl,  lbl: 'LSL',  col: '#c0392b', dash: []      },
     { val: usl,  lbl: 'USL',  col: '#c0392b', dash: []      },
     { val: mean, lbl: 'Mean', col: '#1a4f8a', dash: [4,3]   },
-  ].filter(m => m.val != null);
+  ].filter(m => m.val != null && m.val >= xMin && m.val <= xMax);   // V169-6：畫面外的不畫線，改走下面的邊緣標示
+
+  // ══ V169-6：縮視野後掉出畫面的規格線，在圖邊緣用紅三角＋數值標出 ══
+  //  不標的話，放大後的圖看起來像「這個尺寸沒有規格上下限」，會被誤讀。
+  (function(){
+    const _ey = mt + ph * 0.5;
+    // V169-8：邊界虛線 —— 有虛線才讀得出「這裡是被切掉的邊界」，光一個三角像標籤
+    const _dashEdge = (x) => {
+      ctx.strokeStyle='#c0392b'; ctx.lineWidth=1.5; ctx.setLineDash([5,4]);
+      ctx.beginPath(); ctx.moveTo(x, mt); ctx.lineTo(x, toY(0)); ctx.stroke();
+      ctx.setLineDash([]); ctx.lineWidth=1;
+    };
+    ctx.font = 'bold 10px Arial'; ctx.fillStyle = '#c0392b';
+    if (lsl != null && lsl < xMin) {
+      _dashEdge(ml + 0.5);
+      ctx.fillStyle='#c0392b';
+      ctx.beginPath(); ctx.moveTo(ml,_ey); ctx.lineTo(ml+10,_ey-6); ctx.lineTo(ml+10,_ey+6); ctx.closePath(); ctx.fill();
+      ctx.textAlign='left';  ctx.fillText('LSL '+lsl.toFixed(3), ml+12, _ey+3);
+    }
+    if (usl != null && usl > xMax) {
+      _dashEdge(W-mr-0.5);
+      ctx.fillStyle='#c0392b';
+      ctx.beginPath(); ctx.moveTo(W-mr,_ey); ctx.lineTo(W-mr-10,_ey-6); ctx.lineTo(W-mr-10,_ey+6); ctx.closePath(); ctx.fill();
+      ctx.textAlign='right'; ctx.fillText('USL '+usl.toFixed(3), W-mr-12, _ey+3);
+    }
+  })();
 
   // 先畫垂直線
   markers.forEach(m => {
@@ -9643,6 +9936,7 @@ function cpkDrawChart(canvas, pt, st) {
 
     ctx.fillStyle = 'rgba(255,255,255,0.85)';
     ctx.fillRect(x - bgW/2, labelY - 11, bgW, labelH + 2);
+    _lblBoxes.push([x - bgW/2, labelY - 11, bgW, labelH + 2]);   // V169-6：給柱頂筆數做避讓用
 
     ctx.fillStyle = m.col;
     ctx.font = 'bold 10px Arial';
@@ -9651,11 +9945,105 @@ function cpkDrawChart(canvas, pt, st) {
     ctx.font = '9px Arial';
     ctx.fillText(m.val.toFixed(3), x, valueY);
   });
+  // ══ V169-6：柱頂筆數統一在這裡畫（最後畫）══
+  //  最後畫 ⇒ 不會被 Mean／LSL／USL 的標籤盒蓋住；
+  //  白色外框 ⇒ 數字落在深藍柱子上或壓到常態曲線時一樣讀得出來。
+  ctx.font='9px Arial'; ctx.textAlign='center'; ctx.lineJoin='round';
+  // 撞到 Mean／LSL／USL 標籤盒的，往下移到盒子底下再畫。
+  //  只加白外框不夠——外框只讓字看得見，字還是會跟盒裡的數字疊在一起
+  //  （實測長成「48.94410」＝ Mean 48.944 疊上柱頂的 10，看起來像亂碼）。
+  _cntLabels.forEach(l => {
+    const w = ctx.measureText(l[0]).width;
+    for (let i = 0; i < 3; i++) {
+      const hit = _lblBoxes.find(b =>
+        l[1] + w/2 > b[0] && l[1] - w/2 < b[0] + b[2] && l[2] > b[1] && l[2] - 9 < b[1] + b[3]);
+      if (!hit) break;
+      l[2] = hit[1] + hit[3] + 13;   // V169-9：+9→+13，字頂距盒底約 6px（原本 0px，列印看起來像黏著）
+    }
+  });
+  ctx.lineWidth=3; ctx.strokeStyle='#fff';
+  _cntLabels.forEach(l => ctx.strokeText(l[0], l[1], l[2]));
+  ctx.fillStyle='#1a4f8a';
+  _cntLabels.forEach(l => ctx.fillText(l[0], l[1], l[2]));
+  ctx.lineWidth=1;
+
+  // ══ V169-3：X 軸刻度改「整齊間隔」══
+  //  刻度落在間隔的整數倍上（例：公差 0.16 → 間隔 0.05 → 2.70/2.75/2.80/2.85，
+  //  USL 2.85 剛好落在刻度上），不同尺寸的圖擺在一起也比得出比例尺。
   ctx.fillStyle='#777'; ctx.font='11px Arial'; ctx.textAlign='center';
-  for (let i=0;i<=4;i++) { const xv=xMin+(xMax-xMin)*i/4; ctx.fillText(xv.toFixed(2),toX(xv),H-mb+13); }
-  ctx.fillStyle='#333'; ctx.font='11px Arial'; ctx.textAlign='left';
-  [`n=${vals.length}`,`μ=${mean.toFixed(3)}`,`σ=${sigma.toFixed(3)}`,`Cp=${cp!=null?cp.toFixed(2):'—'}`,`Cpk=${cpk!=null?cpk.toFixed(2):'—'}`]
-    .forEach((s,i) => ctx.fillText(s, ml+(pw/5)*i, H-2));
+  // V169-6：縮視野後畫得下，目標格數 4→8；但格數不能靠猜——
+  //  直接用 measureText 量標籤真實寬度，放不下就往上退一級（1→2→5→10），
+  //  這樣「48.760」這種六位數標籤跟「0.188」會各自收斂到不重疊的格數。
+  let _step = cpkNiceStep(xMax - xMin, 8);
+  for (let _g = 0; _g < 6; _g++) {
+    const _d0 = Math.max(0, -Math.floor(Math.log10(_step) + 1e-9));
+    const _n0 = Math.floor((xMax - xMin) / _step) + 1;
+    if (_n0 <= 2) break;
+    const _w0 = Math.max(ctx.measureText(xMin.toFixed(_d0)).width, ctx.measureText(xMax.toFixed(_d0)).width);
+    if (pw / (_n0 - 1) >= _w0 + 8) break;
+    _step = cpkNiceStep(_step * 2.2, 1);
+  }
+  const _tickDec = Math.max(0, -Math.floor(Math.log10(_step) + 1e-9));   // ⚠ 別用 _dec，那是量測解析度的小數位數
+  const _first = Math.ceil((xMin / _step) - 1e-9) * _step;
+  for (let k = 0; k < 40; k++) {
+    const xv = _first + k * _step;
+    if (xv > xMax + _step * 1e-9) break;
+    ctx.fillText(xv.toFixed(_tickDec), toX(xv), H-mb+13);
+  }
+  // 底下資訊列：加上「刻度」，讓使用者知道這張圖的比例尺（使用者 260904 要求）
+  // ══ V169-6：公差全景條 ══
+  //  縮視野讓主圖讀得出精度，但會丟掉三件事，這條 11px 細條一次補回來：
+  //    ① 規格線的相對位置（藍塊在整條公差帶的哪裡）
+  //    ② 「變異好像變大了」的錯覺（藍塊只佔 3% ⇒ 一眼知道製程其實很集中）
+  //    ③ 各球標之間的可比較性（每條都以自己的公差正規化，佔比可以互相比）
+  (function(){
+    const _sy = H-50, _sh = 11, _sx = ml, _sw = W-ml-mr, _T = usl-lsl;
+    if (lsl == null || usl == null || !(usl > lsl)) {
+      // 單邊公差畫不出「佔公差多少」⇒ 別留一塊空白讓人以為圖壞了，直接說明
+      ctx.font='9px Arial'; ctx.textAlign='center'; ctx.fillStyle='#aaa';
+      ctx.fillText('單邊公差，無公差全景', _sx+_sw/2, _sy+_sh);
+      return;
+    }
+    const _p = v => _sx + Math.min(1, Math.max(0, (v-lsl)/_T)) * _sw;
+    ctx.fillStyle='#f2f4f8'; ctx.fillRect(_sx,_sy,_sw,_sh);
+    ctx.strokeStyle='#c0392b'; ctx.lineWidth=1; ctx.strokeRect(_sx+0.5,_sy+0.5,_sw-1,_sh-1);
+    const _a=_p(vMin), _b=_p(vMax);
+    ctx.fillStyle='rgba(26,79,138,0.8)'; ctx.fillRect(_a,_sy+1,Math.max(2,_b-_a),_sh-2);
+    ctx.font='9px Arial';
+    ctx.fillStyle='#c0392b';
+    ctx.textAlign='left';   ctx.fillText(lsl.toFixed(3), _sx, _sy+_sh+9);
+    ctx.textAlign='right';  ctx.fillText(usl.toFixed(3), _sx+_sw, _sy+_sh+9);
+    ctx.fillStyle='#1a4f8a';
+    ctx.textAlign='center'; ctx.fillText('公差全景　資料佔 '+(100*(vMax-vMin)/_T).toFixed(0)+'%', _sx+_sw/2, _sy+_sh+9);
+  })();
+  // ══ V169-8：底下這一列改成「量實際文字寬度再分配間距」══
+  //  症狀（使用者 260904 截圖）：「Cpk=2.56刻度=0.02」「μ=48.945σ=0.024」黏成一團。
+  //  成因：舊版把繪圖區硬切 6 等分、每項固定放在自己槽位的起點 ⇒ 等於假設六項一樣寬。
+  //    實測 11px Arial：「n=32」只有 25px、「刻度=0.02」有 50px。
+  //    卡片 380px 時槽位只剩 54px，最寬那幾項幾乎貼滿，看起來就是黏在一起。
+  //  ⇒ 量每一項真實寬度，把剩下的空白平均分給 5 個間隙；
+  //    真的擠不下再逐級降字級（11→8px），最後才捨棄最右邊的「刻度＝」。
+  //  這樣任何卡片寬度、任何位數都不會黏（不是靠把卡片加寬來閃）。
+  ctx.fillStyle='#333'; ctx.textAlign='left';
+  (function(){
+    let items = [`n=${vals.length}`,`μ=${mean.toFixed(3)}`,`σ=${sigma.toFixed(3)}`,
+                 `Cp=${cp!=null?cp.toFixed(2):'—'}`,`Cpk=${cpk!=null?cpk.toFixed(2):'—'}`,
+                 `刻度=${_step.toFixed(_tickDec)}`];
+    const MIN_GAP = 7;
+    let fs = 11, widths = [], gap = 0;
+    for (let guard = 0; guard < 12; guard++) {
+      ctx.font = fs + 'px Arial';
+      widths = items.map(t => ctx.measureText(t).width);
+      const total = widths.reduce((a,b) => a+b, 0);
+      gap = (items.length > 1) ? (pw - total) / (items.length - 1) : 0;
+      if (gap >= MIN_GAP) break;
+      if (fs > 8) { fs--; continue; }
+      if (items.length > 3) { items.pop(); continue; }
+      gap = MIN_GAP; break;
+    }
+    let x = ml;
+    items.forEach((t,i) => { ctx.fillText(t, x, H-2); x += widths[i] + gap; });
+  })();
 }
 
 async function cpkSaveRecord() {
@@ -9848,9 +10236,24 @@ function cpkLoadDemoRecord(data) {
   // 設定資料點並渲染表格（cpkRenderTable 會直接把 values 填入 input value）
   cpkPoints = JSON.parse(JSON.stringify(data.points || []));
   cpkRenderTable();
-  // 顯示狀態訊息
+  // ══ V169-8：表單編號 —— 從查詢帶入時要看得出這是哪一張單 ══
+  //  這個元素本來只有「從歷史列印」那條路徑會填，畫面上帶入編輯時是空的。
+  const _fn = document.getElementById('cpk-print-formno');
+  if (_fn) {
+    if (data.formNo) { _fn.textContent = '📋 ' + data.formNo; _fn.style.display = ''; }
+    else { _fn.textContent = ''; _fn.style.display = 'none'; }
+  }
+  // ══ V169-8：載入後直接算＋畫，不必再按一次「計算」══
+  //  舊版只渲染表格就結束 ⇒ 統計列全是「—」、分布圖還留著上一筆的，
+  //  兩者對不上而且列印會照印（使用者 260904 抓到）。載入是明確動作、一次成本。
+  if (cpkPoints.length) { try { cpkCalculateAll(); } catch(e) { console.warn('cpkCalculateAll:', e); } }
+  else cpkInvalidateCharts('');
   const el = document.getElementById('cpk-status');
-  if (el) { el.textContent = `✅ 示範資料已載入（${cpkPoints.length} 個量測點，各 ${data.lotSize} 筆）　按「📊 計算」查看結果`; el.style.color='#1d9e75'; }
+  if (el) {
+    el.textContent = (data.formNo ? `✅ 已載入 ${data.formNo}` : '✅ 示範資料已載入')
+      + `（${cpkPoints.length} 個量測點，各 ${data.lotSize} 筆）　已自動計算並產生分布圖`;
+    el.style.color = '#1d9e75';
+  }
 }
 
 // ══════════════════════════════════════════════
@@ -10139,11 +10542,17 @@ const SUPPLIER_USERS_KEY = 'qms_supplier_users';
 function getSupplierList() {
   try { return JSON.parse(localStorage.getItem(SUPPLIER_LIST_KEY) || '[]'); } catch(e) { return []; }
 }
-function saveSupplierList(list) {
+function saveSupplierList(list, syncCloud) {   // V169：同 saveSiteConfig，拉取回來不回推
+  if (syncCloud === undefined) syncCloud = true;
   try { localStorage.setItem(SUPPLIER_LIST_KEY, JSON.stringify(list)); } catch(e) {}
-  // ☁ 同步每筆供應商到 Supabase
-  if (_sbReady) {
-    list.forEach(s => sbSaveSupplier(s).catch(e => console.warn('供應商同步失敗:', s.code, e)));
+  // ☁ 同步每筆供應商到 Supabase（只有「真的編輯」時才推）
+  if (_sbReady && syncCloud) {
+    Promise.allSettled(list.map(s => sbSaveSupplier(s))).then(rs => {
+      const bad = rs.map((r, i) => r.status === 'rejected' ? list[i].code : null).filter(Boolean);
+      if (!bad.length) return;
+      console.warn('供應商同步失敗:', bad, (rs.find(r => r.status === 'rejected') || {}).reason);
+      try { showSyncToast('⚠ 供應商清單有 ' + bad.length + ' 筆未同步到雲端（' + bad.join('、') + '）——本機已存，請確認已登入管理員後重試', true); } catch(e) {}
+    });
   }
 }
 function getSupplierUsers() {

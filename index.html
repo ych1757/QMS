@@ -445,7 +445,7 @@ input.spec-inp[type=number] { -moz-appearance:textfield; appearance:textfield; }
 // 用途＝跟使用者溝通「你看到的畫面是不是最新版」，不是品質文件的表單版次
 //（表單版次 Rev 另有其用途、目前維持 V1.0 不動，日後各廠區若有自己的表單版次需求再談）
 // 顯示位置：① 瀏覽器分頁標題 ② 登入畫面副標下方 ③ 主畫面右上（列印時自動隱藏）
-const APP_VER = 'V169-9';   // ★★ 每出一版必須同步改這一行（比照 MHR 的做法），否則畫面版號會對不上檔案版號
+const APP_VER = 'V170-12';   // ★★ 每出一版必須同步改這一行（比照 MHR 的做法），否則畫面版號會對不上檔案版號
 
 const SUPABASE_URL = 'https://vwusebvvsqyjydddupit.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_Ju-c9cuXYJil7PEJ1-NspA_ASzfIzi5';
@@ -461,8 +461,37 @@ async function sbTestConnection() {
   } catch(e) { return false; }
 }
 
+// ══ V170-2：sbSaveFaiRecord／sbSaveCpkRecord／sbSavePartSpec 改「回傳三態」══
+//  背景：這三支原本一律回 undefined，失敗只 console.warn ⇒ 呼叫端**無從得知成敗**。
+//    後果最明顯的是「☁ 一鍵上傳」：try{ await sbSaveXxx(); ok++ }catch{ err++ }
+//    因為函式永不 throw，catch 到不了、ok++ 必定執行 ⇒ 綠燈報「FAI n 筆」跟雲端收到幾筆無關。
+//  約定（四態，刻意不用 true/false 兩態）：
+//    true      ＝ 雲端確認**新寫入**
+//    'exists'  ＝ 雲端**本來就有同一筆**（409／PostgreSQL 23505 唯一鍵衝突）
+//    false     ＝ 送出了但雲端拒絕（其他 HTTP 非 2xx，或途中丟例外）
+//    null      ＝ **根本沒送出**（未連線 _sbReady=false、或資料缺必要欄位）
+//  ⚠ 為什麼要分 null：否則「離線」會被呼叫端當成「同步失敗」，訊息會誤導使用者去查權限。
+//  ⚠ 為什麼要分 'exists'（V170-3 使用者實測後補）：
+//    fai_records／cpk_records 的 POST 沒有在網址帶 `on_conflict=`（part_specs／qms_site_config／
+//    qms_supplier_list 都有帶），所以本機每一筆只要雲端已存在，就撞 UNIQUE(local_key) 回 409。
+//    使用者 260907 第一次跑「一鍵上傳」：FAI 0 筆、CPK 0 筆、其餘三類全成功，
+//    Console 全是 `cpk_records_local_key_key duplicate key` ⇒ 這顆按鈕對 FAI／CPK 從來沒成功過，
+//    而舊版照樣綠燈報「✅ 完成！FAI 211筆」。
+//    但 409 的真正意思是「**雲端本來就有**」，不是資料遺失——把它算成「失敗 211 筆」
+//    會變成另一種誤導（讓人以為雲端缺了 211 筆）。所以獨立成一態。
+//  ⚠ 刻意**不**改成 `?on_conflict=local_key` 去做 upsert：那會讓「一鍵上傳」變成
+//    「本機覆蓋雲端」，而本機只是快取、可能比雲端舊（別人在另一台改過），
+//    一次蓋 211 筆且無法逐筆確認，風險遠大於效益。這顆按鈕的職責是「補推雲端沒有的」。
+// V170-3：PostgREST 的唯一鍵衝突＝HTTP 409 且 code 23505
+function _sbIsDuplicate(status, bodyText) {
+  if (status === 409) return true;
+  try { return JSON.parse(bodyText || '{}').code === '23505'; } catch(e) { return false; }
+}
+//  ⚠ 內部維持**不 throw**：全檔 8 個呼叫點（sbSavePartSpec 3、sbSaveCpkRecord 2、sbSaveFaiRecord 3）
+//    目前沒有任何一個接回傳值，所以本改動對現行行為零影響、完全向後相容；
+//    改成 throw 才會波及那 8 處。
 async function sbSaveFaiRecord(key, data, isUpdate) {
-  if (!_sbReady || !data?.header) return;
+  if (!_sbReady || !data?.header) return null;
   try {
     const h = data.header;
     const payload = {
@@ -509,16 +538,24 @@ async function sbSaveFaiRecord(key, data, isUpdate) {
       }
       // 兩種都對不到 → 當作新記錄 POST
       if (!patched || patched.length === 0) {
-        await fetch(SUPABASE_URL + '/rest/v1/fai_records', {
+        // ⚠ V170-2：這支補救 POST 原本**完全不看 res.ok**，失敗也照印「☁ FAI 已更新(覆蓋)」。
+        //   覆蓋原單走的就是這條路（歷史查詢→編輯→覆蓋），是三個呼叫點裡後果最重的一個：
+        //   雲端沒更新，畫面卻綠字「✅ 已更新原記錄」，接著清表＋切到歷史頁。
+        const cRes = await fetch(SUPABASE_URL + '/rest/v1/fai_records', {
           method: 'POST',
           headers: {
             'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer(),
             'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates'
           }, body: JSON.stringify(payload)
         });
+        if (!cRes.ok) {
+          const t = await cRes.text();
+          if (_sbIsDuplicate(cRes.status, t)) return 'exists';
+          console.warn('sbSaveFaiRecord 覆蓋補POST失敗:', t); return false;
+        }
       }
       console.log('☁ FAI 已更新(覆蓋):', data.formNo || key);
-      return;
+      return true;
     }
 
     // ── 新記錄：維持原本 POST ──
@@ -532,13 +569,18 @@ async function sbSaveFaiRecord(key, data, isUpdate) {
       },
       body: JSON.stringify(payload)
     });
-    if (!res.ok) { const t = await res.text(); console.warn('sbSaveFaiRecord error:', t); }
-    else console.log('☁ FAI 已同步:', data.formNo || key);
-  } catch(e) { console.warn('sbSaveFaiRecord exception:', e); }
+    if (!res.ok) {
+      const t = await res.text();
+      if (_sbIsDuplicate(res.status, t)) { console.log('☁ FAI 雲端已有，略過:', data.formNo || key); return 'exists'; }
+      console.warn('sbSaveFaiRecord error:', t); return false;
+    }
+    console.log('☁ FAI 已同步:', data.formNo || key);
+    return true;
+  } catch(e) { console.warn('sbSaveFaiRecord exception:', e); return false; }
 }
 
 async function sbSaveCpkRecord(key, data, isUpdate) {
-  if (!_sbReady) return;
+  if (!_sbReady) return null;   // V170-2：null=沒送出（見 sbSaveFaiRecord 的三態說明）
   try {
     const payload = {
       local_key: key,
@@ -566,23 +608,34 @@ async function sbSaveCpkRecord(key, data, isUpdate) {
         patched = pRes.ok ? await pRes.json() : [];
       }
       if (!patched || patched.length === 0) {
-        await fetch(SUPABASE_URL + '/rest/v1/cpk_records',
+        // ⚠ V170-2：同 FAI，這支補救 POST 原本不看 res.ok（見 sbSaveFaiRecord 的說明）
+        const cRes = await fetch(SUPABASE_URL + '/rest/v1/cpk_records',
           { method: 'POST', headers: { ...H, 'Prefer': 'resolution=merge-duplicates' }, body: JSON.stringify(payload) });
+        if (!cRes.ok) {
+          const t = await cRes.text();
+          if (_sbIsDuplicate(cRes.status, t)) return 'exists';
+          console.warn('sbSaveCpkRecord 覆蓋補POST失敗:', t); return false;
+        }
       }
       console.log('☁ CPK 已更新(覆蓋):', data.formNo || key);
-      return;
+      return true;
     }
     const res = await fetch(SUPABASE_URL + '/rest/v1/cpk_records',
       { method: 'POST', headers: { ...H, 'Prefer': 'resolution=merge-duplicates' }, body: JSON.stringify(payload) });
-    if (!res.ok) { const t = await res.text(); console.warn('sbSaveCpkRecord error:', t); }
-    else console.log('☁ CPK 已同步:', data.partno);
-  } catch(e) { console.warn('sbSaveCpkRecord exception:', e); }
+    if (!res.ok) {
+      const t = await res.text();
+      if (_sbIsDuplicate(res.status, t)) { console.log('☁ CPK 雲端已有，略過:', data.formNo || key); return 'exists'; }
+      console.warn('sbSaveCpkRecord error:', t); return false;
+    }
+    console.log('☁ CPK 已同步:', data.partno);
+    return true;
+  } catch(e) { console.warn('sbSaveCpkRecord exception:', e); return false; }
 }
 
 async function sbSavePartSpec(partno, spec, scope) {
   // scope 參數：儲存此料號屬於哪個廠區/供應商（修正 v87）
   // 例：'SH'、'YUKE'、'shared'（預設）
-  if (!_sbReady) return;
+  if (!_sbReady) return null;   // V170-2：null=沒送出（見 sbSaveFaiRecord 的三態說明）
   try {
     const sess = getSession();
     // 若未傳入 scope，自動判斷：廠區帳號用廠區碼，Admin 用 shared
@@ -619,10 +672,13 @@ async function sbSavePartSpec(partno, spec, scope) {
       // V145：儲存失敗不再靜默——之前失敗只寫 console、畫面照樣「✔ 已儲存」＝大永同號事件最大的坑
       try { setMgrStatus('⚠ 料號 ' + partno + ' 雲端同步失敗，目前僅存在本機——請重試，若持續失敗請聯絡管理員', 'err'); } catch(e2) {}
       try { showSyncBanner('⚠ 料號 ' + partno + ' 雲端同步失敗', 6000); } catch(e3) {}
+      return false;   // V170-2
     }
+    return true;      // V170-2
   } catch(e) {
     console.warn('sbSavePartSpec exception:', e);
     try { setMgrStatus('⚠ 料號 ' + partno + ' 雲端同步失敗（網路錯誤），目前僅存在本機——請重試', 'err'); } catch(e2) {}
+    return false;     // V170-2
   }
 }
 
@@ -822,7 +878,23 @@ function showSyncBanner(msg, autoHideMs) {
 }
 
 // ══ 帳號同步：從 Supabase 拉取使用者資料庫 ══
+// ══ V170：三張早已刪除的舊表，不再呼叫 ══
+//  實測（260907，PostgREST 直打）：qms_users／qms_supplier_users／qms_admin_config
+//  三張表在 DB 端都回 404 `PGRST205`（table not found），fai_records／cpk_records／
+//  qms_site_config／qms_supplier_list／part_specs 則正常 200。
+//  成因：帳號主檔自 V134 起改走 **Supabase Auth**、人員清單自 V139-3 起 **直讀 OMS**，
+//    DB 端的舊表已刪，前端卻沒跟著拿掉 ⇒ 每次載入固定 3 個 404 進 Console。
+//  ⚠ 為什麼要處理：這些呼叫全部把失敗吞掉、悄悄退回 localStorage，
+//    等於一條「看起來有在同步、其實從來沒成功」的假路徑（同 [失敗不能印成通過] 那類）。
+//  ⚠ 為什麼安全：拿掉＝零行為改變。三支 pull 本來就 `if(!res.ok) return`（回 0／不做事）；
+//    寫入那幾支（sbSaveUser／sbDeleteUser／setUserRole 的 PATCH）也早就是 404 靜默失敗。
+//  ⚠ 已查證沒有連帶壞掉的功能：`sbLoginVerify` 全檔沒有任何呼叫點（死碼）；
+//    `doChangePassword` 走的是 `sbAuthChangePassword`（Supabase Auth），舊的 qms_users
+//    分支整段在 `return;` 之後、不可能執行。改密碼不受影響。
+const LEGACY_USER_TABLES_GONE = true;   // qms_users / qms_supplier_users / qms_admin_config
+
 async function sbPullUsers() {
+  if (LEGACY_USER_TABLES_GONE) return 0;   // V170：表已不存在
   if (!_sbReady) return 0;
   try {
     const res = await fetch(
@@ -853,6 +925,7 @@ async function sbPullUsers() {
 
 // ══ 帳號同步：儲存使用者到 Supabase ══
 async function sbSaveUser(siteCode, email, userData) {
+  if (LEGACY_USER_TABLES_GONE) return;   // V170：表已不存在（帳號主檔＝Supabase Auth＋OMS）
   if (!_sbReady) return;
   try {
     // 先用 PATCH 更新（已存在的帳號）
@@ -907,6 +980,7 @@ async function sbSaveUser(siteCode, email, userData) {
 
 // ══ 帳號同步：刪除使用者從 Supabase ══
 async function sbDeleteUser(siteCode, email) {
+  if (LEGACY_USER_TABLES_GONE) return;   // V170：表已不存在
   if (!_sbReady) return;
   try {
     await fetch(
@@ -1006,7 +1080,13 @@ async function sbPullSupplierList() {
 }
 
 // ══ 供應商帳號：儲存單筆到 Supabase ══
+// ⚠ V170-2（稽核 D2 抓到）：V170 補了 sbPullUsers／sbPullSupplierUsers／sbPullAdminConfig／
+//   sbSaveUser／sbDeleteUser，**唯獨漏掉這兩支供應商帳號函式**。
+//   它們打的 qms_supplier_users 一樣已刪，而且連 res.ok 都沒接、catch 也不會觸發
+//   （fetch 對 404 是 resolve）⇒ 是一條連 Console 都看不到的死路徑，
+//   而「☁ 一鍵上傳」第七階段還會把**明文密碼**送去那個不存在的端點。
 async function sbSaveSupplierUser(supplierCode, email, userData) {
+  if (LEGACY_USER_TABLES_GONE) return null;   // V170-2：表已不存在
   // 修正 v97：改用 upsert 避免 PATCH 空表時誤判成功的問題
   if (!_sbReady) return;
   try {
@@ -1027,6 +1107,7 @@ async function sbSaveSupplierUser(supplierCode, email, userData) {
 
 // ══ 供應商帳號：刪除從 Supabase ══
 async function sbDeleteSupplierUser(supplierCode, email) {
+  if (LEGACY_USER_TABLES_GONE) return null;   // V170-2：表已不存在（本函式全檔亦無呼叫點）
   if (!_sbReady) return;
   try {
     await fetch(
@@ -1051,6 +1132,7 @@ async function sbSaveAdminConfig(password) {
 
 // ══ 管理員設定：從 Supabase 拉取 ══
 async function sbPullAdminConfig() {
+  if (LEGACY_USER_TABLES_GONE) return;   // V170：表已不存在
   if (!_sbReady) return;
   try {
     const res = await fetch(SUPABASE_URL + '/rest/v1/qms_admin_config?id=eq.1&select=password',
@@ -1066,6 +1148,7 @@ async function sbPullAdminConfig() {
 
 // ══ 供應商帳號：從 Supabase 拉取 ══
 async function sbPullSupplierUsers() {
+  if (LEGACY_USER_TABLES_GONE) return;   // V170：表已不存在
   if (!_sbReady) return;
   try {
     const res = await fetch(SUPABASE_URL + '/rest/v1/qms_supplier_users?select=*',
@@ -1092,9 +1175,11 @@ async function sbInit() {
     _sbReady = true;
     console.log('✅ Supabase 已連線');
     // 同步所有資料類型（循序執行，設定類失敗不影響記錄拉取）
+    // V170：sbPullSupplierUsers／sbPullUsers／sbPullAdminConfig 三支已移除——
+    //  它們打的表在 DB 端早就刪了（每次載入固定 3 個 404）；留在清單裡會讓人
+    //  誤以為這三類資料有在同步。帳號＝Supabase Auth＋OMS，不走這裡。
     await Promise.allSettled([
-      sbPullSiteConfig(), sbPullSupplierList(), sbPullSupplierUsers(),
-      sbPullUsers(), sbPullAdminConfig(), sbPullPartSpecs()
+      sbPullSiteConfig(), sbPullSupplierList(), sbPullPartSpecs()
     ]);
     const [faiResult, cpkResult] = await Promise.allSettled([
       sbPullAllRecords(), sbPullCpkRecords()
@@ -1112,10 +1197,16 @@ async function sbInit() {
     }
     // ── 同步完成後刷新儀表板和歷史查詢（修正 v99）──
     // Pull 完雲端資料後，localStorage 已更新，需要重新渲染才能顯示最新資料
-    const activeTab = document.querySelector('.tab-pane.active')?.id;
-    if (activeTab === 'tab-dash') renderDashboard();
-    if (activeTab === 'tab-hist') runHistQuery();
-    if (activeTab === 'tab-mgr') { PART_SPECS = isAdmin() ? loadAllSpecDB() : loadSpecDB(); renderPnList(); } // V144：料號頁開著時，同步完成後重載清單
+    refreshActiveTabAfterSync();   // V170-5：收斂到單一出處（見該函式）
+    // ══ V170-4：設定頁的「系統資訊」也要重算 ══
+    //  症狀（使用者 260907）：歷史查詢 211 筆，系統資訊卻寫「正式記錄 0 筆」。
+    //  成因：renderSysInfo() 全檔只有兩個呼叫點——切進設定頁時、匯入設定後，
+    //    **雲端記錄拉回來之後沒有任何一處會重算**。
+    //    而記錄是在第二批 Promise.allSettled（sbPullAllRecords／sbPullCpkRecords）才寫進
+    //    localStorage 的，那批要跑好幾秒（211 筆、含照片、要分頁）；
+    //    第一批（廠區／供應商／料號規格）很快就完成。
+    //    所以開頁後直接停在設定頁的人，看到的正好是「廠區 16、料號規格 13、記錄 0」
+    //    這個中間狀態——使用者截圖的 Storage Used 只有 25 KB 也印證了當下真的還沒寫進去。
   } catch(e) {
     showSyncBanner('⚠ 雲端連線失敗，使用本地資料', 4000);
   }
@@ -1837,7 +1928,7 @@ async function sbInit() {
     </div>
     <div style="margin-top:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 12px;background:#f8f9fa;border:1px solid #dde;border-radius:6px">
       <span style="font-size:11px;color:#666;font-weight:600">📦 資料備份 / 跨裝置同步：</span>
-      <button onclick="exportRecords()" style="height:28px;padding:0 14px;font-size:11px;font-weight:600;background:#1a4f8a;color:#fff;border:none;border-radius:4px;cursor:pointer;white-space:nowrap">⬇ 備份 JSON</button>
+      <button id="export-records-btn" onclick="exportRecords()" style="height:28px;padding:0 14px;font-size:11px;font-weight:600;background:#1a4f8a;color:#fff;border:none;border-radius:4px;cursor:pointer;white-space:nowrap">⬇ 備份 JSON</button>
       <button onclick="exportRecordsCSV()" style="height:28px;padding:0 14px;font-size:11px;font-weight:600;background:#0f6e56;color:#fff;border:none;border-radius:4px;cursor:pointer;white-space:nowrap">📊 匯出查詢結果 Excel</button>
       <button id="import-records-btn" onclick="triggerImportRecords()" style="height:28px;padding:0 14px;font-size:11px;font-weight:600;background:#555;color:#fff;border:none;border-radius:4px;cursor:pointer;white-space:nowrap">⬆ 匯入 JSON</button>
       <button id="resync-btn" onclick="resyncFromCloud()" style="height:28px;padding:0 14px;font-size:11px;font-weight:600;background:#BA7517;color:#fff;border:none;border-radius:4px;cursor:pointer;white-space:nowrap">🔄 重新同步雲端</button>
@@ -2002,22 +2093,32 @@ async function sbInit() {
         <span style="color:#c0392b;font-weight:700">🔴 刪除</span>：含數據修改權限 + <b>可刪除數據記錄</b>　
         <span style="color:#333;font-weight:700">⚫ 全部</span>：全部功能（含系統設定）
       </div>
-      <div style="margin-bottom:8px">
-        <label style="font-size:11px;font-weight:700;color:#555">Filter by Org 依組織篩選：</label>
-        <select id="user-mgr-site" onchange="renderUserMgrTable()" style="height:28px;border:1px solid #bbb;border-radius:4px;padding:0 8px;font-size:12px;font-family:Arial,sans-serif;margin-left:6px">
-          <option value="">All Orgs 全部廠區</option>
+      <!-- V170-9：比照 MHR 的人員查找列（搜尋＋三個下拉＋清除＋顯示筆數） -->
+      <div style="margin-bottom:8px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+        <input id="user-mgr-kw" oninput="renderUserMgrTable(true)" placeholder="🔍 搜尋：姓名 / Email / 工號 / 廠區"
+          style="height:28px;border:1px solid #bbb;border-radius:4px;padding:0 8px;font-size:12px;width:250px;font-family:Arial,sans-serif">
+        <select id="user-mgr-site" onchange="renderUserMgrTable(true)" style="height:28px;width:auto;border:1px solid #bbb;border-radius:4px;padding:0 8px;font-size:12px;font-family:Arial,sans-serif">
+          <option value="">全部廠區 All Orgs</option>
         </select>
+        <select id="user-mgr-role" onchange="renderUserMgrTable(true)" style="height:28px;width:auto;border:1px solid #bbb;border-radius:4px;padding:0 8px;font-size:12px;font-family:Arial,sans-serif">
+          <option value="">全部角色</option>
+        </select>
+        <select id="user-mgr-status" onchange="renderUserMgrTable(true)" style="height:28px;width:auto;border:1px solid #bbb;border-radius:4px;padding:0 8px;font-size:12px;font-family:Arial,sans-serif">
+          <option value="">全部狀態</option>
+        </select>
+        <button onclick="clearUserMgrFilter()" style="height:28px;padding:0 12px;font-size:11px;font-weight:600;background:#fff;color:#555;border:1px solid #bbb;border-radius:4px;cursor:pointer">清除</button>
+        <span id="user-mgr-count" style="font-size:11px;color:#666;white-space:nowrap"></span>
       </div>
       <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
       <table style="width:100%;border-collapse:collapse;font-size:12px;min-width:720px">
         <thead>
           <tr style="background:#555;color:#fff">
-            <th style="padding:7px 6px;text-align:left;width:50px;white-space:nowrap">Site</th>
-            <th style="padding:7px 6px;text-align:left;width:60px;white-space:nowrap">工號</th>
-            <th style="padding:7px 6px;text-align:left;width:76px;white-space:nowrap">姓名</th>
-            <th style="padding:7px 6px;text-align:left;width:200px;white-space:nowrap">Email 帳號</th>
-            <th style="padding:7px 6px;text-align:center;white-space:nowrap">Role 角色</th>
-            <th style="padding:7px 4px;text-align:left;width:56px;white-space:nowrap;font-size:10px">建立</th>
+            <th data-usort="site"      onclick="sortUserMgr(this,'site')"      title="點擊排序" style="padding:7px 6px;text-align:left;width:50px;white-space:nowrap;cursor:pointer;user-select:none">Site<span data-uarrow style="font-size:9px;margin-left:3px;opacity:.85"></span></th>
+            <th data-usort="emp_id"    onclick="sortUserMgr(this,'emp_id')"    title="點擊排序" style="padding:7px 6px;text-align:left;width:60px;white-space:nowrap;cursor:pointer;user-select:none">工號<span data-uarrow style="font-size:9px;margin-left:3px;opacity:.85"></span></th>
+            <th data-usort="name"      onclick="sortUserMgr(this,'name')"      title="點擊排序" style="padding:7px 6px;text-align:left;width:76px;white-space:nowrap;cursor:pointer;user-select:none">姓名<span data-uarrow style="font-size:9px;margin-left:3px;opacity:.85"></span></th>
+            <th data-usort="email"     onclick="sortUserMgr(this,'email')"     title="點擊排序" style="padding:7px 6px;text-align:left;width:200px;white-space:nowrap;cursor:pointer;user-select:none">Email 帳號<span data-uarrow style="font-size:9px;margin-left:3px;opacity:.85"></span></th>
+            <th data-usort="role"      onclick="sortUserMgr(this,'role')"      title="點擊排序（依權限高低）" style="padding:7px 6px;text-align:center;white-space:nowrap;cursor:pointer;user-select:none">Role 角色<span data-uarrow style="font-size:9px;margin-left:3px;opacity:.85"></span></th>
+            <th data-usort="createdAt" onclick="sortUserMgr(this,'createdAt')" title="點擊排序" style="padding:7px 4px;text-align:left;width:56px;white-space:nowrap;font-size:10px;cursor:pointer;user-select:none">建立<span data-uarrow style="font-size:9px;margin-left:3px;opacity:.85"></span></th>
             <th style="padding:7px 6px;text-align:center;width:92px;white-space:nowrap">Action</th>
           </tr>
         </thead>
@@ -2516,6 +2617,34 @@ function listAllSpecRows() {
   return rows;
 }
 function scopeLabel(scope) { return scope === '__shared__' ? '(共用)' : scope; }
+
+// ══ V170-12：料號規格依「可看廠區」顯示（使用者 260908）══
+//  症狀：料號規格管理頁只看得到 2 筆（＝內建預設料號），別廠的一筆都沒有。
+//  成因：`loadSpecDB()` 只讀**一個** localStorage key（`getSpecDBKey()` → `fai_part_specs_<自己的廠>`），
+//    而 `sbPullPartSpecs()` 是**按 scope 分開存**成 `fai_part_specs_SH`／`_VN`／… 各自一個 key。
+//    所以不管 DB 回了幾個廠的規格，畫面永遠只顯示自己那一個 key。
+//  ⚠ 為什麼**不**直接把別廠的併進 `PART_SPECS`（那樣改最少，但會壞兩件事）：
+//    ① `saveSpecDB(db)` 是把**整個** PART_SPECS 寫回自己的 key ⇒ 一存檔就把別廠料號
+//       複製到自己名下，資料污染，而且雲端那邊 scope 也會跟著錯。
+//    ② `cpkLoadSpec()`／FAI 填表也吃 PART_SPECS ⇒ 打別廠料號會帶出規格，但跨廠是唯讀、
+//       根本存不了單（RLS 擋），等於引導使用者做一件註定失敗的事。
+//  ⇒ 所以 PART_SPECS 維持「只有自己的」，別廠的另外列成**唯讀區**接在清單後面。
+function listCrossScopeSpecRows() {
+  const s = getSession();
+  const scopes = (s && Array.isArray(s.viewSites)) ? s.viewSites : [];
+  if (!scopes.length) return [];
+  //  自己的那個 scope 不重複列（上面正常清單已經有了）
+  const mine = (s.isSupplier && s.supplierCode) ? s.supplierCode
+             : (s.site && s.site !== '__nosite__') ? s.site : null;
+  const out = [];
+  scopes.forEach(sc => {
+    if (!sc || sc === mine) return;
+    let db = {};
+    try { db = JSON.parse(localStorage.getItem(SPEC_DB_KEY + '_' + sc) || '{}'); } catch(e) {}
+    Object.entries(db).forEach(([pn, spec]) => { if (spec) out.push({ pn, spec, scope: sc }); });
+  });
+  return out.sort((a, b) => (a.scope + '|' + a.pn).localeCompare(b.scope + '|' + b.pn));
+}
 function setPnScopeFilter(v) { pnScopeFilter = v; renderPnList(); }
 
 function specsToRows(specs) {
@@ -5171,12 +5300,13 @@ function renderPnList() {
     return;
   }
 
-  // ── 非 admin：維持原樣（自己歸屬、一號一列）──
-  if (!keys.length) {
+  // ── 非 admin：自己歸屬（一號一列，可編可刪）＋ V170-12 跨廠唯讀區 ──
+  const _cross = listCrossScopeSpecRows();
+  if (!keys.length && !_cross.length) {
     tbody.innerHTML = `<tr><td colspan="${colCount}" class="empty-hint">資料庫尚無料號，請在下方填寫後儲存</td></tr>`;
     return;
   }
-  tbody.innerHTML = keys.map(pn => {
+  let _html = keys.map(pn => {
     const s = PART_SPECS[pn];
     return `<tr style="border-bottom:2px solid #e0e0e0">
       <td style="font-weight:700;color:#1a4f8a">${pn}</td>
@@ -5192,6 +5322,30 @@ function renderPnList() {
       </td>
     </tr>`;
   }).join('');
+
+  // ══ V170-12：🌐 範圍內、別廠的料號規格（唯讀）══
+  //  刻意接在自己的清單「後面」而不是混排：上面是你能改的，下面是只能看的，
+  //  中間有一條分隔標題，不會有人誤以為下面那些也能編。
+  //  ⚠ 這些列**沒有編輯／刪除鈕**——跨廠唯讀是 V143 定的，資料庫端也擋（V170 的 RLS 改動）。
+  if (_cross.length) {
+    _html += `<tr><td colspan="${colCount}" style="padding:8px 10px 6px;font-size:12px;font-weight:700;color:#0f6e56;background:#f0fff8;border-top:2px solid #9fd8c0">
+        🌐 以下 ${_cross.length} 筆是<b>跨廠區檢視範圍</b>內的料號規格 —— <b>唯讀</b>，不能編輯或刪除
+      </td></tr>`;
+    _html += _cross.map(r => {
+      const s = r.spec;
+      return `<tr style="border-bottom:1px solid #e8e8e8;background:#fbfefc">
+        <td style="font-weight:700;color:#0f6e56">${r.pn}</td>
+        <td style="color:#555">${s.partname||''}</td>
+        <td><span class="pn-badge">${s.rev||''}</span></td>
+        <td><span class="pn-badge" style="background:#f0fff4;color:#1D6E50">${s.material||''}</span></td>
+        <td style="text-align:center"><span class="pn-badge">${(s.specs||[]).length} 項</span></td>
+        <td style="width:160px">
+          <span style="font-size:10px;font-weight:700;background:#e8f5ee;color:#0f6e56;border:1px solid #9fd8c0;border-radius:3px;padding:2px 7px;white-space:nowrap">🔒 ${scopeLabel(r.scope)}　唯讀</span>
+        </td>
+      </tr>`;
+    }).join('');
+  }
+  tbody.innerHTML = _html;
 }
 
 function clearEditor() {
@@ -7043,11 +7197,23 @@ document.getElementById('bc-format')?.addEventListener('change', onBcFormatChang
 // 📦 記錄匯出 / 匯入（跨裝置同步）
 // ══════════════════════════════════════════════
 function exportRecords() {
+  // V170：整包備份僅系統管理員（作法照 V167 匯入守門：按鈕不隱藏、變淡、點了跳提示）
+  const caps = ROLE_CAPS[getCurrentUserRole()] || ROLE_CAPS.query;
+  if (!caps.exportData) {
+    showNoPermToast('整包備份 JSON 需要管理員權限（⚫ 全部）——請改用「📊 匯出查詢結果 Excel」');
+    return;
+  }
   // 記錄最後備份時間（方案 B 備份提醒機制）
   localStorage.setItem('qms_last_backup', new Date().toISOString());
   checkBackupReminder(); // 立即更新提醒狀態
+  // ══ V170-2：把 CPK 記錄納入備份（使用者 260907 指定）══
+  //  舊篩選只有 fai_record_ 與 fai_draft_ ⇒ **CPK 整類不在備份檔裡**，
+  //  而「⬆ 匯入 JSON」是照檔案裡的 key 寫回去 ⇒ 拿這個備份還原會少掉全部 CPK。
+  //  同一支檔案裡的 getAllRecords() 早就含 cpk_record_，是這裡漏了。
+  //  ⚠ 體積不是問題：實測一張 22 球標×32 筆的 CPK 單約 7KB，30 張約 215KB；
+  //    FAI 的照片是 base64（一張約 1,400KB），CPK 只有它的 2%。
   const keys = Object.keys(localStorage).filter(k =>
-    k.startsWith(RECORD_PREFIX) || k.startsWith(STORAGE_PREFIX)
+    k.startsWith(RECORD_PREFIX) || k.startsWith(STORAGE_PREFIX) || k.startsWith('cpk_record_')
   );
   if (!keys.length) {
     setExportStatus('⚠ 尚無記錄可匯出', '#c0392b');
@@ -7478,7 +7644,119 @@ async function linkAllOmsEmp() {
   renderUserMgrTable();
 }
 
-async function renderUserMgrTable() {
+// ══ V170-9：人員查找（搜尋＋角色/狀態篩選）—— 比照 MHR 名單（使用者 260908）══
+//  五種狀態對應畫面上原本就有的五個區塊（V139／V164 定的語意）：
+const UMGR_STATUS = [
+  { key:'ghost',    label:'\u26a0 未設權限（OMS 已授權、QMS 無帳號）' },
+  { key:'pending',  label:'\u26a0 權限被移除（可重新開通）' },
+  { key:'revoked',  label:'🚫 OMS 已撤銷授權' },
+  { key:'active',   label:'\u2705 正常名單' },
+  { key:'inactive', label:'\u26a0 組織已停用' },
+];
+// ⚠ V170-10：這一行原本寫成 '\U0001F50D 查詢'（大寫 U 的 8 位逃逸）——
+//   那是 Python 的寫法，**JavaScript 不認得**（JS 只吃 \uXXXX 或 \u{XXXXX}），
+//   結果畫面上直接印出「U0001F50D 查詢」。改放真正的字元，不再繞逃逸。
+const UMGR_ROLE_LABEL = { query:'🔍 查詢', inspector:'🔵 輸入', editor:'🟠 修改', supervisor:'🔴 刪除', admin:'⚫ 全部' };
+// V170-10：下拉選項用跟下方圖例／勾選框同一組顏色（使用者 260908：「比較一致」）
+//  色碼與 renderUserMgrTable 內的 PERM_DEFS 相同，改色時兩邊要一起改。
+const UMGR_ROLE_COLOR = { query:'#0f6e56', inspector:'#1a4f8a', editor:'#BA7517', supervisor:'#c0392b', admin:'#333333' };
+//  狀態則沿用各區塊標題列本來就在用的顏色，讓下拉跟區塊對得起來。
+const UMGR_STATUS_COLOR = { ghost:'#c0392b', pending:'#BA7517', revoked:'#555555', active:'#1D9E75', inactive:'#BA7517' };
+//  下拉的排列順序要跟畫面下方那排圖例一致（查詢→輸入→修改→刪除→全部）
+const UMGR_ROLE_ORDER = ['query','inspector','editor','supervisor','admin'];
+
+//  ⚠ 關鍵字要能打中畫面上看得到的每一欄，否則使用者搜不到會以為資料不見了。
+//    含 OMS 那份姓名（omsName/omsEng）——名單顯示的中文名是即時讀 OMS 的。
+function umgrHay(r) {
+  return [r.site, r.emp_id, r.name, r.engName, r.omsName, r.omsEng, r.email, r.key,
+          UMGR_ROLE_LABEL[r.role] || r.role]
+    .map(x => String(x == null ? '' : x)).join(' ').toLowerCase();
+}
+function umgrPass(r, opt) {
+  const o = opt || {};
+  if (o.kw && !umgrHay(r).includes(o.kw)) return false;
+  if (o.role && (r.role || '') !== o.role) return false;
+  if (o.status && (r._status || '') !== o.status) return false;
+  return true;
+}
+
+function clearUserMgrFilter() {
+  ['user-mgr-kw','user-mgr-site','user-mgr-role','user-mgr-status'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.value = '';
+  });
+  renderUserMgrTable(true);
+}
+
+//  多篩選連動（平台通則）：每個下拉的可選項＝「通過其他條件」的資料才有的值；
+//  目前選的值若因此消失，自動清掉，不讓畫面停在一個永遠 0 筆的死組合。
+//  orderList：選項的固定順序。不給就照發現順序，那會跟畫面下方的圖例對不起來
+//  （圖例是 查詢→輸入→修改→刪除→全部，下拉卻可能變成 全部→查詢→刪除→修改→輸入）。
+function umgrSyncSelect(id, allRows, opt, defLabel, labelOf, valueOf, colorOf, orderList) {
+  const el = document.getElementById(id);
+  if (!el) return '';
+  const avail = [];
+  allRows.forEach(r => { if (umgrPass(r, opt)) { const v = valueOf(r); if (v && avail.indexOf(v) < 0) avail.push(v); } });
+  if (orderList) avail.sort((a, b) => orderList.indexOf(a) - orderList.indexOf(b));   // V170-10：照圖例順序
+  let cur = el.value;
+  if (cur && avail.indexOf(cur) < 0) cur = '';        // 失效自動清
+  //  V170-10：選項照圖例上色；選單本身也跟著目前選項的顏色走，收合狀態下也看得出來
+  el.innerHTML = '<option value="" style="color:#555">' + defLabel + '</option>'
+    + avail.map(v => {
+        const c = colorOf ? (colorOf(v) || '#333') : '#333';
+        return '<option value="' + v + '" style="color:' + c + ';font-weight:700"'
+             + (v === cur ? ' selected' : '') + '>' + labelOf(v) + '</option>';
+      }).join('');
+  el.value = cur;
+  el.style.color      = cur && colorOf ? (colorOf(cur) || '#333') : '#333';
+  el.style.fontWeight = cur ? '700' : '400';
+  return cur;
+}
+
+// ══ V170-8：人員管理表格排序（使用者 260908 要求）══
+//  ⚠ 只排「區塊內」的順序，**不打散三區分流**：
+//    ⚠OMS已授權但權限被移除 / 🚫OMS已撤銷 / 正常名單 / 組織已停用 —— 這四塊的
+//    先後與標題列是 V164 定的語意（誰要處理、誰不能登入），排序不可以把它們攪在一起。
+//  預設不排序（userSortCol=''）＝維持原本的載入順序，點了表頭才開始排，
+//  避免這版一上去畫面順序就變、跟使用者記憶中的位置對不上。
+let userSortCol = '', userSortDir = 1;   // dir: 1=升冪, -1=降冪
+
+//  角色要照「權限高低」排，不是字母序——找「誰有全部權限」才是實際用途。
+function userRoleRank(role) {
+  return { query:1, inspector:2, editor:3, supervisor:4, admin:5 }[role] || 0;
+}
+
+function sortUserMgrRows(rows) {
+  if (!userSortCol || !Array.isArray(rows)) return rows;
+  const col = userSortCol, dir = userSortDir;
+  return rows.slice().sort((a, b) => {
+    let x, y;
+    if (col === 'role') { x = userRoleRank(a.role); y = userRoleRank(b.role); }
+    else {
+      x = a[col]; y = b[col];
+      //  '__nosite__'（系統管理員）與空工號一律排最後，不要卡在字母序中間
+      const last = v => (v === '__nosite__' || v === '' || v == null);
+      if (last(x) !== last(y)) return last(x) ? 1 : -1;   // 與 dir 無關，永遠墊底
+      x = String(x == null ? '' : x); y = String(y == null ? '' : y);
+      return x.localeCompare(y, 'zh-Hant', { numeric: true }) * dir;
+    }
+    return (x === y ? 0 : (x < y ? -1 : 1)) * dir;
+  });
+}
+
+function sortUserMgr(th, col) {
+  if (userSortCol === col) userSortDir *= -1;
+  else { userSortCol = col; userSortDir = 1; }
+  document.querySelectorAll('th[data-usort] span[data-uarrow]').forEach(el => el.textContent = '');
+  const arrow = th.querySelector('span[data-uarrow]');
+  if (arrow) arrow.textContent = (userSortDir === 1 ? '▲' : '▼');
+  renderUserMgrTable();
+}
+
+//  V170-9：useCache=true ⇒ 不重新打 Edge Function，只用上次的資料重畫。
+//   篩選／排序走這條（否則每打一個字就兩次網路往返）；所有「改了資料」的呼叫點
+//   維持原本的 renderUserMgrTable()（不帶參數＝重新抓），行為不變。
+let _umgrCache = null;
+async function renderUserMgrTable(useCache) {
   const filterSite = document.getElementById('user-mgr-site')?.value || '';
   const tbody = document.getElementById('user-mgr-tbody');
   if (!tbody) return;
@@ -7487,7 +7765,7 @@ async function renderUserMgrTable() {
   const qmsEmpIds = new Set();   // V139：已在 QMS 有帳號的工號
   const qmsEmails = new Set();   // V139：已在 QMS 有帳號的 email（小寫）
   try {
-    const lr = await sbCallAdminFn('list');
+    const lr = (useCache && _umgrCache && _umgrCache.lr) ? _umgrCache.lr : await sbCallAdminFn('list');
     if (!lr.ok || !lr.data || !lr.data.profiles) {
       tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:14px;color:#c0392b;font-size:12px">載入帳號失敗：' + (lr.msg||'') + '</td></tr>';
       return;
@@ -7508,6 +7786,7 @@ async function renderUserMgrTable() {
       if (p.emp_id) qmsEmpIds.add(p.emp_id);
       if (p.email)  qmsEmails.add(String(p.email).toLowerCase());
     });
+    _umgrCache = Object.assign({}, _umgrCache, { lr });   // V170-9
     try { localStorage.setItem(USER_DB_KEY, JSON.stringify(db)); } catch(e) {} // 供 onPermCheck 沿用
   } catch(e) {
     tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:14px;color:#c0392b;font-size:12px">載入帳號錯誤</td></tr>';
@@ -7529,7 +7808,7 @@ async function renderUserMgrTable() {
   const activeSiteCodes = new Set(activeSites().map(s => s.code));   // V158:共用來源
 
   // ── V139：讀 OMS 已授權 QMS、但 QMS 還沒帳號的人（＝未設權限，比照 GHG 自動出現）──
-  let ghostRows = [];
+  let ghostRows = [];   // V170-9：篩選後會重新指派
   let omsNameMap = {}; // V139-1：工號 → {name, eng}（姓名即時讀 OMS，OMS 改名 QMS 跟著變）
   let omsEmpByEmail = {}; // V142：email(小寫) → OMS 工號（用來自動連結既有帳號）
   // ══ V164：名單要反映 OMS 真相（使用者 260901：「OMS 沒有勾選，那應該就不在 QMS 權限名單中才對」）══
@@ -7539,7 +7818,8 @@ async function renderUserMgrTable() {
   //  ⚠ 只對「內部員工」分流：admin 虛擬帳號與供應商不在 OMS 名單，永遠留在①（同門③的排除規則）
   let omsAuthedEmails = new Set(), omsAuthedEmpIds = new Set(), omsRosterOk = false;
   try {
-    const omsRoster = await loadOmsQmsRoster();
+    const omsRoster = (useCache && _umgrCache && _umgrCache.roster) ? _umgrCache.roster : await loadOmsQmsRoster();
+    _umgrCache = Object.assign({}, _umgrCache, { roster: omsRoster });   // V170-9
     omsRoster.forEach(p => {
       if (p.emp_id) omsNameMap[p.emp_id] = { name: p.name || '', eng: p.eng_name || '' };
       if (p.emp_id && p.email) omsEmpByEmail[String(p.email).toLowerCase()] = p.emp_id;
@@ -7567,15 +7847,16 @@ async function renderUserMgrTable() {
   });
   window._linkable = linkable;
 
-  const activeRows   = [];
-  const inactiveRows = [];
-  const revokedRows  = [];   // V164 ③：QMS 有設定，但 OMS 已撤銷授權
-  const pendingRows  = [];   // V164 ②：OMS 有授權，但 QMS 權限已被移除（帳號還在，可直接重新開通）
+  let activeRows   = [];     // V170-9：篩選後會重新指派，故由 const 改 let
+  let inactiveRows = [];
+  let revokedRows  = [];     // V164 ③：QMS 有設定，但 OMS 已撤銷授權
+  let pendingRows  = [];     // V164 ②：OMS 有授權，但 QMS 權限已被移除（帳號還在，可直接重新開通）
   Object.entries(db).forEach(([site, users]) => {
     if (filterSite && site !== filterSite) return;
     Object.entries(users).forEach(([key, u]) => {
       const om = u.emp_id && omsNameMap[u.emp_id];
       const row = {site, key, name: u.name, email: u.email||'', role: u.role||'inspector', emp_id: u.emp_id||'', createdAt: u.createdAt||'',
+        acctType: u.acctType || 'site',   // V170-11：分辨「虛擬管理員帳號」vs「個人帳號勾了全部」
         omsName: om ? om.name : '', omsEng: om ? om.eng : ''};
       const siteActive = activeSiteCodes.has(site) || site === '__nosite__';
       // V164 三區分流（只對內部員工；admin 與供應商豁免＝比照登入門③的排除規則）
@@ -7632,11 +7913,23 @@ async function renderUserMgrTable() {
            style="height:26px;padding:0 8px;font-size:10px;border:1px solid #1D9E75;color:#1D9E75;background:#fff;border-radius:3px;cursor:pointer;font-family:Arial,sans-serif;white-space:nowrap;margin-right:3px">▶ 啟用廠區</button>
          <button onclick="deleteUserConfirm('${r.site}','${r.key}','${r.name}')"
            style="height:26px;padding:0 8px;font-size:10px;border:1px solid #c0392b;color:#c0392b;background:#fff;border-radius:3px;cursor:pointer;font-family:Arial,sans-serif;white-space:nowrap">✕ 移除</button>`
-      : `${r.role === 'admin' ? '' : (() => { /* V143：🌐 跨廠區查詢範圍設定鈕（admin 帳號本來就看全部，不用設） */
+      : `${(() => {
+           /* ══ V170-11：🌐 只對「真正的 ADMIN 帳號」隱藏（使用者 260908）══
+              舊條件是 `r.role === 'admin'`，也就是**只要勾了「⚫ 全部」就沒有 🌐**。
+              但這兩件事在本系統是分開的（見 [管理員=虛擬帳號非個人]）：
+                · 虛擬管理員帳號 admin@id.syncmold.com.tw（account_type='admin'，site='__nosite__'）
+                  ＝最高系統管理員，本身就跨全廠區，沒有東西可以設 ⇒ 不顯示 🌐
+                · 個人帳號被勾「⚫ 全部」（account_type 仍是 'site'，只有 qms_role='admin'）
+                  ＝拿到全部功能權限，但**廠區範圍仍應該可以單獨指定**
+                  （使用者 260908：DTO 同事給全部權限，但廠區要能單獨選）
+              所以改看 acctType，不看 role。 */
+           if (r.acctType === 'admin' || r.site === '__nosite__') return '';   // 只有這個帳號沒有 🌐
+           return (() => {
            const sc = (window._scopeByEmail || {})[String(r.email || r.key).toLowerCase()] || {};
            const has = (sc.bus && sc.bus.length) || (sc.sups && sc.sups.length);
            return `<button onclick="openScopeModal('${String(r.email || r.key).replace(/'/g, '')}')" title="🌐 跨廠區查詢範圍"
-             style="height:26px;padding:0 7px;font-size:10px;border:1px solid ${has ? '#0f6e56' : '#bbb'};color:${has ? '#fff' : '#777'};background:${has ? '#0f6e56' : '#fff'};border-radius:3px;cursor:pointer;font-family:Arial,sans-serif;white-space:nowrap;margin-right:3px">🌐${has ? '✓' : ''}</button>`; })()}<button onclick="resetUserPassword('${r.site}','${r.key}','${r.name}')"
+             style="height:26px;padding:0 7px;font-size:10px;border:1px solid ${has ? '#0f6e56' : '#bbb'};color:${has ? '#fff' : '#777'};background:${has ? '#0f6e56' : '#fff'};border-radius:3px;cursor:pointer;font-family:Arial,sans-serif;white-space:nowrap;margin-right:3px">🌐${has ? '✓' : ''}</button>`; })();
+         })()}<button onclick="resetUserPassword('${r.site}','${r.key}','${r.name}')"
            style="height:26px;padding:0 8px;font-size:10px;border:1px solid #1a4f8a;color:#1a4f8a;background:#fff;border-radius:3px;cursor:pointer;font-family:Arial,sans-serif;white-space:nowrap;margin-right:3px">🔑 重設</button>
         <span id="sync_badge_${sid}" style="font-size:10px;color:#1d9e75;font-family:Arial"></span>
          <button onclick="deleteUserConfirm('${r.site}','${r.key}','${r.name}')"
@@ -7714,28 +8007,71 @@ async function renderUserMgrTable() {
   if (linkable.length) {
     html += `<tr><td colspan="7" style="padding:8px 8px 6px;font-size:12px;font-weight:700;color:#0f6e56;background:#eefaf4;border-top:2px solid #9fd8bf">🔗 有 <b>${linkable.length}</b> 位帳號可從 OMS 連結工號（email 已對上、但還沒工號）<button onclick="linkAllOmsEmp()" style="height:24px;padding:0 12px;font-size:11px;font-weight:700;border:none;background:#0f6e56;color:#fff;border-radius:4px;cursor:pointer;margin-left:10px">🔗 一鍵連結全部</button></td></tr>`;
   }
+  // ══ V170-9：套用查找條件 ══
+  //  ⚠ 先給每一列標上「它屬於哪一區」，篩選才有辦法對狀態下手；
+  //    區塊本身的順序與標題列不動（V164 的語意：誰要處理、誰不能登入）。
+  ghostRows.forEach(r => r._status = 'ghost');
+  pendingRows.forEach(r => r._status = 'pending');
+  revokedRows.forEach(r => r._status = 'revoked');
+  activeRows.forEach(r => r._status = 'active');
+  inactiveRows.forEach(r => r._status = 'inactive');
+  const _umgrAll = [].concat(ghostRows, pendingRows, revokedRows, activeRows, inactiveRows);
+  const _kw = (document.getElementById('user-mgr-kw')?.value || '').trim().toLowerCase();
+  //  連動：角色下拉只列「通過關鍵字＋狀態」的資料有的角色；狀態下拉同理
+  const _role   = umgrSyncSelect('user-mgr-role',   _umgrAll,
+                    { kw:_kw, status: document.getElementById('user-mgr-status')?.value || '' },
+                    '全部角色', v => UMGR_ROLE_LABEL[v] || v, r => r.role || '',
+                    v => UMGR_ROLE_COLOR[v], UMGR_ROLE_ORDER);
+  const _status = umgrSyncSelect('user-mgr-status', _umgrAll,
+                    { kw:_kw, role:_role },
+                    '全部狀態', v => (UMGR_STATUS.find(x => x.key === v) || {}).label || v, r => r._status || '',
+                    v => UMGR_STATUS_COLOR[v], UMGR_STATUS.map(x => x.key));
+  const _opt = { kw:_kw, role:_role, status:_status };
+  const _f = rows => rows.filter(r => umgrPass(r, _opt));
+  ghostRows    = _f(ghostRows);
+  pendingRows  = _f(pendingRows);
+  revokedRows  = _f(revokedRows);
+  activeRows   = _f(activeRows);
+  inactiveRows = _f(inactiveRows);
+  const _shown = ghostRows.length + pendingRows.length + revokedRows.length + activeRows.length + inactiveRows.length;
+  const _cntEl = document.getElementById('user-mgr-count');
+  if (_cntEl) {
+    _cntEl.textContent = '顯示 ' + _shown + ' / ' + _umgrAll.length + ' 筆';
+    _cntEl.style.color = (_shown === 0 ? '#c0392b' : '#666');
+  }
+  if (!_shown) {
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:14px;color:#c0392b;font-size:12px">查無符合條件的人員 —— 請按「清除」重設條件</td></tr>';
+    return;
+  }
+
   // V139：未設權限（OMS 已授權 QMS、QMS 尚無帳號）置頂
   if (ghostRows.length) {
     html += `<tr><td colspan="7" style="padding:8px 8px 6px;font-size:12px;font-weight:700;color:#c0392b;background:#fff3f0;border-top:2px solid #f0b0a0">⚠ 有 ${ghostRows.length} 位已在 OMS 授權 QMS、尚未建立 QMS 帳號 —— 請按「＋ 帶入」建立帳號後設權限</td></tr>`;
     html += ghostRows.map((g, i) => buildGhostRow(g, i)).join('');
   }
   // V164 ②：帳號在、OMS 有授權，但 QMS 權限被移除 → 一鍵重新開通（不必重建帳號）
-  if (pendingRows.length) {
-    html += `<tr><td colspan="7" style="padding:8px 8px 6px;font-size:12px;font-weight:700;color:#BA7517;background:#fffbe8;border-top:2px solid #f0d080">⚠ 有 ${pendingRows.length} 位 <b>OMS 已授權、但 QMS 權限被移除</b> —— 按「＋ 重新開通」即可恢復（帳號密碼都還在）</td></tr>`;
-    html += pendingRows.map(r => buildPendingRow(r)).join('');
+  // V170-8：各區塊各自套排序（見 sortUserMgrRows 的說明：不跨區塊打散）
+  const _pendingRows  = sortUserMgrRows(pendingRows);
+  const _revokedRows  = sortUserMgrRows(revokedRows);
+  const _activeRows   = sortUserMgrRows(activeRows);
+  const _inactiveRows = sortUserMgrRows(inactiveRows);
+
+  if (_pendingRows.length) {
+    html += `<tr><td colspan="7" style="padding:8px 8px 6px;font-size:12px;font-weight:700;color:#BA7517;background:#fffbe8;border-top:2px solid #f0d080">⚠ 有 ${_pendingRows.length} 位 <b>OMS 已授權、但 QMS 權限被移除</b> —— 按「＋ 重新開通」即可恢復（帳號密碼都還在）</td></tr>`;
+    html += _pendingRows.map(r => buildPendingRow(r)).join('');
   }
   // V164 ③：OMS 已撤銷授權，QMS 卻還留著設定 → 提示清理（此人已進不來，純資料整潔）
-  if (revokedRows.length) {
-    html += `<tr><td colspan="7" style="padding:8px 8px 6px;font-size:12px;font-weight:700;color:#555;background:#f4f4f4;border-top:2px solid #ccc">🚫 有 ${revokedRows.length} 位 <b>OMS 已撤銷 QMS 授權</b>，但 QMS 還留著權限設定 —— 他們<b>已經無法登入</b>，按「清除設定」讓名單保持乾淨</td></tr>`;
-    html += revokedRows.map(r => buildRevokedRow(r)).join('');
+  if (_revokedRows.length) {
+    html += `<tr><td colspan="7" style="padding:8px 8px 6px;font-size:12px;font-weight:700;color:#555;background:#f4f4f4;border-top:2px solid #ccc">🚫 有 ${_revokedRows.length} 位 <b>OMS 已撤銷 QMS 授權</b>，但 QMS 還留著權限設定 —— 他們<b>已經無法登入</b>，按「清除設定」讓名單保持乾淨</td></tr>`;
+    html += _revokedRows.map(r => buildRevokedRow(r)).join('');
   }
-  html += activeRows.map((r,i) => buildRow(r, i, false)).join('');
+  html += _activeRows.map((r,i) => buildRow(r, i, false)).join('');
 
   if (inactiveRows.length) {
     html += `<tr><td colspan="6" style="padding:8px 12px 4px;font-size:11px;font-weight:700;color:#BA7517;background:#fff8e8;border-top:2px solid #f0d080">
       ⚠ 失效帳號 Inactive Accounts（組織已停用）
     </td></tr>`;
-    html += inactiveRows.map((r,i) => buildRow(r, i, true)).join('');
+    html += _inactiveRows.map((r,i) => buildRow(r, i, true)).join('');
   }
 
   tbody.innerHTML = html;
@@ -8080,7 +8416,13 @@ function renderSysInfo() {
   const grid = document.getElementById('sys-info-grid');
   if (!grid) return;
   const allKeys = Object.keys(localStorage);
-  const recordCount = allKeys.filter(k=>k.startsWith('fai_record_')).length;
+  // ══ V170-4：正式記錄要含 CPK ══
+  //  舊版只數 fai_record_ ⇒ 就算重算也只會顯示 190，跟歷史查詢的 211 對不起來
+  //  （211 ＝ FAI 190 ＋ CPK 21）。歷史查詢的 getAllRecords() 本來就含 cpk_record_，
+  //  是這裡漏了——同一份資料，兩個地方數出不同答案。
+  const faiCount    = allKeys.filter(k=>k.startsWith('fai_record_')).length;
+  const cpkCount    = allKeys.filter(k=>k.startsWith('cpk_record_')).length;
+  const recordCount = faiCount + cpkCount;
   const draftCount  = allKeys.filter(k=>k.startsWith('fai_draft_')).length;
   const partCount   = Object.keys(isAdmin() ? loadAllSpecDB() : loadSpecDB()).length;
   let storageUsed = 0;
@@ -8089,7 +8431,7 @@ function renderSysInfo() {
     ['Version 版本', 'QMS v1.0'],
     ['Current Org 當前組織', isAdmin() ? '— (全組織 All Orgs) —' : (getCurrentSite() || '— 未設定 —')],
     ['Orgs Configured 組織數', SITE_LIST.length + ' 個'],
-    ['Formal Records 正式記錄', recordCount + ' 筆'],
+    ['Formal Records 正式記錄', recordCount + ' 筆　<span style="font-weight:400;color:#888">(FAI ' + faiCount + ' / CPK ' + cpkCount + ')</span>'],
     ['Drafts 草稿', draftCount + ' 筆'],
     ['Part Specs 料號規格', partCount + ' 筆'],
     ['Storage Used 儲存使用', Math.round(storageUsed/1024) + ' KB'],
@@ -8504,16 +8846,27 @@ async function sbRefreshViewScope() {
 }
 
 // 🔐 _2CODE：登入後重新從雲端拉記錄（登入會清本機快取，需重拉才看得到同廠區/全部記錄）
+// ══ V170-5：同步完成後刷新目前分頁 —— 收斂成單一出處 ══
+//  原本這段邏輯在檔案裡有**兩份**（sbInit 的開頁同步、sbPostLoginRefresh 的登入後同步），
+//  V170-4 補「設定頁也要重算」時只改到其中一份 ⇒ 登入後那條路徑照樣看到「正式記錄 0 筆」。
+//  這正是本專案自己那條「規則收斂到單一出處」要避免的打地鼠，所以抽出來一次改。
+function refreshActiveTabAfterSync() {
+  const activeTab = document.querySelector('.tab-pane.active')?.id;
+  if (activeTab === 'tab-dash') renderDashboard();
+  if (activeTab === 'tab-hist') runHistQuery();
+  // V144：料號頁開著時，同步完成後重載清單
+  if (activeTab === 'tab-mgr') { PART_SPECS = isAdmin() ? loadAllSpecDB() : loadSpecDB(); renderPnList(); }
+  // V170-4：設定頁的「系統資訊」也要重算（記錄是第二批才寫進 localStorage）
+  if (activeTab === 'tab-sys') renderSysInfo();
+}
+
 async function sbPostLoginRefresh() {
   try {
     if (!_sbReady) { try { _sbReady = await sbTestConnection(); } catch(e){} }
     if (!_sbReady) return;
     await sbRefreshViewScope(); // V143：先重算跨廠範圍（動態跟隨），資料拉取才會照新範圍放行
     await Promise.allSettled([ sbPullAllRecords(), sbPullCpkRecords(), sbPullPartSpecs() ]);
-    const activeTab = document.querySelector('.tab-pane.active')?.id;
-    if (activeTab === 'tab-dash') renderDashboard();
-    if (activeTab === 'tab-hist') runHistQuery();
-    if (activeTab === 'tab-mgr') { PART_SPECS = isAdmin() ? loadAllSpecDB() : loadSpecDB(); renderPnList(); } // V144：料號頁開著時，登入同步完成後重載清單
+    refreshActiveTabAfterSync();   // V170-5：與開頁同步共用同一支
   } catch(e) { console.warn('登入後重拉失敗:', e); }
 }
 
@@ -10143,11 +10496,23 @@ async function resyncFromCloud() {
   if (btn) { btn.disabled = true; btn.textContent = '⏳ 同步中…'; }
   if (st)  { st.textContent = ''; }
   try {
-    clearLocalCache();                       // 清掉本機 FAI/CPK 快取
+    clearLocalCache();                       // 清掉本機 FAI/CPK 快取（含 fai_part_specs_<廠區>）
     const n1 = await sbPullAllRecords();     // 重拉 FAI
     const n2 = await sbPullCpkRecords();     // 重拉 CPK
-    runHistQuery();                          // 刷新歷史查詢列表
-    if (st) { st.textContent = `✅ 已同步：FAI ${n1||0} 筆、CPK ${n2||0} 筆`; st.style.color = '#1d9e75'; }
+    // ══ V170-7：料號規格也要重拉 ══
+    //  clearLocalCache() 連 `fai_part_specs_<廠區>` 一起刪掉了（見該函式），
+    //  但舊版只重拉 FAI／CPK ⇒ **廠區別料號規格被刪掉、沒補回來**，
+    //  要等下次重新開頁（sbInit 的第一批才有 sbPullPartSpecs）才會回來。
+    //  中間這段時間，料號規格管理頁與 CPK 頁的料號帶入會少料號。
+    //  （共用的 `fai_part_specs`──不帶廠區碼那個──不在清除範圍內，不受影響。）
+    await sbPullPartSpecs();
+    //  ⚠ 記憶體裡的 PART_SPECS 也是舊的，一定要重載：
+    //    它是 renderPnList() 與 cpkLoadSpec()（CPK 頁打料號帶規格）共用的全域變數，
+    //    只重拉 localStorage 而不重載這個，CPK 頁帶進來的還是清空前的舊規格。
+    PART_SPECS = isAdmin() ? loadAllSpecDB() : loadSpecDB();
+    const nSpec = Object.keys(PART_SPECS || {}).length;
+    refreshActiveTabAfterSync();             // V170-5：收斂後的共用刷新（含歷史查詢／料號頁／設定頁）
+    if (st) { st.textContent = `✅ 已同步：FAI ${n1||0} 筆、CPK ${n2||0} 筆、料號規格 ${nSpec} 筆`; st.style.color = '#1d9e75'; }
   } catch(e) {
     console.warn('resyncFromCloud error:', e);
     // V167-2：本機快取在拉取前就被 clearLocalCache 清掉了 ⇒ 失敗時畫面會是空的，
@@ -11038,7 +11403,7 @@ function renderSysTab() {
       btnDiv.style.cssText = 'margin-top:16px;padding:12px;background:#f0fff4;border:1px solid #1d9e75;border-radius:8px;grid-column:1/-1';
       btnDiv.innerHTML = `
         <div style="font-size:12px;font-weight:700;color:#1d9e75;margin-bottom:6px">☁ 一鍵上傳所有本機資料到 Supabase</div>
-        <div style="font-size:11px;color:#555;margin-bottom:10px">同步範圍：FAI 記錄、CPK 記錄、料號規格、使用者帳號、廠區設定、供應商清單、供應商帳號，讓所有裝置都能查看最新資料。</div>
+        <div style="font-size:11px;color:#555;margin-bottom:10px">同步範圍：FAI 記錄、CPK 記錄、料號規格、廠區設定、供應商清單，讓所有裝置都能查看最新資料。<br><span style="color:#888">（帳號不從這裡推——帳號主檔在 Supabase Auth 與 OMS 授權）</span></div>
         <button id="bulk-upload-btn" onclick="bulkUploadToSupabase()"
           style="height:32px;padding:0 16px;background:#1d9e75;color:#fff;border:none;border-radius:6px;font-size:12px;cursor:pointer;font-weight:700">
           ☁ 開始上傳
@@ -11106,11 +11471,26 @@ const SUPPLIER_ROLE_TABS = {
 // 各角色可執行的操作
 const ROLE_CAPS = {
   admin:      { submit:true,  edit:true,  del:true,  exportData:true,  importData:true,  approve:true  },
-  supervisor: { submit:true,  edit:true,  del:true,  exportData:true,  importData:false, approve:true  },
-  editor:     { submit:true,  edit:true,  del:false, exportData:true,  importData:false, approve:false },
-  inspector:  { submit:true,  edit:false, del:false, exportData:true,  importData:false, approve:false },
-  query:      { submit:false, edit:false, del:false, exportData:true,  importData:false, approve:false },
+  supervisor: { submit:true,  edit:true,  del:true,  exportData:false, importData:false, approve:true  },
+  editor:     { submit:true,  edit:true,  del:false, exportData:false, importData:false, approve:false },
+  inspector:  { submit:true,  edit:false, del:false, exportData:false, importData:false, approve:false },
+  query:      { submit:false, edit:false, del:false, exportData:false, importData:false, approve:false },
 };
+// ══ V170-1：`exportData` 收斂到系統管理員（使用者 260907 定案）══
+//  舊值：五個角色全 true，而且**全檔沒有一行檢查它**（V167 只補了 importData，
+//    當時判斷「匯出的就是他螢幕上看得到的」而維持全開）。
+//  改的理由：「⬇ 備份 JSON」匯出的**不是螢幕上那一份**——它把 localStorage 裡
+//    fai_record_* 與 fai_draft_* 整包倒出成原始 JSON，不看查詢條件、不受畫面篩選，
+//    連別人還沒送出的草稿都在裡面。這種形式的資料落地是管理職責。
+//  平台一致性：MHR V102 已把「匯出備份」收斂到系統管理員；本檔 V167 的「⬆ 匯入 JSON」
+//    也已經是 admin-only；V168 的「備份提醒」依使用者決定只給 admin 看。
+//    這版讓「⬇ 備份 JSON」跟它的搭檔（匯入）站在同一條線上。
+//  ⚠ 「admin」＝ `getCurrentUserRole()` 回 'admin'，涵蓋兩種人：
+//    ① 虛擬管理員帳號 admin@id.syncmold.com.tw 登入
+//    ② 個人帳號在人員管理被勾「⚫ 全部」（選單值就是 admin）
+//    兩者權限相同，差別只在「🔑 修改管理員密碼」只有 ① 看得到。
+//  ⚠ 不影響日常：檢驗員每天在用的是「📊 匯出查詢結果 Excel」(exportRecordsCSV)，
+//    那支只匯出當下查詢結果、受查詢範圍限制，**本版完全沒動**。
 
 function getCurrentUserRole() {
   const s = getSession();
@@ -11202,7 +11582,20 @@ async function bulkUploadToSupabase() {
   btn.disabled = true;
   st.textContent = '';
 
-  let faiOk=0, faiErr=0, cpkOk=0, cpkErr=0, specOk=0, specErr=0, userOk=0, userErr=0;
+  // ══ V170-2：計數改成「看回傳值」，不再是「跑過幾個 key」══
+  //  舊版每個階段都是 try{ await sbSaveXxx(); ok++ }catch{ err++ }，
+  //  而那些函式永不 throw ⇒ catch 到不了、ok++ 必定執行
+  //  ⇒「✅ 完成！FAI n 筆」數的是迴圈跑幾圈，跟雲端收到幾筆無關。
+  //  這顆按鈕的用途正好是「懷疑雲端漏資料時拿來補推」，報假成功等於讓人以為補好了。
+  let faiOk=0, faiErr=0, cpkOk=0, cpkErr=0, specOk=0, specErr=0;
+  let faiDup=0, cpkDup=0;   // V170-3：雲端本來就有的（409），不是失敗
+  // ══ V170-6：進度顯示要數「處理到第幾筆」，不是「成功幾筆」══
+  //  V170-2 把 faiOk 改成「只有新寫入才 +1」之後，遇到「雲端本來就有」的情況
+  //  faiOk 會一直是 0 ⇒ 按鈕上的進度卡在 (0/195) 不動，看起來像當掉。
+  //  （使用者 260907 實測 195 筆全部雲端已有，進度整段停在 0。）
+  let faiDone=0, cpkDone=0;
+  const _fails = [];   // 收集失敗原因，最後顯示前幾筆（只給數字看不出要修什麼）
+  const _why = (r) => (r === null ? '未連線，沒送出' : '雲端拒絕（權限或欄位）');
 
   // ── 第一階段：FAI 記錄 ──
   const faiKeys = Object.keys(localStorage).filter(k => k.startsWith('fai_record_'));
@@ -11210,11 +11603,14 @@ async function bulkUploadToSupabase() {
   for (const key of faiKeys) {
     try {
       const data = JSON.parse(localStorage.getItem(key) || '{}');
-      if (!data.header) { faiErr++; continue; }
-      await sbSaveFaiRecord(key, data);
-      faiOk++;
-      btn.textContent = `⏳ FAI 記錄上傳中 (${faiOk}/${faiKeys.length})...`;
-    } catch(e) { faiErr++; }
+      if (!data.header) { faiErr++; faiDone++; _fails.push('FAI ' + key + '：本機資料缺 header'); continue; }
+      const r = await sbSaveFaiRecord(key, data);
+      if (r === true) faiOk++;
+      else if (r === 'exists') faiDup++;          // V170-3：雲端已有，不算失敗
+      else { faiErr++; _fails.push('FAI ' + (data.formNo || key) + '：' + _why(r)); }
+      faiDone++;                                   // V170-6：進度用這個
+      btn.textContent = `⏳ FAI 記錄上傳中 (${faiDone}/${faiKeys.length})...`;
+    } catch(e) { faiErr++; _fails.push('FAI ' + key + '：' + e.message); }
     await new Promise(r => setTimeout(r, 80));
   }
 
@@ -11224,11 +11620,14 @@ async function bulkUploadToSupabase() {
   for (const key of cpkKeys) {
     try {
       const data = JSON.parse(localStorage.getItem(key) || '{}');
-      if (!data.points) { cpkErr++; continue; }
-      await sbSaveCpkRecord(key, data);
-      cpkOk++;
-      btn.textContent = `⏳ CPK 記錄上傳中 (${cpkOk}/${cpkKeys.length})...`;
-    } catch(e) { cpkErr++; }
+      if (!data.points) { cpkErr++; cpkDone++; _fails.push('CPK ' + key + '：本機資料缺 points'); continue; }
+      const r = await sbSaveCpkRecord(key, data);
+      if (r === true) cpkOk++;
+      else if (r === 'exists') cpkDup++;          // V170-3：雲端已有，不算失敗
+      else { cpkErr++; _fails.push('CPK ' + (data.formNo || key) + '：' + _why(r)); }
+      cpkDone++;                                   // V170-6：進度用這個
+      btn.textContent = `⏳ CPK 記錄上傳中 (${cpkDone}/${cpkKeys.length})...`;
+    } catch(e) { cpkErr++; _fails.push('CPK ' + key + '：' + e.message); }
     await new Promise(r => setTimeout(r, 80));
   }
 
@@ -11239,23 +11638,20 @@ async function bulkUploadToSupabase() {
     try {
       const db = JSON.parse(localStorage.getItem(skey) || '{}');
       for (const [pn, spec] of Object.entries(db)) {
-        try { await sbSavePartSpec(pn, spec); specOk++; } catch(e) { specErr++; }
+        try {
+          const r = await sbSavePartSpec(pn, spec);
+          if (r === true) specOk++;
+          else { specErr++; _fails.push('料號 ' + pn + '：' + _why(r)); }
+        } catch(e) { specErr++; _fails.push('料號 ' + pn + '：' + e.message); }
         await new Promise(r => setTimeout(r, 60));
       }
-    } catch(e) { specErr++; }
+    } catch(e) { specErr++; _fails.push('料號庫 ' + skey + '：' + e.message); }
   }
 
-  // ── 第四階段：使用者帳號（qms_users 結構：{廠區: {email: userData}}） ──
-  btn.textContent = `⏳ 使用者帳號上傳中...`;
-  try {
-    const userDB = JSON.parse(localStorage.getItem('qms_users') || '{}');
-    for (const [siteCode, users] of Object.entries(userDB)) {
-      for (const [email, userData] of Object.entries(users)) {
-        try { await sbSaveUser(siteCode, email, userData); userOk++; } catch(e) { userErr++; }
-        await new Promise(r => setTimeout(r, 60));
-      }
-    }
-  } catch(e) { userErr++; }
+  // ── 第四階段（使用者帳號）已於 V170-2 移除 ──
+  //  它打的 qms_users 在 DB 端已刪；V170 讓 sbSaveUser 第一行就 return，
+  //  等於一個 request 都沒發，迴圈卻照數 userOk、畫面照印「帳號 N 筆」。
+  //  帳號主檔＝Supabase Auth ＋ OMS 授權，本來就不該從這裡推。
 
   // ── 第五階段：廠區設定 ──
   btn.textContent = `⏳ 廠區設定上傳中...`;
@@ -11279,28 +11675,34 @@ async function bulkUploadToSupabase() {
     }
   } catch(e) { supErr++; }
 
-  // ── 第七階段：供應商帳號 ──
-  btn.textContent = `⏳ 供應商帳號上傳中...`;
-  let supUserOk=0, supUserErr=0;
-  try {
-    const supUserDB = JSON.parse(localStorage.getItem('qms_supplier_users') || '{}');
-    for (const [supplierCode, users] of Object.entries(supUserDB)) {
-      for (const [email, userData] of Object.entries(users)) {
-        try { await sbSaveSupplierUser(supplierCode, email, userData); supUserOk++; } catch(e) { supUserErr++; }
-        await new Promise(r => setTimeout(r, 60));
-      }
-    }
-  } catch(e) { supUserErr++; }
+  // ── 第七階段（供應商帳號）已於 V170-2 移除 ──
+  //  ⚠ 這是七個階段裡最糟的一個：真的對已刪除的 qms_supplier_users 發 POST，
+  //    每筆必定 404，而 sbSaveSupplierUser 既不看 res.ok、catch 也不觸發
+  //    ⇒ 100% 失敗、100% 報成功，還把**明文密碼**送去一個不存在的端點。
 
   // ── 完成，顯示各類筆數 ──
   btn.disabled = false;
   btn.textContent = '☁ 一鍵上傳所有資料到雲端';
-  const totalErr = faiErr + cpkErr + specErr + userErr + siteErr + supErr + supUserErr;
-  st.innerHTML =
-    `✅ 完成！` +
-    `FAI ${faiOk}筆　CPK ${cpkOk}筆　料號規格 ${specOk}筆　帳號 ${userOk}筆　` +
-    `廠區 ${siteOk}筆　供應商 ${supOk}筆　供應商帳號 ${supUserOk}筆` +
-    (totalErr ? `　<span style="color:#c0392b">失敗 ${totalErr} 筆</span>` : '');
+  // V170-2：這些數字現在真的代表「雲端確認收到幾筆」；失敗一併列出原因
+  const totalErr = faiErr + cpkErr + specErr + siteErr + supErr;
+  const totalNew = faiOk + cpkOk + specOk + siteOk + supOk;
+  const totalDup = faiDup + cpkDup;
+  // V170-3：三段分開講。「雲端已有」是好消息（代表沒漏），不能算進失敗嚇人。
+  const head = totalErr
+    ? `\u26a0 完成，有 ${totalErr} 筆真的沒上去`
+    : (totalNew ? `\u2705 完成，已同步 ${totalNew} 筆` : '\u2705 完成，雲端本來就是最新的');
+  // ⚠ 用「已同步」不用「新上傳」：料號規格／廠區／供應商三類的網址帶 on_conflict，
+  //   走的是 upsert（覆蓋既有列）不是新增；只有 FAI／CPK 是純 POST 才分得出新舊。
+  const detail = `已同步：FAI ${faiOk}\u3000CPK ${cpkOk}\u3000料號規格 ${specOk}\u3000廠區 ${siteOk}\u3000供應商 ${supOk}`
+    + (totalDup ? `\u3000<span style="color:#666">｜雲端已有、略過：FAI ${faiDup}\u3000CPK ${cpkDup}</span>` : '');
+  const list = _fails.length
+    ? '<div style="margin-top:6px;font-size:11px;color:#c0392b;text-align:left">'
+      + _fails.slice(0, 8).map(x => '\u30fb' + x).join('<br>')
+      + (_fails.length > 8 ? `<br>…另有 ${_fails.length - 8} 筆，詳見 Console` : '')
+      + '</div>'
+    : '';
+  if (_fails.length) console.warn('一鍵上傳失敗明細：', _fails);
+  st.innerHTML = head + '\u3000' + detail + list;
   st.style.color = totalErr ? '#c0392b' : '#1d9e75';
 }
 
@@ -11341,7 +11743,9 @@ function setUserRole(site, key, role) {
     db[site][key].role = role;
     saveUserDB(db);
     // ☁ 同步到 Supabase
-    if (_sbReady) {
+    //  V170：qms_users 已刪 ⇒ 這段 PATCH 必定 404。角色的權威來源是 OMS 授權主檔，
+    //  這裡只保留本機 localStorage 的更新（上面 saveUserDB 已做）。
+    if (_sbReady && !LEGACY_USER_TABLES_GONE) {
       fetch(
         SUPABASE_URL + '/rest/v1/qms_users?site_code=eq.' + encodeURIComponent(site) + '&email=eq.' + encodeURIComponent(key),
         {
@@ -11408,6 +11812,15 @@ function applyRolePermissions() {
     excelBtn.style.display = '';
     excelBtn.style.opacity = caps.submit ? '1' : '0.5';
     excelBtn.setAttribute('data-need-cap', 'submit');
+  }
+
+  // V170-1：備份 JSON（僅 admin，比照 V167 的匯入 JSON）——同上做法
+  const exportBtn = document.getElementById('export-records-btn');
+  if (exportBtn) {
+    exportBtn.style.display = '';
+    exportBtn.style.opacity = caps.exportData ? '1' : '0.5';
+    exportBtn.title = caps.exportData ? '' : '整包備份需要管理員權限；請改用「匯出查詢結果 Excel」';
+    exportBtn.setAttribute('data-need-cap', 'exportData');
   }
 
   // V167：匯入 JSON（僅 admin）——比照上面幾顆的做法：顯示但變淡，點了由 triggerImportRecords 攔截

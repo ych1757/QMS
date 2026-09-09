@@ -445,7 +445,7 @@ input.spec-inp[type=number] { -moz-appearance:textfield; appearance:textfield; }
 // 用途＝跟使用者溝通「你看到的畫面是不是最新版」，不是品質文件的表單版次
 //（表單版次 Rev 另有其用途、目前維持 V1.0 不動，日後各廠區若有自己的表單版次需求再談）
 // 顯示位置：① 瀏覽器分頁標題 ② 登入畫面副標下方 ③ 主畫面右上（列印時自動隱藏）
-const APP_VER = 'V170-12';   // ★★ 每出一版必須同步改這一行（比照 MHR 的做法），否則畫面版號會對不上檔案版號
+const APP_VER = 'V170-16';   // ★★ 每出一版必須同步改這一行（比照 MHR 的做法），否則畫面版號會對不上檔案版號
 
 const SUPABASE_URL = 'https://vwusebvvsqyjydddupit.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_Ju-c9cuXYJil7PEJ1-NspA_ASzfIzi5';
@@ -1170,20 +1170,35 @@ async function sbPullSupplierUsers() {
 async function sbInit() {
   try {
     showSyncBanner('⏳ 正在從雲端同步資料…');
-    const ok = await sbTestConnection();
-    if (!ok) { showSyncBanner('⚠ 雲端連線失敗，使用本地資料', 4000); return; }
-    _sbReady = true;
-    console.log('✅ Supabase 已連線');
-    // 同步所有資料類型（循序執行，設定類失敗不影響記錄拉取）
+    // ══ V170-13：拿掉 sbTestConnection() 那趟純探活，五支併成單一批次（使用者 260908）══
+    //  舊流程是三趟**串接**往返：探活(limit=1) → 第一批設定 → 第二批記錄，
+    //  歷史查詢要等第三趟回來才畫得出來。實測（使用者機器打 Supabase）：
+    //  第一趟 862ms（含 DNS＋TLS 握手）、之後每趟約 200ms ⇒ 光往返就 1.3 秒。
+    //  探活沒有資訊價值——後面五支撈失敗一樣會知道連不上（V167-2 已讓記錄類把錯誤
+    //  往外丟、不再吞成「成功 0 筆」）。併批也安全：三支設定各打各的表、記錄類不吃
+    //  設定的結果，refreshActiveTabAfterSync() 在全部 settled 之後才跑，先後無所謂。
+    //  ⚠ _sbReady 全檔有 40 幾處在讀（含「Supabase 未連線，請稍後再試」的擋阻），不能
+    //    就這樣一直放 true：先樂觀設 true 讓五支撈得動，**記錄類兩支都失敗才判定沒連線**、
+    //    把 _sbReady 收回 false ⇒ 離線語意與舊版相同（舊版探活打的也是 fai_records，
+    //    它不通時 _sbReady 一樣留在 false）。
+    //  ⚠ 離線判定只能看記錄類這兩支——設定類三支自己 catch 不往外丟（見各該函式），
+    //    它們永遠是 fulfilled，拿來判斷連線會永遠判成「連得上」。
     // V170：sbPullSupplierUsers／sbPullUsers／sbPullAdminConfig 三支已移除——
     //  它們打的表在 DB 端早就刪了（每次載入固定 3 個 404）；留在清單裡會讓人
     //  誤以為這三類資料有在同步。帳號＝Supabase Auth＋OMS，不走這裡。
-    await Promise.allSettled([
-      sbPullSiteConfig(), sbPullSupplierList(), sbPullPartSpecs()
-    ]);
-    const [faiResult, cpkResult] = await Promise.allSettled([
+    _sbReady = true;
+    const [ , , , faiResult, cpkResult ] = await Promise.allSettled([
+      // ↓ 前三支＝設定類（自己吞錯，不看結果）；後兩支＝記錄類（會往外丟，離線判定看它們）
+      sbPullSiteConfig(), sbPullSupplierList(), sbPullPartSpecs(),
       sbPullAllRecords(), sbPullCpkRecords()
     ]);
+    if (faiResult.status === 'rejected' && cpkResult.status === 'rejected') {
+      _sbReady = false;   // 收回樂觀假設：兩支記錄類都撈不到＝真的沒連上
+      console.warn('雲端連線失敗:', faiResult.reason);
+      showSyncBanner('⚠ 雲端連線失敗，使用本地資料', 4000);
+      return;
+    }
+    console.log('✅ Supabase 已連線');
     const faiCount = faiResult.status === 'fulfilled' ? faiResult.value : 0;
     const cpkCount = cpkResult.status === 'fulfilled' ? cpkResult.value : 0;
     // V167-2：同一個謊的第二處——舊版不論成敗一律報「✅ 完成」，拉失敗時就變成
@@ -3785,6 +3800,10 @@ function switchTab(tab) {
     showNoPermToast(`「${tabNames[tab]||tab}」頁籤需要更高權限（目前：${roleNames[role]||role}）`);
     return;
   }
+
+  // V170-14：記住停在哪一頁（**權限檢查通過之後**才記——被擋下的那次不算數，
+  //  否則下次重整會還原到一個自己根本進不去的頁籤）。
+  try { sessionStorage.setItem(LAST_TAB_KEY, tab); } catch(e) {}
 
   ['fai','dash','hist','mgr','sys','cpk'].forEach(t => {
     const pane = document.getElementById('tab-'+t);
@@ -8659,6 +8678,37 @@ function onImportConfig(input) {
 // 🔐 登入系統 Login System（無密碼版）
 // ══════════════════════════════════════════════
 const LOGIN_SESSION_KEY = 'qms_session';
+// V170-14：記住當前分頁，重整時還原。放 sessionStorage 而不是 localStorage——
+//  它跟著「這個瀏覽器分頁」活，關掉就沒了，不會把某天的停留位置留到下次開機。
+const LAST_TAB_KEY      = 'qms_last_tab';
+
+// ══ V170-16：還原上次停留的分頁——收斂成單一出處（使用者 260909 回報）══
+//  症狀：V170-14/15 用 Admin 帳號重整，還是被丟回「檢驗填表」，CPK 頁也一樣。
+//  成因：checkSession() 有**三條**恢復路徑，而 V170-14 只把還原寫在 enterSystem 裡：
+//    ① s.isAdmin    → 自己恢復畫面後 return，**不走 enterSystem**
+//    ② s.isSupplier → 同上，也 return
+//    ③ 一般廠區使用者 → enterSystem(...)  ← V170-14 只涵蓋到這條
+//  ⇒ 管理員和供應商完全沒被涵蓋。（同理，V170-13 的 clearLocalCache 條件也只作用在 ③；
+//    ①② 本來就不經過 enterSystem，重整時從來沒被清過快取。）
+//  ⚠ 所以不要再往 enterSystem 裡塞第二份——三條路徑各寫一次必然會有人漏掉、
+//    以後再加第四條登入方式又會重演。抽成這支，三處都呼叫它。
+// @param isFreshLogin  true＝真的登入（不還原）／false＝重整（還原）
+// @return 有沒有真的切過頁（呼叫端用來決定要不要套自己的預設頁）
+function restoreLastTab(isFreshLogin) {
+  if (isFreshLogin) return false;          // 真登入一律回預設頁，不沿用上一次的位置
+  let last = null;
+  try { last = sessionStorage.getItem(LAST_TAB_KEY); } catch(e) {}
+  if (!last || last === 'fai') return false;   // 'fai' 就是 HTML 預設，不用多切一次
+  //  ⚠ 自己比對權限、不丟給 switchTab 擋：那樣會彈「需要更高權限」——
+  //    使用者只是按了 F5、沒點任何東西卻被罵，很莫名。
+  const sess    = getSession();
+  const role    = getCurrentUserRole();
+  const tabMap  = sess?.isSupplier ? SUPPLIER_ROLE_TABS : ROLE_TABS;
+  const allowed = tabMap[role] || tabMap.query || ROLE_TABS.query;
+  if (!allowed.includes(last)) return false;
+  switchTab(last);
+  return true;
+}
 const USER_DB_KEY       = 'qms_users';
 
 // 🔐 _2CODE：登入 session 改存 sessionStorage → 關閉/重開分頁即需重新登入
@@ -9211,8 +9261,25 @@ function enterSystem(site, userName, userKey, extra) {
   // → token/refresh/角色/跨廠範圍全掉、重整後改用匿名金鑰拉資料（被 RLS 擋）看不到記錄。
   // 改成「先鋪舊 session、再蓋新值」：重整保留全部欄位；正常登入時 extra 會覆寫所有身分欄位、不受舊值影響。
   saveSession(Object.assign({}, _prev || {}, { site, userName, userKey, loginAt: new Date().toISOString(), firstLoginAt }, extra || {}));
-  // 每次登入清除本機記錄快取，確保從 Supabase 拉取最新資料
-  clearLocalCache();
+  // ══ V170-13：只有「真的登入」才清本機快取，重整不清（使用者 260908）══
+  //  症狀：歷史查詢才 211 筆，每次開頁卻要等一秒多才出現。
+  //  成因：這行原本無條件清。而 checkSession() 在頁面載入時也會走進 enterSystem()
+  //    （見下方唯一的另一個呼叫點），所以**按 F5 重整、關分頁再開、從別的系統跳回來，
+  //    本機那 195 筆記錄全被清光**，畫面空著等三趟雲端往返（實測 1.3~1.7 秒）才畫得出來，
+  //    而本機明明有現成資料、畫出來只要 62ms（實測 getAllRecords 24ms＋渲染 55ms）。
+  //  ⚠ 為什麼這樣改**不會放寬權限**：clearLocalCache() 真正的用途是
+  //    ①換人登入時清掉上一個人的資料　②權限收縮時讓看不到的舊資料消失。
+  //    ① 換人登入一定帶 extra（token／角色／跨廠範圍），照清，一點沒少；
+  //    ② 權限收縮本來的承諾就是 🌐 對話框上寫給使用者看的「設定後對方**下次登入**生效」——
+  //       重整不是下次登入，所以改完的行為跟畫面上已經講的話一致。
+  //  兩個呼叫點剛好分得乾淨：真登入帶 extra、checkSession 重整不帶 ⇒ 用 extra 當旗標。
+  if (extra) {
+    clearLocalCache();
+    // V170-14：真登入也要把「上次停留的分頁」清掉。sessionStorage 跟著瀏覽器分頁活，
+    //  doLogout() 只清 session＋reload、不清它 ⇒ 不清的話，下一個人登入後若馬上重整，
+    //  會被還原到**上一個人**最後停留的頁籤（權限有擋、不會越權，但很突兀）。
+    try { sessionStorage.removeItem(LAST_TAB_KEY); } catch(e) {}
+  }
   try { localStorage.setItem(SITE_KEY, site === '__nosite__' ? '' : site); } catch(e) {}
 
   // 切換畫面
@@ -9259,9 +9326,19 @@ function enterSystem(site, userName, userKey, extra) {
   // 套用角色權限（控制頁籤和功能按鈕顯示）
   setTimeout(() => {
     applyRolePermissions();
-    // query 角色預設切換到歷史查詢
     const role = getCurrentUserRole();
-    if (role === 'query') switchTab('hist');
+    // ══ V170-14：重整時還原上次停留的分頁（使用者 260908）══
+    //  症狀：按 F5 之後一律被丟回「📋 填表」，停在哪一頁不算數。
+    //  成因：分頁狀態從來沒被記過——`tab-fai-btn` 的 active 是寫死在 HTML 的預設值。
+    //  以前重整反正資料要整包重拉，停在哪頁差別不大；V170-13 之後資料是現成的，
+    //  被丟回填表頁就變成唯一還要多按一下的地方，所以現在才值得修。
+    //  ⚠ 只在**重整**還原、真登入不還原：沿用 V170-13 那個 extra 旗標（真登入帶、
+    //    checkSession 重整不帶），跟清快取同一個判斷，不另外發明第二套規則。
+    //  ⚠ 還原前**自己比對角色權限**、不合就跳過：不能直接丟給 switchTab 擋，
+    //    那樣會彈一個「需要更高權限」的提示——使用者沒點任何東西卻被罵，很莫名。
+    const _tabRestored = restoreLastTab(!!extra);   // V170-16：改用共用的那支
+    // query 角色預設切換到歷史查詢（還原成功就不覆蓋）
+    if (!_tabRestored && role === 'query') switchTab('hist');
     // 顯示修改密碼按鈕
     const chgBtn = document.getElementById('chg-pwd-btn');
     if (chgBtn) chgBtn.style.display = '';
@@ -9287,6 +9364,15 @@ function doLogout() {
   // 🔐 _2CODE：登出時清 session 並「重新整理整個頁面」→ 徹底重置 DOM，
   // 避免上一個使用者已顯示的內容（例如設定頁/人員管理）殘留給下一個人看到。
   clearSession();
+  // ══ V170-15：登出也要清本機記錄快取（使用者 260908）══
+  //  症狀：上面那段註解說「避免上一個使用者已顯示的內容殘留給下一個人看到」，但它只清了
+  //    session＋重置 DOM——**記錄本身還躺在 localStorage**。實機印證（使用者 260908 截圖）：
+  //    Admin 登出後那 211 筆沒動，是下一個人**登入**那一刻才印出「[Cache] 清除 213 筆本機快取」。
+  //  ⇒ 登出到下次登入之間（可能是幾天，也可能就再也沒人登入），上一個人的品質記錄都還在這台機器上。
+  //  ⚠ 這不是 V170-13 造成的，是本來就這樣；V170-13 只動登入端，登出端一直是這個樣子。
+  //  補這行等於把「清掉」從『下次有人登入時』提前到『你按登出時』，沒有任何行為變差：
+  //    真登入本來就會清（enterSystem 的 if (extra)），所以下一個人拉到的資料完全一樣。
+  clearLocalCache();
   try { localStorage.removeItem(SITE_KEY); } catch(e) {}
   location.reload();
 }
@@ -9555,6 +9641,7 @@ function checkSession() {
         const sb = document.getElementById('site-badge'); if (sb) sb.style.display = 'none';
         const sw = document.getElementById('site-select-wrap'); if (sw) sw.style.display = 'none';
         applyRolePermissions();
+        restoreLastTab(false);   // V170-16：管理員重整也要還原分頁（這條 return 掉、不走 enterSystem）
         // Admin 不需要改密碼按鈕
         return;
       }
@@ -9577,6 +9664,7 @@ function checkSession() {
         const chgBtn2 = document.getElementById('chg-pwd-btn');
         if (chgBtn2) chgBtn2.style.display = '';
         applyRolePermissions();
+        restoreLastTab(false);   // V170-16：供應商重整也要還原分頁（這條同樣 return 掉）
         checkForceChangePwd();
         return;
       }

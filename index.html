@@ -445,7 +445,7 @@ input.spec-inp[type=number] { -moz-appearance:textfield; appearance:textfield; }
 // 用途＝跟使用者溝通「你看到的畫面是不是最新版」，不是品質文件的表單版次
 //（表單版次 Rev 另有其用途、目前維持 V1.0 不動，日後各廠區若有自己的表單版次需求再談）
 // 顯示位置：① 瀏覽器分頁標題 ② 登入畫面副標下方 ③ 主畫面右上（列印時自動隱藏）
-const APP_VER = 'V170-20';   // ★★ 每出一版必須同步改這一行（比照 MHR 的做法），否則畫面版號會對不上檔案版號
+const APP_VER = 'V170-22';   // ★★ 每出一版必須同步改這一行（比照 MHR 的做法），否則畫面版號會對不上檔案版號
 
 const SUPABASE_URL = 'https://vwusebvvsqyjydddupit.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_Ju-c9cuXYJil7PEJ1-NspA_ASzfIzi5';
@@ -9592,35 +9592,78 @@ function checkForceChangePwd() {
 const SESSION_TIMEOUT_MS = 8 * 60 * 60 * 1000;
 const SESSION_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // v119: 7天最大登入壽命
 
+// ══ V170-22：修「登入逾時被靜默吞掉」（260911 查 showToast 時挖出來的）══
+//  ★這支函式原本從 V170-21 起就是壞的，而且**線上 index 也是壞的**，已在 V170-16 上實測重現。
+//  ★症狀（8 小時逾時後重整頁面）：
+//    使用者**不會**被要求重新登入，畫面看起來還是登入狀態 —— 但**歷史查詢一筆都沒有**。
+//  ★成因鏈（三個問題疊在一起）：
+//    ① `showToast` **全檔從未定義**，只有這裡兩個呼叫點 ⇒ 執行到就丟 ReferenceError。
+//    ② 丟錯的位置在 `clearSession()`／`clearLocalCache()` **之後**、
+//       「顯示登入畫面」與 `return true` **之前** ⇒ session 與本機快取都被清掉了，
+//       但畫面沒切回登入頁。
+//    ③ 最要命的是函式尾端那個 `catch(e){ return false; }` —— 把「已逾時」吞成「沒逾時」。
+//       呼叫端 `if (checkSessionTimeout()) return;` 於是**放行**，
+//       接著用已經失效的舊 session 變數往下走到 `enterSystem()`，
+//       而 `enterSystem` 內的 `_prev = getSession()` 此時是 null（剛被清掉），
+//       於是 session 被**重建成只剩 site/userName/userKey/loginAt/firstLoginAt ——
+//       token、refresh、角色、跨廠範圍全部不見**。
+//       沒有 token ⇒ `sbAuthBearer()` 退回匿名金鑰 ⇒ 被 RLS 擋 ⇒ 看不到任何雲端記錄。
+//       （這正是 V143 註解裡警告過的同一種狀況。）
+//    實測（線上 V170-16）：快取 50→0、session 被清、**回傳值 false**、
+//    接著 checkSession() 進了主畫面、session 重建後 token 為 false、console 零警告。
+//  ★改法：**把「判定」和「副作用」分開**。
+//    判定只管算出有沒有逾時；清理與畫面切換各自獨立包 try/catch，
+//    任何一步失敗都**不會**污染「已逾時」這個結論。
+//    catch 改成保守側 —— 判不出來時當作要重新登入（寧可多登一次，
+//    不可放行一個沒有 token 的空殼 session）。
 function checkSessionTimeout() {
+  let timedOut = false, reason = '';
   try {
     const s = getSession();
     if (!s || !s.userName) return false;
     if (!s.loginAt) return false;
-    const elapsed = Date.now() - new Date(s.loginAt).getTime();
-    if (elapsed > SESSION_TIMEOUT_MS) {
-      clearSession();
-      // 清除本機快取，下次登入重新拉取
-      clearLocalCache();
-      showToast('登入已逾時，請重新登入', 'error', 4000);
-      document.getElementById('login-screen').style.display = 'flex';
-      document.getElementById('main-page').style.display    = 'none';
-      return true; // 已逾時
+    if (Date.now() - new Date(s.loginAt).getTime() > SESSION_TIMEOUT_MS) {
+      timedOut = true; reason = '登入已逾時，請重新登入';
+    } else if (s.firstLoginAt &&
+               Date.now() - new Date(s.firstLoginAt).getTime() > SESSION_MAX_AGE_MS) {
+      // v119: 7天最大登入壽命（不管有無操作，超過7天一律強制重新登入）
+      timedOut = true; reason = '登入已超過 7 天，請重新登入';
     }
-    // v119: 7天最大登入壽命（不管有無操作，超過7天一律強制重新登入）
-    if (s.firstLoginAt) {
-      const age = Date.now() - new Date(s.firstLoginAt).getTime();
-      if (age > SESSION_MAX_AGE_MS) {
-        clearSession();
-        clearLocalCache();
-        showToast('登入已超過 7 天，請重新登入', 'error', 4000);
-        document.getElementById('login-screen').style.display = 'flex';
-        document.getElementById('main-page').style.display    = 'none';
-        return true;
-      }
-    }
-    return false;
-  } catch(e) { return false; }
+  } catch(e) {
+    // 判不出來就當作要重新登入 —— 舊版這裡 return false，等於「出錯就放行」
+    console.warn('checkSessionTimeout 判定失敗，保守起見要求重新登入:', e);
+    timedOut = true; reason = '登入狀態異常，請重新登入';
+  }
+  if (!timedOut) return false;
+
+  // ── 以下都是副作用：各自獨立，失敗也不影響上面已經確定的「要登出」──
+  try { clearSession(); } catch(e) { console.warn('clearSession 失敗:', e); }
+  try { clearLocalCache(); } catch(e) { console.warn('clearLocalCache 失敗:', e); }
+  try { showToast(reason, 'error', 4000); } catch(e) { console.warn('showToast 失敗:', e); }
+  try {
+    document.getElementById('login-screen').style.display = 'flex';
+    document.getElementById('main-page').style.display    = 'none';
+  } catch(e) { console.warn('切回登入畫面失敗:', e); }
+  return true;
+}
+
+// ══ V170-22：補上 showToast ══
+//  全檔只有 checkSessionTimeout 的兩個呼叫點在用它，但它從來沒被定義過。
+//  沿用既有 showNoPermToast 的樣式與位置，多吃一個 type（error 紅／其餘藍）與顯示秒數。
+function showToast(msg, type, ms) {
+  try {
+    const old = document.getElementById('qms-toast');
+    if (old) old.remove();
+    const t = document.createElement('div');
+    t.id = 'qms-toast';
+    const bg = (type === 'error') ? '#c0392b' : '#1a4f8a';
+    t.style.cssText = 'position:fixed;top:60px;left:50%;transform:translateX(-50%);background:' + bg +
+      ';color:#fff;padding:10px 20px;border-radius:8px;font-size:13px;font-weight:700;z-index:99999;' +
+      'box-shadow:0 4px 16px rgba(0,0,0,0.3);font-family:Arial,sans-serif;max-width:90vw;text-align:center';
+    t.textContent = ((type === 'error') ? '⚠ ' : '') + msg;
+    document.body.appendChild(t);
+    setTimeout(() => { try { t.remove(); } catch(e) {} }, ms || 3000);
+  } catch(e) { console.warn('showToast 失敗:', e, msg); }
 }
 
 function clearLocalCache() {
@@ -9898,6 +9941,7 @@ function cpkRenderTable() {
           id="cpkv_${pi}_${si}"
           onchange="cpkSetValue(${pi},${si},this.value)"
           onkeydown="cpkKeyNav(event,${pi},${si})"
+          onpaste="cpkPaste(event,${pi},${si})"
           style="width:100%;min-width:52px;height:24px;border:none;background:transparent;text-align:center;font-size:11px;font-family:Arial,sans-serif;${isOOS?'color:#c0392b;font-weight:700':''}">
         </td>`;
     });
@@ -9947,6 +9991,82 @@ function cpkSetValue(pi, si, val) {
     inp.style.color = oos ? '#c0392b' : '';
     inp.style.fontWeight = oos ? '700' : '';
   }
+}
+
+// ══ V170-21：CPK 量測值支援從 Excel 貼上一整塊（Noris 邱泊鈞 260910 反映）══
+//  症狀：三次元量完的資料在 Excel 裡是「一列多個尺寸」，選起來複製、貼到 QMS，
+//    整串只會進到一格 —— 實際上是**連一格都進不去**（見下方實測）。
+//  成因：每一格是獨立的 <input type="number">，全檔從來沒有貼上處理。
+//    number input 收到含 Tab／換行的字串會整串判為無效 ⇒ value 變成空字串。
+//    實測（V170-20 上跑）：
+//      貼 `37.771<TAB>0.2236`  → value = ""（空）
+//      貼 `0.2429<TAB>錯誤<TAB>0.0217` → value = ""（空）
+//      貼 `37.771`（單一值）   → 正常進去
+//  ⇒ 他只能一格一格手打。實際規模：一張單 14 個尺寸 × 32 筆樣本 = **448 格**。
+//
+//  使用者定案（260910~11）：
+//    ① 做「貼上」不做「匯入 xlsx」—— 那份 Excel 是人工整理的（工作表叫『MEAS統計_重抓』、
+//       最後一列寫著『No.3、No.21、No.31 已依新 PDF 替換』），格式不穩定，匯入綁死欄位會一直壞。
+//    ② 一次貼整塊或分次貼一欄，由使用者自己決定 ⇒ 從游標所在格往右往下填，剪貼簿幾格就填幾格。
+//    ③ Excel 上顯示『錯誤』的（CMM 量測失敗，該份檔案有 44 格）**不貼，保持空白**。
+//       ⚠ 絕不可填 0 —— 那 44 個假的零會把 μ 拉低、σ 撐大，Cpk 整個失真，而且畫面看不出來。
+//    ④ 超出目前球標數／樣本數時**先擋下來提示**，不靜默丟棄。
+//       靜默丟資料正是「失敗看起來像成功」：他貼完看畫面有東西就以為好了，
+//       結果少了幾個尺寸，Cpk 照樣算得出來、照樣印報告。
+//  ⚠ 刻意**不**在貼上後自動呼叫 cpkCalculateAll()：手動打一格也不會自動算，
+//    貼上保持一致；而且 CPK 圖是綁「當下畫面算過沒」，自動算會讓那個約定失效。
+function cpkPaste(e, pi, si) {
+  const cb = e.clipboardData || window.clipboardData;
+  const txt = cb ? cb.getData('text') : '';
+  if (!txt) return;
+  // 單一數值 ⇒ 不接管，交給瀏覽器預設行為（一格一格貼的舊習慣完全不變）
+  if (!/[\t\r\n]/.test(txt.replace(/\s+$/, ''))) return;
+  e.preventDefault();
+
+  const grid = txt.replace(/\r\n?/g, '\n')
+                  .replace(/\n+$/, '')
+                  .split('\n')
+                  .map(line => line.split('\t'));
+  const rowsN = grid.length;
+  const colsN = Math.max.apply(null, grid.map(g => g.length));
+
+  const lotSize   = parseInt(document.getElementById('cpk-lotsize') ? document.getElementById('cpk-lotsize').value : '') || 32;
+  const availCols = cpkPoints.length - pi;   // 從這一格往右還有幾個球標
+  const availRows = lotSize - si;            // 從這一格往下還有幾筆樣本
+
+  if (colsN > availCols || rowsN > availRows) {
+    const exCol = Math.max(0, colsN - availCols), exRow = Math.max(0, rowsN - availRows);
+    const msg = '剪貼簿有 ' + colsN + ' 欄 × ' + rowsN + ' 列。\n'
+      + '從目前這一格算起，只放得下 ' + availCols + ' 欄 × ' + availRows + ' 列。\n\n'
+      + '超出的部分不會貼入：'
+      + (exCol ? '右邊 ' + exCol + ' 欄' : '') + (exCol && exRow ? '、' : '') + (exRow ? '下面 ' + exRow + ' 列' : '')
+      + '\n\n要繼續貼入放得下的部分嗎？'
+      + '\n（取消的話什麼都不會改，可以先把球標數或樣本數調好再貼）';
+    if (!confirm(msg)) return;
+  }
+
+  let filled = 0, blanked = 0;
+  const maxR = Math.min(rowsN, availRows);
+  for (let r = 0; r < maxR; r++) {
+    const maxC = Math.min(grid[r].length, availCols);
+    for (let c = 0; c < maxC; c++) {
+      const raw = String(grid[r][c]).trim().replace(/,/g, '');   // 去掉 Excel 的千分位
+      // 空白、'錯誤'、'N/A'、'--' 等任何不是數字的一律留空白（未量測）。
+      //  ⚠ 用「能不能解析成數字」判斷，不是只認『錯誤』兩個字 —— 下次可能是別的字。
+      const ok = raw !== '' && isFinite(Number(raw));
+      const val = ok ? raw : '';
+      const tPi = pi + c, tSi = si + r;
+      const inp = document.getElementById('cpkv_' + tPi + '_' + tSi);
+      if (inp) inp.value = val;
+      cpkSetValue(tPi, tSi, val);   // 沿用既有的 setter（含超規底色）
+      if (ok) filled++; else blanked++;
+    }
+  }
+
+  // 照實回報，不靜默完成
+  showSyncBanner('已貼入 ' + filled + ' 格'
+    + (blanked ? '，' + blanked + ' 格非數字（如「錯誤」）留空白' : '')
+    + ' —— 請按「計算」更新統計與分布圖', 6000);
 }
 
 function cpkKeyNav(e, pi, si) {

@@ -445,7 +445,7 @@ input.spec-inp[type=number] { -moz-appearance:textfield; appearance:textfield; }
 // 用途＝跟使用者溝通「你看到的畫面是不是最新版」，不是品質文件的表單版次
 //（表單版次 Rev 另有其用途、目前維持 V1.0 不動，日後各廠區若有自己的表單版次需求再談）
 // 顯示位置：① 瀏覽器分頁標題 ② 登入畫面副標下方 ③ 主畫面右上（列印時自動隱藏）
-const APP_VER = 'V170-16';   // ★★ 每出一版必須同步改這一行（比照 MHR 的做法），否則畫面版號會對不上檔案版號
+const APP_VER = 'V170-20';   // ★★ 每出一版必須同步改這一行（比照 MHR 的做法），否則畫面版號會對不上檔案版號
 
 const SUPABASE_URL = 'https://vwusebvvsqyjydddupit.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_Ju-c9cuXYJil7PEJ1-NspA_ASzfIzi5';
@@ -1658,7 +1658,7 @@ async function sbInit() {
       <!-- 不合格量測項目自動列出 -->
       <div style="font-size:11px;font-weight:700;color:#721c24;margin-bottom:6px">不合格量測項目 NC Measurement Items（自動帶入）</div>
       <table class="ncr-items-table">
-        <thead><tr><th>FAI#</th><th>量測項目</th><th>USL</th><th>LSL</th><th>量測值</th><th>Cpk</th><th>判定</th></tr></thead>
+        <thead><tr><th>FAI#</th><th>量測項目</th><th>USL</th><th>LSL</th><th>量測值</th><th>Cpk / Cpu</th><th>判定</th></tr></thead>
         <tbody id="ncr-items-tbody"></tbody>
       </table>
 
@@ -2783,17 +2783,51 @@ function emptyRows(n) {
 }
 rows = emptyRows(10);
 
-function calcStats(s, usl, lsl) {
+// ══ V170-18：製程能力指標依「尺寸類型」分兩種算法（Gray 顏清輝 260910 提出，葉建成 Risk 確認）══
+//  ★事故：料號 56500000-002 的 #7-1（Profile，LSL=0／USL=0.75／μ=0.4158／σ=0.0493）
+//    報告印出 **Cpk = −0.276**（判定：能力嚴重不足），但正確答案是 **2.26**（能力優良）。
+//    已用本檔公式復算確認：(1−Ca)×Cp ＝ −0.2759，與客戶報告上的數字完全相同 ⇒ 不是輸入錯，是公式錯。
+//  ★成因：`Ca = |μ − 名目值| ÷ (公差帶/2)`。幾何公差的名目值是 **0**（不是公差中心），
+//    μ 只要超過公差帶一半，Ca 就 > 1、(1−Ca) 變負數 ⇒ Cpk 整個翻成負的。
+//    Ca 這個定義**內建「目標值在公差正中央」的前提**；幾何公差的目標在邊界（0，越小越好），前提不成立。
+//  ★另一個坑（方向相反、同樣要修）：填表頁用的 `min(Cpu,Cpl)` 把 0 當一般 LSL，
+//    μ 越接近 0（製程越好）Cpl 越小 ⇒ **越好判越差**。實測 Profile≤0.75、σ=0.02：
+//    μ 從 0.10 改善到 0.05，min 公式從 1.67 掉到 0.83。這條印在客戶的 IQC/FQC 報告上。
+//  ⇒ 定案（葉建成 Risk 260910 確認）：
+//     ① 一般雙邊尺寸　　　　　　　→ Cpk = min(Cpu, Cpl)
+//     ② 僅有上限規格的幾何公差　　→ 只算 Cpu = (USL − μ) / 3σ，
+//        報告**顯示 Cpu、不以 Cpk 標示**，Cp／Ca 不適用一律顯示「—」。
+//  ⚠ 判斷條件用實際資料查過（唯讀 SQL，260910）：
+//     nom=0 且 lsl=0 且 usl>0 ── 1,275 筆，全是幾何公差　✅ 本函式認定的就是這種
+//     nom=0 且 lsl=−0.5、usl=+0.5 ──   74 筆，是「0 ±0.5」**以零為中心的雙邊公差**，不可誤判
+//     nom=0 且 lsl=0 且 usl=0　　──   91 筆，三欄皆空的未填列，本來就算不出
+//     （所以 `usl > 0` 和 `lsl === 0` 兩個條件缺一不可，不是多餘的防呆。）
+//  ⚠ 葉建成 Risk 的提醒：不要永久只靠數值判斷。QMS 目前**沒有特性類型欄位**
+//    （列上只有 moi 量測儀器與 type=FAI/CPK），將來若加了 Profile／Position／Flatness
+//    這類特性類型，應一併納入條件。**所以判斷收斂在這一支**，屆時只改這裡。
+function isUpperOnlyGDT(nom, lsl, usl) {
+  const n = Number(nom), l = Number(lsl), u = Number(usl);
+  if (!isFinite(n) || !isFinite(l) || !isFinite(u)) return false;
+  return n === 0 && l === 0 && u > 0;
+}
+
+function calcStats(s, usl, lsl, nom) {
   if (usl===null || lsl===null) return null;
   const v = s.filter(x => x !== null && x !== '' && !isNaN(x)).map(Number);
   if (v.length < 2) return null;
   const mean = v.reduce((a,b)=>a+b,0)/v.length;
   const sigma = Math.sqrt(v.reduce((a,x)=>a+(x-mean)**2,0)/(v.length-1));
   const tol = usl - lsl;
-  if (sigma === 0) return {mean, sigma:0, cpk:null, pctTol: tol>0?((mean-lsl)/tol*100):null};
-  const cpk = Math.min((usl-mean)/(3*sigma),(mean-lsl)/(3*sigma));
+  const gdt = isUpperOnlyGDT(nom, lsl, usl);   // V170-18
+  if (sigma === 0) return {mean, sigma:0, cpk:null, gdt, pctTol: tol>0?((mean-lsl)/tol*100):null};
+  // V170-18：幾何公差只看上側；一般尺寸維持 min(Cpu,Cpl)
+  //  ⚠ 欄位名仍叫 cpk —— 全檔十幾處判定（>=1.33／>=1.0）、儀表板、匯出都讀這個欄位，
+  //    換名等於要同步改十幾處、任何一處漏掉就會出現「數字對、判定錯」。
+  //    值改對、判定就自動全對；**顯示層**再依 gdt 旗標決定要印 Cpk 還是 Cpu。
+  const cpk = gdt ? (usl-mean)/(3*sigma)
+                  : Math.min((usl-mean)/(3*sigma),(mean-lsl)/(3*sigma));
   const pctTol = tol>0 ? ((mean-lsl)/tol*100) : null;
-  return {mean, sigma, cpk, pctTol};
+  return {mean, sigma, cpk, pctTol, gdt};
 }
 
 // ══ V168-1：Mean/σ/%Tol 的顯示格式收斂成單一出處 ══
@@ -2840,7 +2874,7 @@ function render() {
   let cpkTotal=0, cpkPass=0, cpkAlert=0, cpkFail=0;
 
   rows.forEach((r, idx) => {
-    const stats = calcStats(r.s, r.usl, r.lsl);
+    const stats = calcStats(r.s, r.usl, r.lsl, r.nom);
     const judge = getJudge(r.type, stats, r.usl, r.lsl, r.s);
     if (r.type==='CPK') {
       cpkTotal++;
@@ -2899,7 +2933,7 @@ function render() {
   // ── 整體判定規則（修正 v79）──
   // 只要任一列（FAI 或 CPK）判定為 Fail / Reject，整體就顯示 REJECT
   const anyRowFail = rows.some(r => {
-    const st = calcStats(r.s, r.usl, r.lsl);
+    const st = calcStats(r.s, r.usl, r.lsl, r.nom);
     const jg = getJudge(r.type, st, r.usl, r.lsl, r.s);
     return jg.label === 'Fail' || jg.label === 'Reject';
   });
@@ -2911,7 +2945,7 @@ function render() {
 
   // NCR trigger bar
   const hasNC = rows.some(r => {
-    const st = calcStats(r.s, r.usl, r.lsl);
+    const st = calcStats(r.s, r.usl, r.lsl, r.nom);
     const jg = getJudge(r.type, st, r.usl, r.lsl, r.s);
     return jg.label==='Reject' || jg.label==='Fail';
   });
@@ -2925,7 +2959,7 @@ function render() {
 // 局部更新計算結果（不重繪整表，避免輸入中斷）
 function renderCalc(idx) {
   const r = rows[idx];
-  const stats = calcStats(r.s, r.usl, r.lsl);
+  const stats = calcStats(r.s, r.usl, r.lsl, r.nom);
   const judge = getJudge(r.type, stats, r.usl, r.lsl, r.s);
   // 更新超規底色
   for (let i = 0; i < sampleCount; i++) {
@@ -2975,7 +3009,7 @@ function updateSummary() {
   let cpkTotal=0, cpkPass=0, cpkAlert=0, cpkFail=0;
   rows.forEach(r => {
     if (r.type !== 'CPK') return;
-    const stats = calcStats(r.s, r.usl, r.lsl);
+    const stats = calcStats(r.s, r.usl, r.lsl, r.nom);
     const judge = getJudge(r.type, stats, r.usl, r.lsl, r.s);
     cpkTotal++;
     if (judge.label==='Pass'||judge.label==='OK') cpkPass++;
@@ -2991,7 +3025,7 @@ function updateSummary() {
   // ── 整體判定規則（修正 v79）──
   // 任一列 Fail/Reject → 整體 REJECT，與 render() 邏輯一致
   const anyRowFail = rows.some(r => {
-    const st = calcStats(r.s, r.usl, r.lsl);
+    const st = calcStats(r.s, r.usl, r.lsl, r.nom);
     const jg = getJudge(r.type, st, r.usl, r.lsl, r.s);
     return jg.label === 'Fail' || jg.label === 'Reject';
   });
@@ -3001,7 +3035,7 @@ function updateSummary() {
   else if (cpkAlert>0)  { ov.textContent='ALERT';  ov.className='sum-val alert'; }
   else                  { ov.textContent='PASS';   ov.className='sum-val pass'; }
   const hasNC = rows.some(r => {
-    const st = calcStats(r.s, r.usl, r.lsl);
+    const st = calcStats(r.s, r.usl, r.lsl, r.nom);
     return ['Reject','Fail'].includes(getJudge(r.type, st, r.usl, r.lsl, r.s).label);
   });
   document.getElementById('ncr-trigger-bar').style.display = hasNC ? 'block' : 'none';
@@ -3223,7 +3257,11 @@ function renderSPC() {
   const usl  = r.usl; const lsl = r.lsl;
   const ucl  = xbar + 3*sigma;
   const lcl  = xbar - 3*sigma;
-  const cpk  = (usl!=null && lsl!=null && sigma>0) ? Math.min((usl-xbar)/(3*sigma),(xbar-lsl)/(3*sigma)) : null;
+  // V170-18：同 calcStats 的分流（見 isUpperOnlyGDT 的說明）
+  const _gdt = isUpperOnlyGDT(r.nom, lsl, usl);
+  const cpk  = (usl!=null && lsl!=null && sigma>0)
+    ? (_gdt ? (usl-xbar)/(3*sigma) : Math.min((usl-xbar)/(3*sigma),(xbar-lsl)/(3*sigma)))
+    : null;
 
   // Canvas 尺寸
   const W = canvas.parentElement.clientWidth || 700;
@@ -3294,7 +3332,7 @@ function renderSPC() {
     <span><b>σ</b>=${sigma.toFixed(4)}</span>
     <span><b>UCL</b>=${ucl.toFixed(4)}</span>
     <span><b>LCL</b>=${lcl.toFixed(4)}</span>
-    ${cpk!==null?`<span><b>Cpk</b>=${cpk.toFixed(3)}</span>`:''}
+    ${cpk!==null?`<span><b>${_gdt?'Cpu':'Cpk'}</b>=${cpk.toFixed(3)}</span>`:''}
     ${usl!=null?`<span style="color:#e67e22"><b>USL</b>=${usl}</span>`:''}
     ${lsl!=null?`<span style="color:#e67e22"><b>LSL</b>=${lsl}</span>`:''}
   `;
@@ -3316,7 +3354,7 @@ function openNCR() {
   tbody.innerHTML = '';
   let ncCount = 0;
   rows.forEach(r => {
-    const st = calcStats(r.s, r.usl, r.lsl);
+    const st = calcStats(r.s, r.usl, r.lsl, r.nom);
     const jg = getJudge(r.type, st, r.usl, r.lsl, r.s);
     if (jg.label !== 'Reject' && jg.label !== 'Fail') return;
     ncCount++;
@@ -3329,7 +3367,7 @@ function openNCR() {
       <td>${r.usl??'—'}</td>
       <td>${r.lsl??'—'}</td>
       <td style="color:#c0392b;font-weight:700">${oosVals.join(', ')||meas.join(', ')||'—'}</td>
-      <td>${r.type==='CPK'&&st&&st.cpk!==null?st.cpk.toFixed(3):'—'}</td>
+      <td>${r.type==='CPK'&&st&&st.cpk!==null?((st.gdt?'<span style="font-size:9px;color:#7b3fa0;font-weight:700">Cpu </span>':'')+st.cpk.toFixed(3)):'—'}</td>
       <td style="color:#c0392b;font-weight:700">${jg.label}</td>
     `;
     tbody.appendChild(tr);
@@ -3477,7 +3515,7 @@ function exportXLSX() {
 
   // Data rows
   rows.forEach(r => {
-    const st = calcStats(r.s, r.usl, r.lsl);
+    const st = calcStats(r.s, r.usl, r.lsl, r.nom);
     const jg = getJudge(r.type, st, r.usl, r.lsl, r.s);
     const sVals = Array.from({length:sampleCount}, (_,i) => r.s[i]??'');
     ws1Data.push([
@@ -3524,7 +3562,7 @@ function exportXLSX() {
 
   rows.forEach((r, i) => {
     const dataRow = hdrRow + 1 + i;
-    const st = calcStats(r.s, r.usl, r.lsl);
+    const st = calcStats(r.s, r.usl, r.lsl, r.nom);
     const jg = getJudge(r.type, st, r.usl, r.lsl, r.s);
 
     // Cpk 欄上色
@@ -3558,7 +3596,7 @@ function exportXLSX() {
   rows.forEach(r => {
     if (r.type !== 'CPK') return;
     cpkTotal++;
-    const st = calcStats(r.s, r.usl, r.lsl);
+    const st = calcStats(r.s, r.usl, r.lsl, r.nom);
     const jg = getJudge(r.type, st, r.usl, r.lsl, r.s);
     if (jg.label==='Pass') cpkPass++;
     else if (jg.label==='Alert') cpkAlert++;
@@ -3970,7 +4008,7 @@ function renderDashboard() {
       try {
         (rec.data?.rows || []).forEach(r => {
           if (r.type !== 'CPK') return;
-          const st = calcStats(r.s||[], r.usl, r.lsl);
+          const st = calcStats(r.s||[], r.usl, r.lsl, r.nom);
           if (st?.cpk != null) {
             allCpkVals.push(st.cpk);
             allCpkDims.push({ label: `#${r.fai||'?'} ${r.moi||''}`, cpk: st.cpk });
@@ -4282,7 +4320,7 @@ function calcCpkStats(rowList) {
   (rowList||[]).forEach(r => {
     if (r.type !== 'CPK') return;
     total++;
-    const st = calcStats(r.s||[], r.usl, r.lsl);
+    const st = calcStats(r.s||[], r.usl, r.lsl, r.nom);
     if (st && st.cpk !== null && st.cpk >= 1.33) pass++;
   });
   return { pass, total };
@@ -4294,7 +4332,7 @@ function calcOverallFromRows(rowList) {
   // 規則：任一列（FAI 或 CPK）Fail/Reject → REJECT；有 Alert → ALERT；全 OK → PASS
   let anyReject = false, anyAlert = false;
   (rowList || []).forEach(r => {
-    const st = calcStats(r.s||[], r.usl, r.lsl);
+    const st = calcStats(r.s||[], r.usl, r.lsl, r.nom);
     const jg = getJudge(r.type, st, r.usl ?? null, r.lsl ?? null, r.s||[]);
     if (jg.label === 'Fail' || jg.label === 'Reject') anyReject = true;
     else if (jg.label === 'Alert') anyAlert = true;
@@ -4827,7 +4865,7 @@ function toggleHistDetail(key) {
         <td>${st ? st.mean.toFixed(3) : '—'}</td>
         <td>${st ? st.sigma.toFixed(4) : '—'}</td>
         <td>${st && st.cp != null ? st.cp.toFixed(3) : '—'}</td>
-        <td style="${fail?'color:#c0392b;font-weight:700':''}">${st && st.cpk != null ? st.cpk.toFixed(3) : '—'}</td>
+        <td style="${fail?'color:#c0392b;font-weight:700':''}">${st && st.cpk != null ? ((st.gdt?'<span style="font-size:9px;color:#7b3fa0;font-weight:700">Cpu </span>':'') + st.cpk.toFixed(3)) : '—'}</td>
         <td><span class="hist-result-badge ${resCls}">${resLbl}</span></td>
       </tr>`;
     }).join('');
@@ -4852,7 +4890,7 @@ function toggleHistDetail(key) {
           <div style="margin-left:auto">${actionBtns}</div>
         </div>
         <table>
-          <thead><tr><th>#</th><th>量測點</th><th>Nominal</th><th>USL</th><th>LSL</th><th>n</th><th>Mean</th><th>σ</th><th>Cp</th><th>Cpk</th><th>判定</th></tr></thead>
+          <thead><tr><th>#</th><th>量測點</th><th>Nominal</th><th>USL</th><th>LSL</th><th>n</th><th>Mean</th><th>σ</th><th>Cp</th><th>Cpk / Cpu</th><th>判定</th></tr></thead>
           <tbody>${cpkDetailRows}</tbody>
         </table>
       </div>
@@ -4866,7 +4904,7 @@ function toggleHistDetail(key) {
   const sHdrs   = Array.from({length:sCount},(_,i)=>`<th>S${i+1}</th>`).join('');
 
   const detailRows = rowList.map(r => {
-    const st = calcStats(r.s||[], r.usl, r.lsl);
+    const st = calcStats(r.s||[], r.usl, r.lsl, r.nom);
     const jg = getJudge(r.type, st, r.usl ?? null, r.lsl ?? null, r.s||[]);
     const resCls = jg.label==='Pass'||jg.label==='OK'?'hist-result-pass':jg.label==='Alert'?'hist-result-alert':jg.label==='Reject'||jg.label==='Fail'?'hist-result-fail':'';
     const sVals = Array.from({length:sCount},(_,i)=>{
@@ -9871,16 +9909,24 @@ function cpkRenderTable() {
   // 統計 foot（MAX, MIN, AVERAGE, STDEV, Ca, CP, CPK）
   const statLabels = ['MAX','MIN','AVERAGE','STDEV','Ca','CP','CPK'];
   let footHtml = '';
+  // V170-18：列標題的**顯示文字**跟 lbl 分開 —— lbl 同時當儲存格 id 的一部分
+  //  （`cpk-stat-${pi}-${lbl}`），直接改 lbl 會讓下面 setter 找不到格子。
+  const STAT_TXT = { CPK: 'CPK / CPU' };
   statLabels.forEach(lbl => {
     const isCa = lbl === 'Ca';
     footHtml += `<tr style="background:${isCa?'#fff8e8':'#e8f0fb'}">`;
-    footHtml += `<td style="padding:5px 7px;border:1px solid #bbd;font-weight:700;font-size:10px;color:${isCa?'#BA7517':'#1a4f8a'}">${lbl}</td>`;
+    footHtml += `<td style="padding:5px 7px;border:1px solid #bbd;font-weight:700;font-size:10px;color:${isCa?'#BA7517':'#1a4f8a'}">${STAT_TXT[lbl]||lbl}</td>`;
     cpkPoints.forEach((pt, pi) => {
       footHtml += `<td id="cpk-stat-${pi}-${lbl}" style="padding:5px;border:1px solid #bbd;text-align:center;font-size:11px;font-weight:600">—</td>`;
     });
     footHtml += '</tr>';
   });
-  footHtml += `<tr><td colspan="${cpkPoints.length+1}" style="font-size:9px;color:#888;padding:3px 7px;border:1px solid #dde">Ca = |均值-目標值|/((USL-LSL)/2)　Cpk = (1-Ca)×Cp　STDEV 採樣本標準差(n-1)</td></tr>`;
+  // V170-18：註腳改寫 —— 原本寫的 `Cpk = (1-Ca)×Cp` 已停用（那是算出 −0.276 的公式）
+  footHtml += `<tr><td colspan="${cpkPoints.length+1}" style="font-size:9px;color:#888;padding:3px 7px;border:1px solid #dde;line-height:1.7">`
+    + `一般雙邊尺寸：<b>Cpk = min( (USL−μ)/3σ , (μ−LSL)/3σ )</b>　`
+    + `僅有上限規格的幾何公差（名目值=0、LSL=0）：<b>Cpu = (USL−μ)/3σ</b>，此時 Cp／Ca 不適用顯示「—」　`
+    + `Ca = |μ−目標值|/((USL−LSL)/2)　STDEV 採樣本標準差(n-1)`
+    + `</td></tr>`;
   tfoot.innerHTML = footHtml;
 }
 
@@ -9955,23 +10001,27 @@ function cpkCalcStats(vals, usl, lsl, nom) {
   // 樣本標準差（Excel STDEV，分母 n-1）
   const sigma = Math.sqrt(v.reduce((a,x)=>a+(x-mean)**2,0)/(n-1));
   const tol   = usl - lsl;
-  const cp    = sigma > 0 ? tol/(6*sigma) : null;
+  const gdt   = isUpperOnlyGDT(nom, lsl, usl);   // V170-18（判斷用**原始 nom**，不是下面補中心值後的 nominal）
+  // V170-18：Cp 是雙邊指標（整條公差帶 ÷ 6σ），對單邊幾何公差沒有意義 ⇒ 不算，顯示層印「—」
+  const cp    = (!gdt && sigma > 0) ? tol/(6*sigma) : null;
 
   // Ca：均值偏離目標值的比率（需要 nominal 目標值）
   // Ca = ABS((Mean - Nominal) / ((USL-LSL)/2))
   const nominal = (nom != null) ? nom : (usl+lsl)/2; // 無目標值時用中心值
-  const ca = (tol > 0) ? Math.abs((mean - nominal) / (tol/2)) : 0; // tol=0 防 Infinity
+  // V170-18：Ca 就是把 −0.276 算出來的元兇（它假設目標值在公差中央）⇒ 幾何公差不算，顯示「—」
+  const ca = (!gdt && tol > 0) ? Math.abs((mean - nominal) / (tol/2)) : null;
 
-  // Cpk 兩種算法：
-  // Excel 算法（含 Ca）：Cpk = (1-Ca) × Cp
-  // 傳統算法（直接用 min）：Cpk = min((USL-Mean)/(3σ), (Mean-LSL)/(3σ))
-  // 採用 Excel 算法
-  const cpk_excel = (cp != null && ca != null) ? (1 - ca) * cp : null;
-  // 保留傳統算法供參考
-  const cpk_min   = sigma > 0 ? Math.min((usl-mean)/(3*sigma),(mean-lsl)/(3*sigma)) : null;
-  const cpk = cpk_excel; // 主要使用 Excel 算法
+  // ══ V170-18：改用標準定義，與填表頁統一 ══
+  //  舊版採 `(1−Ca)×Cp`（Excel 算法）＝ 與填表頁的 min 公式不一致，同一筆資料兩個畫面兩個數字；
+  //  且遇到幾何公差會吐出負值（56500000-002 #7-1 實例，見 isUpperOnlyGDT 的說明）。
+  const cpu = sigma > 0 ? (usl-mean)/(3*sigma) : null;
+  const cpl = sigma > 0 ? (mean-lsl)/(3*sigma) : null;
+  const cpk = gdt ? cpu
+                  : ((cpu != null && cpl != null) ? Math.min(cpu, cpl) : null);
+  //  cpk_min 保留欄位名（外部若有引用不致壞掉），值＝標準 min
+  const cpk_min = (cpu != null && cpl != null) ? Math.min(cpu, cpl) : null;
 
-  return { n, mean, sigma, cp, ca, cpk, cpk_min, max:Math.max(...v), min:Math.min(...v) };
+  return { n, mean, sigma, cp, ca, cpk, cpu, cpl, cpk_min, gdt, max:Math.max(...v), min:Math.min(...v) };
 }
 
 // ── CPK 單點判定（防呆）──
@@ -10046,7 +10096,8 @@ function cpkCalculateAll() {
       STDEV:   st ? st.sigma.toFixed(4) : '—',
       Ca:      st?.ca != null ? st.ca.toFixed(4) : '—',
       CP:      st?.cp  != null ? st.cp.toFixed(3)  : '—',
-      CPK:     st?.cpk != null ? st.cpk.toFixed(3) : '—',
+      // V170-18：幾何公差走單邊指標，值前面標 Cpu，免得被當成雙邊 Cpk 解讀
+      CPK:     st?.cpk != null ? ((st.gdt ? 'Cpu ' : '') + st.cpk.toFixed(3)) : '—',
     };
     statLabels.forEach(lbl => {
       const cell = document.getElementById(`cpk-stat-${pi}-${lbl}`);
@@ -10083,7 +10134,10 @@ function cpkCalculateAll() {
       const titleBar = document.createElement('div');
       titleBar.style.cssText = 'background:#1a4f8a;color:#fff;padding:6px 10px;font-size:11px;font-weight:700;display:flex;justify-content:space-between';
       const cpkColor = (st.cpk!=null&&st.cpk>=1.33)?'#7fff9a':(st.cpk!=null&&st.cpk>=1.0)?'#ffd67a':'#ff8080';
-      titleBar.innerHTML = `<span>球標 ${pt.faiNo} ${pt.moi||''}</span><span style="color:${cpkColor}">CPK = ${st.cpk!=null?st.cpk.toFixed(3):'—'}</span>`;
+      // V170-19：幾何公差的徽章要標 CPU（葉建成 Risk 260910 實測後提出）
+      //  症狀：統計表已顯示「Cpu 2.180」、圖下統計列也顯示「Cpu=2.18」，
+      //    但卡片右上角這個綠色徽章還印「CPK = 2.180」⇒ 同一張卡片上兩種標籤，明顯不一致。
+      titleBar.innerHTML = `<span>球標 ${pt.faiNo} ${pt.moi||''}</span><span style="color:${cpkColor}">${st.gdt?'CPU':'CPK'} = ${st.cpk!=null?st.cpk.toFixed(3):'—'}</span>`;
       wrap.appendChild(titleBar);
       const canvasWrap = document.createElement('div');
       canvasWrap.style.padding = '8px';
@@ -10166,7 +10220,7 @@ function cpkNiceStep(range, targetTicks) {
 function cpkDrawChart(canvas, pt, st) {
   const vals = pt.values.filter(v => v != null && !isNaN(v));
   if (vals.length < 2) return;
-  const {mean, sigma, usl, lsl, cp, cpk} = { usl:pt.usl, lsl:pt.lsl, ...st };
+  const {mean, sigma, usl, lsl, cp, cpk, gdt} = { usl:pt.usl, lsl:pt.lsl, ...st };   // V170-18：多帶 gdt
   // ══ V169-2：直方圖分箱改「對齊量測解析度」（A+ 案）══
   //  ⚠ 舊版把**整條 X 軸**等分成 √n 格。但 X 軸一定要涵蓋 LSL/USL 再各加 18% 留白，
   //    而實務上量測值多半集中在規格帶的 20~30% 內 ⇒ 格子被空白區稀釋得極寬。
@@ -10205,6 +10259,19 @@ function cpkDrawChart(canvas, pt, st) {
     if (usl != null && usl > _b && usl < _c + _half * 1.6) _b = usl + _half * 0.10;
     xMin = _a; xMax = _b;
   }
+  // ══ V170-17：LSL＝0 的幾何公差，X 軸不要畫到 0 以左（使用者 260909）══
+  //  症狀：球標 11-2 的 X 軸出現 `-0.01` 刻度。位置度／平面度這類幾何公差 LSL＝0，
+  //    物理上不可能是負值，標一個負刻度在品質報告上會被誤讀成「量到 -0.01」。
+  //  成因：上面兩條路徑都會讓 xMin 跑到 0 以左——
+  //    ①未縮視野：xMin ＝ LSL − (公差帶寬)×18%（留白，免得 LSL 線緊貼畫框）
+  //    ②縮視野　：視窗以資料為中心、半寬 max(全距×0.75, 3σ)，資料貼著 0 時左緣就成負的
+  //    （11-1／11-3 沒露出負刻度只是第一個刻度剛好落在 0.00，視窗一樣是從 −0.036 開始）
+  //  ⚠ 條件寫得窄，兩個都要成立才夾：
+  //    (a) `lsl === 0` —— 雙邊公差的一般尺寸不受影響（球標 5 的 1.505~1.565 本來就離 0 很遠，
+  //        該留的白照留；把它一律夾 0 會讓整條軸從 0 拉到 1.65，圖就毀了）
+  //    (b) 所有量測值都 ≥ 0 —— 萬一真的有人輸入負值（打錯或量測異常），**要讓它看得見**，
+  //        這時不夾，寧可露出負軸也不要把異常值藏到畫面外。
+  if (lsl === 0 && xMin < 0 && vals.every(v => v >= 0)) xMin = 0;
   // 量測解析度＝所有數值中小數位數最多的那個（2.81 / 48.94 → 0.01）
   const _dec = Math.max(0, ...vals.map(v => {
     const t = String(v), i = t.indexOf('.');
@@ -10315,7 +10382,12 @@ function cpkDrawChart(canvas, pt, st) {
   ctx.stroke();
   // 繪製 LSL / USL / Mean 標示線，標籤錯開避免重疊
   const markers = [
-    { val: lsl,  lbl: 'LSL',  col: '#c0392b', dash: []      },
+    // ══ V170-19：幾何公差的 0 不是「規格下限」，標成 LSL 會誤導（葉建成 Risk 260910）══
+    //  他的原話：「0 不是『低於這個就 NG 的規格下限』，而是這種幾何特性的理想值／理論下界」。
+    //  既然已經把它定義成 Upper-only／One-sided specification，就不該再用 LSL 這個詞——
+    //  LSL 的語意是「低於它就不合格」，但位置度／平整度量到 0 是**最好**的結果，不是不合格。
+    //  ⇒ 幾何公差改標「Target」（理想值），一般雙邊尺寸維持 LSL 不動。
+    { val: lsl,  lbl: gdt ? 'Target' : 'LSL',  col: '#c0392b', dash: []      },
     { val: usl,  lbl: 'USL',  col: '#c0392b', dash: []      },
     { val: mean, lbl: 'Mean', col: '#1a4f8a', dash: [4,3]   },
   ].filter(m => m.val != null && m.val >= xMin && m.val <= xMax);   // V169-6：畫面外的不畫線，改走下面的邊緣標示
@@ -10335,7 +10407,8 @@ function cpkDrawChart(canvas, pt, st) {
       _dashEdge(ml + 0.5);
       ctx.fillStyle='#c0392b';
       ctx.beginPath(); ctx.moveTo(ml,_ey); ctx.lineTo(ml+10,_ey-6); ctx.lineTo(ml+10,_ey+6); ctx.closePath(); ctx.fill();
-      ctx.textAlign='left';  ctx.fillText('LSL '+lsl.toFixed(3), ml+12, _ey+3);
+      // V170-19：同上，出框標示也不能寫 LSL（V170-17 之後幾何公差的軸夾在 0，這條理論上不會觸發，一致性照改）
+      ctx.textAlign='left';  ctx.fillText((gdt?'Target ':'LSL ')+lsl.toFixed(3), ml+12, _ey+3);
     }
     if (usl != null && usl > xMax) {
       _dashEdge(W-mr-0.5);
@@ -10375,16 +10448,21 @@ function cpkDrawChart(canvas, pt, st) {
     const valW = ctx.measureText(m.val.toFixed(3)).width;
     const bgW = Math.max(lblW, valW) + 6;
 
+    // V170-17：標籤盒往畫框內收——夾 0 之後 LSL 線會**正好落在左緣**（x＝ml），
+    //  標籤置中畫的話盒子會有一半跑到 ml 左邊、壓住 Y 軸的刻度數字（ml 只有 38px）。
+    //  只移「標籤」，垂直線仍畫在真實位置 x，不影響讀值。
+    //  規格線在畫面中間時 _lx === x，等於沒動，既有的圖不受影響。
+    const _lx = Math.min(Math.max(x, ml + bgW/2), W - mr - bgW/2);
     ctx.fillStyle = 'rgba(255,255,255,0.85)';
-    ctx.fillRect(x - bgW/2, labelY - 11, bgW, labelH + 2);
-    _lblBoxes.push([x - bgW/2, labelY - 11, bgW, labelH + 2]);   // V169-6：給柱頂筆數做避讓用
+    ctx.fillRect(_lx - bgW/2, labelY - 11, bgW, labelH + 2);
+    _lblBoxes.push([_lx - bgW/2, labelY - 11, bgW, labelH + 2]);   // V169-6：給柱頂筆數做避讓用
 
     ctx.fillStyle = m.col;
     ctx.font = 'bold 10px Arial';
     ctx.textAlign = 'center';
-    ctx.fillText(m.lbl, x, labelY);
+    ctx.fillText(m.lbl, _lx, labelY);
     ctx.font = '9px Arial';
-    ctx.fillText(m.val.toFixed(3), x, valueY);
+    ctx.fillText(m.val.toFixed(3), _lx, valueY);
   });
   // ══ V169-6：柱頂筆數統一在這裡畫（最後畫）══
   //  最後畫 ⇒ 不會被 Mean／LSL／USL 的標籤盒蓋住；
@@ -10467,8 +10545,17 @@ function cpkDrawChart(canvas, pt, st) {
   //  這樣任何卡片寬度、任何位數都不會黏（不是靠把卡片加寬來閃）。
   ctx.fillStyle='#333'; ctx.textAlign='left';
   (function(){
+    // V170-18：幾何公差印 Cpu（Cp 對單邊沒有意義，上面已經算成 null ⇒ 這裡自然顯示「—」）
+    // ══ V170-20：圖上與表上的小數位數要一致（葉建成 Risk 260910）══
+    //  症狀：同一個球標、同一個數字，統計表寫「Cpu 2.180」（3 位）、
+    //    圖下統計列卻寫「Cpu=2.18」（2 位）⇒ 兩邊對不起來，看的人會懷疑是不是兩個值。
+    //  ⇒ 圖改成 3 位，跟統計表與卡片徽章（都是 toFixed(3)）對齊。Cp 就在隔壁，一起改，
+    //    否則會變成「Cpk 3 位、Cp 2 位」的另一種不一致。
+    //  ⚠ 每項多一個字元，靠下方既有的防黏字機制（量寬→降字級→必要時捨棄最右邊「刻度＝」）吸收，
+    //    不是靠把卡片加寬來閃 —— 已在 380px 窄卡片實測過。
     let items = [`n=${vals.length}`,`μ=${mean.toFixed(3)}`,`σ=${sigma.toFixed(3)}`,
-                 `Cp=${cp!=null?cp.toFixed(2):'—'}`,`Cpk=${cpk!=null?cpk.toFixed(2):'—'}`,
+                 `Cp=${cp!=null?cp.toFixed(3):'—'}`,
+                 `${gdt?'Cpu':'Cpk'}=${cpk!=null?cpk.toFixed(3):'—'}`,
                  `刻度=${_step.toFixed(_tickDec)}`];
     const MIN_GAP = 7;
     let fs = 11, widths = [], gap = 0;

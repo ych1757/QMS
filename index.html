@@ -178,6 +178,8 @@ table.main tr:hover td.s-col.oos{background:#ffcaca}
   body{background:#fff;margin:0;padding:0}
   .page{box-shadow:none;border:none;margin:0;padding:8px}
   .no-print{display:none!important}
+  /* V172-1：「臨時」標記是內部看記錄用的，客戶報告上不印 */
+  .adhoc-tag{display:none!important}
   .btn-row{display:none!important}
   .process-bar{display:none!important}
   .tab-nav{display:none!important}
@@ -273,9 +275,16 @@ table.main tr:hover td.s-col.oos{background:#ffcaca}
 .spec-tbl td input:focus{background:#fffde7}
 .spec-tbl tr:hover td{background:#f5f8ff}
 .spec-tbl td.usl-col{background:#f0fff4;color:#1D6E50;font-size:10px;font-weight:600}
+/* V171：球標自動排序後，被搬動的那一列閃一下底色（先亮、再慢慢退回原色） */
+.spec-tbl tr.spec-moved td{background:#ffe9a8 !important}
+.spec-tbl tr.spec-fading td{transition:background-color .9s ease}
+/* V172-1：檢驗填表頁臨時加的量測項目標記（畫面與歷史明細用；列印不出現，見 @media print） */
+.adhoc-tag{display:inline-block;font-size:8px;font-weight:700;color:#8a6d00;background:#fff3cd;
+  border:1px solid #e0c860;border-radius:3px;padding:0 2px;margin-left:3px;vertical-align:middle;line-height:12px}
 .mgr-status{font-size:11px;margin-top:8px;padding:6px 10px;border-radius:3px;display:none}
 .mgr-status.ok{display:block;background:#d4edda;color:#155724}
 .mgr-status.err{display:block;background:#f8d7da;color:#721c24}
+.mgr-status.warn{display:block;background:#fff3cd;color:#856404}
 .sn-btn{height:26px;padding:0 10px;font-size:12px;font-weight:600;border:1px solid #bbb;background:#fff;color:#555;border-radius:4px;cursor:pointer;font-family:Arial,sans-serif}
 .sn-btn:hover{background:#e8eef5;border-color:#1a4f8a;color:#1a4f8a}
 .sn-btn.active{background:#1a4f8a;color:#fff;border-color:#1a4f8a}
@@ -445,7 +454,7 @@ input.spec-inp[type=number] { -moz-appearance:textfield; appearance:textfield; }
 // 用途＝跟使用者溝通「你看到的畫面是不是最新版」，不是品質文件的表單版次
 //（表單版次 Rev 另有其用途、目前維持 V1.0 不動，日後各廠區若有自己的表單版次需求再談）
 // 顯示位置：① 瀏覽器分頁標題 ② 登入畫面副標下方 ③ 主畫面右上（列印時自動隱藏）
-const APP_VER = 'V170-22';   // ★★ 每出一版必須同步改這一行（比照 MHR 的做法），否則畫面版號會對不上檔案版號
+const APP_VER = 'V172-1';   // ★★ 每出一版必須同步改這一行（比照 MHR 的做法），否則畫面版號會對不上檔案版號
 
 const SUPABASE_URL = 'https://vwusebvvsqyjydddupit.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_Ju-c9cuXYJil7PEJ1-NspA_ASzfIzi5';
@@ -2674,6 +2683,18 @@ function specsToRows(specs) {
 }
 
 function loadPartSpec() {
+  // ══ V171：編輯已存的檢驗單時，不可重新帶出規格（使用者 260922 提出的疑慮，查證屬實）══
+  //  漏洞：從「歷史查詢」打開舊單來改 → 按「帶出規格」（料號格按 Enter、📷 掃條碼也走這裡）
+  //    → 整張表換成「現在的料號規格」、量測值全部清空；再按「確認修改 → 覆蓋」
+  //    ⇒ 舊單的量測值被蓋成空的，之前完全沒有擋（submitRecord 只檢查料號與日期）。
+  //  料號規格沒有版次、只留最新一份；舊單能保持原貌，靠的是「每張單存它自己那份球標與量測值」，
+  //    重新帶出＝拿新規格蓋掉舊單，正好破壞這個保證。V171 起球標會自動重排，這個風險更實際。
+  //  ⚠ 只擋「編輯舊單」這個狀態；新單照舊可以帶出（按「↺ 清空」會離開編輯狀態）。
+  if (editingRecordKey) {
+    alert('這張是已存的檢驗單，重新帶出規格會清空量測值，所以不能帶。\n要用新規格，請先按「↺ 清空」開一張新單。');
+    setStatus('⚠ 編輯已存的檢驗單時不能重新帶出規格（避免清空量測值）', 'err');
+    return;
+  }
   PART_SPECS = isAdmin() ? loadAllSpecDB() : loadSpecDB();
   const pn = document.getElementById('h-partno').value.trim();
   const spec = PART_SPECS[pn];
@@ -2684,7 +2705,10 @@ function loadPartSpec() {
   document.getElementById('h-partname').value = spec.partname || '';
   document.getElementById('h-material').value  = spec.material || '';
   document.getElementById('h-rev').value        = spec.rev || '';
-  rows = specsToRows(spec.specs);
+  // V172-1：帶出來就照球標號排好。料號規格存檔時雖然也會排（V171），但**存檔順序亂的舊料號**
+  //  要等有人打開那個料號按過「儲存料號」才會被排 ⇒ 在這裡再排一次，任何料號帶出來都是照號碼的順序。
+  //  ⚠ 排的是「帶出來的這張單」，不會回頭改料號規格存的順序（那是料號規格管理頁的事）。
+  rows = specsToRows(sortSpecsByBalloon(spec.specs));
   render();
   setStatus(`✔ 已載入 ${pn} 規格，共 ${rows.length} 項　樣本值已清空`, 'ok');
 }
@@ -2896,6 +2920,7 @@ function render() {
         class="s-inp${oos?' oos-inp':''}"
         oninput="rows[${idx}].s[${i}]=this.value===''?null:+this.value;renderCalc(${idx})"
         onkeydown="sKeyNav(event,${idx},${i})"
+        onpaste="faiPaste(event,${idx},${i})"
       ></td>`;
     }).join('');
 
@@ -2903,7 +2928,7 @@ function render() {
     const typeCell = `<td style="text-align:center"><span class="type-badge type-${r.type||'FAI'}">${r.type||'FAI'}</span></td>`;
 
     tr.innerHTML = `
-      <td style="text-align:center;font-weight:700;color:#1a4f8a">${(r.fai!==undefined && String(r.fai).trim()!=='') ? r.fai : (idx+1)}</td>
+      <td style="text-align:center;font-weight:700;color:#1a4f8a">${(r.fai!==undefined && String(r.fai).trim()!=='') ? r.fai : (idx+1)}${adhocTag(r)}</td>
       <td class="lbl"><input value="${r.moi||''}" placeholder="量測儀器" onchange="rows[${idx}].moi=this.value" style="font-size:10px"></td>
       <td style="text-align:center;padding:0;cursor:pointer" onclick="cycleCharacteristic(${idx},this)" title="點擊切換：— / Key / Major / Minor">
         <span style="display:inline-block;font-size:10px;font-family:Arial;font-weight:600;color:${r.characteristic==='Key'?'#c0392b':r.characteristic==='Major'?'#BA7517':r.characteristic==='Minor'?'#1a4f8a':'#999'};min-width:40px">${r.characteristic||'—'}</span>
@@ -3002,6 +3027,70 @@ function sKeyNav(e, idx, i) {
   if (nidx >= rows.length) { nidx = 0; }
   const next = document.getElementById(`s_${nidx}_${ni}`);
   if (next) { next.focus(); next.select(); }
+}
+
+// ══ V172：FAI 量測值也可從 Excel 貼上一整塊（Noris 邱泊鈞 260922 反映；V170-21 CPK 表的延伸）══
+//  成因同 V170-21：每一格是 <input type="number">，收到含 Tab／換行的字串會整串判無效 ⇒ 一格都進不去。
+//  使用者定調（260922）：「跟 CPK 設計一樣」⇒ 規則照 cpkPaste：
+//    從游標所在格往右、往下照原樣填（FAI 表：往右＝樣本 1、2、3…，往下＝下一個量測項目），剪貼簿幾格就填幾格；
+//    「錯誤」等任何非數字不貼、保持空白（⚠ 絕不填 0，假的 0 會把平均拉低、判定失真）；
+//    超出目前樣本數／量測項目數先擋下來提示（不靜默丟資料）；單一值貼上不接管（一格一格貼的舊習慣不變）。
+//  ⚠ 跟 CPK 表唯一的不同：貼完「要」即時更新每列的超規底色／Mean／σ／%Tol／判定。
+//    CPK 表貼上不算，是因為 CPK 表手動打字本來就不算（要按「計算」，分布圖綁「當下算過沒」）；
+//    FAI 表手動打一格就會即時算（oninput → renderCalc）⇒ 貼上＝打字，要一樣。
+//    不算的話畫面會出現「值已經超規、判定還是 OK」的自相矛盾 —— 正是 V168-1 修過的那種（列印走的就是這個畫面）。
+function faiPaste(e, idx, i) {
+  const cb = e.clipboardData || window.clipboardData;
+  const txt = cb ? cb.getData('text') : '';
+  if (!txt) return;
+  if (!/[\t\r\n]/.test(txt.replace(/\s+$/, ''))) return;   // 單一數值 ⇒ 交給瀏覽器預設行為
+  e.preventDefault();
+
+  const grid = txt.replace(/\r\n?/g, '\n')
+                  .replace(/\n+$/, '')
+                  .split('\n')
+                  .map(line => line.split('\t'));
+  const rowsN = grid.length;
+  const colsN = Math.max.apply(null, grid.map(g => g.length));
+
+  const availCols = sampleCount - i;     // 從這一格往右還有幾個樣本欄
+  const availRows = rows.length - idx;   // 從這一格往下還有幾個量測項目
+
+  if (colsN > availCols || rowsN > availRows) {
+    const exCol = Math.max(0, colsN - availCols), exRow = Math.max(0, rowsN - availRows);
+    const msg = '剪貼簿有 ' + colsN + ' 欄 × ' + rowsN + ' 列。\n'
+      + '從目前這一格算起，只放得下 ' + availCols + ' 欄（樣本）× ' + availRows + ' 列（量測項目）。\n\n'
+      + '超出的部分不會貼入：'
+      + (exCol ? '右邊 ' + exCol + ' 欄' : '') + (exCol && exRow ? '、' : '') + (exRow ? '下面 ' + exRow + ' 列' : '')
+      + '\n\n要繼續貼入放得下的部分嗎？'
+      + '\n（取消的話什麼都不會改，可以先把 Sample Size 樣本數或量測項目調好再貼）';
+    if (!confirm(msg)) return;
+  }
+
+  let filled = 0, blanked = 0;
+  const touched = new Set();
+  const maxR = Math.min(rowsN, availRows);
+  for (let r = 0; r < maxR; r++) {
+    const maxC = Math.min(grid[r].length, availCols);
+    for (let c = 0; c < maxC; c++) {
+      const raw = String(grid[r][c]).trim().replace(/,/g, '');   // 去掉 Excel 的千分位
+      //  用「能不能解析成數字」判斷，不是只認『錯誤』兩個字 —— 下次可能是別的字
+      const ok = raw !== '' && isFinite(Number(raw));
+      const tIdx = idx + r, tI = i + c;
+      rows[tIdx].s[tI] = ok ? Number(raw) : null;   // 與 oninput 同一種存法（數字或 null）
+      //  畫面寫「換算後的數字」而不是原字串：數字格不收「+0.012」這類寫法（會變空白），
+      //  若寫原字串，畫面空白、資料卻有值 ⇒ 平均算進去了卻看不到。FAI 表存檔讀的是 rows，所以兩邊一定要一致。
+      const inp = document.getElementById('s_' + tIdx + '_' + tI);
+      if (inp) inp.value = ok ? String(Number(raw)) : '';
+      touched.add(tIdx);
+      if (ok) filled++; else blanked++;
+    }
+  }
+  touched.forEach(t => renderCalc(t));   // 即時更新（同手動打字）
+
+  // 照實回報，不靜默完成
+  showSyncBanner('已貼入 ' + filled + ' 格'
+    + (blanked ? '，' + blanked + ' 格非數字（如「錯誤」）留空白' : ''), 6000);
 }
 
 // 更新彙總區（不重繪表格）
@@ -3427,9 +3516,34 @@ function syncSpec(idx) {
   r.lsl = +((nom-mt).toFixed(6));
 }
 
+// ══ V172-1：這一頁臨時加的量測項目要看得出來（使用者 260923 定案，B 案）══
+//  背景：檢驗項目本來就該統一在「⚙ 料號規格管理」頁維護。這一頁的「＋ 新增量測項目」加的列
+//    **只存在這一張檢驗單裡，不會回寫料號規格** ⇒ 下一張同料號的新單不會有這個項目。
+//  使用者定案：不鎖（現場臨時多量一個尺寸還是要能加），但要做兩件事——
+//    ① 號碼給「現有最大號＋1」（原本是「第幾列＋1」，球標有 10-1／13-2 這種子號時會算出中間的號碼，
+//       看起來像料號規格內的項目）⇒ 臨時項目一定排在最後面。
+//    ② 標記 `adhoc:true`，畫面與歷史明細的球標旁標「臨時」，日後翻記錄才知道這一列不是當時料號規定的檢驗項目。
+//  ⚠ 標記跟著這張單存進記錄（rows 整包存檔），舊記錄沒有這個欄位 ⇒ 不會標，也不影響任何計算。
+//  標記的產生收斂在這一支：填表頁與歷史明細共用，將來要改字或樣式只改這裡
+function adhocTag(r) {
+  return (r && r.adhoc)
+    ? ' <span class="adhoc-tag" title="臨時項目：不在料號規格內，只存在這一張檢驗單，不會回寫料號規格">臨時</span>'
+    : '';
+}
+
+function nextAdhocFaiNo() {
+  let max = 0;
+  rows.forEach(r => {
+    const t = balloonTokens(r.fai);                       // 與料號規格頁同一套解析：10-2 取 10
+    const head = (t && /^\d+$/.test(t[0])) ? Number(t[0]) : 0;
+    if (head > max) max = head;
+  });
+  return max + 1;
+}
+
 function addRow() {
-  const n = rows.length+1;
-  rows.push({fai:n, moi:'Dial Caliper', type:'FAI', nom:0, pt:0.1, mt:0.1, usl:0.1, lsl:-0.1, s:Array(sampleCount).fill(null), comment:''});
+  const n = nextAdhocFaiNo();
+  rows.push({fai:n, adhoc:true, moi:'Dial Caliper', type:'FAI', nom:0, pt:0.1, mt:0.1, usl:0.1, lsl:-0.1, s:Array(sampleCount).fill(null), comment:''});
   render();
 }
 
@@ -4915,7 +5029,7 @@ function toggleHistDetail(key) {
     // V156：這一列完全沒有數值＝未量測 → 淡黃底＋判定改標「未量測」（判定邏輯不變，只是顯示得明確）
     const _un = r.type && !(r.s||[]).filter(x => x!==null && x!=='' && !isNaN(x)).length;
     return `<tr${_un ? ' style="background:#fffbe6"' : ''}>
-      <td>${r.fai||''}</td><td style="text-align:left">${r.moi||''}</td><td>${r.type||''}</td>
+      <td>${r.fai||''}${adhocTag(r)}</td><td style="text-align:left">${r.moi||''}</td><td>${r.type||''}</td>
       <td>${r.nom??''}</td><td>${r.usl??''}</td><td>${r.lsl??''}</td>
       ${sVals}
       <td>${st?st.mean.toFixed(3):'—'}</td>
@@ -5446,7 +5560,9 @@ function editPn(pn, scope) {
   renderSpecRows();
   // ── 歸屬設定（Admin 才顯示）──
   renderScopeCheckboxes(pn, editingScope);
-  setMgrStatus(`正在編輯料號 ${pn}，修改後按「儲存料號」`, '');
+  // V171：順序亂掉的舊料號「只提示、不偷排」—— 畫面要跟存起來的樣子一致，按儲存才重排
+  if (specRowsInOrder(specRows)) setMgrStatus(`正在編輯料號 ${pn}，修改後按「儲存料號」`, '');
+  else setMgrStatus(`正在編輯料號 ${pn}。⚠ 這個料號的球標不是由小到大排列，按「儲存料號」就會自動重新排序`, 'warn');
   document.getElementById('sc2').classList.add('active-step');
   document.getElementById('sc3').classList.add('active-step');
   document.getElementById('e-partname').scrollIntoView({behavior:'smooth', block:'center'});
@@ -5575,6 +5691,114 @@ function deletePn(pn, scope) {
   setMgrStatus(`已刪除料號 ${pn}`, 'ok');
 }
 
+// ══ V171：料號規格的球標自動依序排列（Noris 邱泊鈞 260922 反映）══
+//  症狀：按「＋ 新增規格行」只會加在最下面。補一個 11 號，它就排在 21 後面；
+//    存檔後「檢驗填表」「CPK」帶出規格也是這個順序（兩頁都照存檔順序帶，不自己排）。
+//  定案（使用者與 Noris 260922 確認）：要的是「存起來的順序真的改、項次跟著重編」，
+//    不是只在畫面上排 ⇒ ① 打完球標號、游標一離開那一格，那一列就搬到該在的位置；
+//    ② 按「儲存料號」時再排一次（保險）；③ 打開順序亂掉的舊料號只提示、不偷排
+//       （畫面要跟存起來的樣子一致，按儲存才生效）。
+//  ⚠ 已存的檢驗單不受影響：每張單存的是它自己那份球標／規格／量測值，查看、列印、編輯、匯出
+//    都不回頭讀料號規格。唯一會拿新規格蓋舊單的路（編輯舊單時按「帶出規格」）V171 一併擋掉，見 loadPartSpec。
+//  排序規則（自然排序）：只看數字與文字，符號（- _ . 空白等）都當分隔 ⇒
+//    10 < 10-1 < 10-2 < 11 < 12 < 13-1；「8_1」與「8-1」同一級；數字以數值比（2 < 10）；
+//    數字排在文字前；沒填球標的列排最後；同號維持原本先後（穩定排序）。
+function balloonTokens(label) {
+  const s = String(label ?? '').trim();
+  if (!s) return null;
+  return s.match(/\d+|\p{L}+/gu) || [s];
+}
+function cmpBalloon(a, b) {
+  const ta = balloonTokens(a), tb = balloonTokens(b);
+  if (!ta || !tb) return (ta ? 0 : 1) - (tb ? 0 : 1);   // 沒填的排最後
+  for (let k = 0; k < Math.min(ta.length, tb.length); k++) {
+    const x = ta[k], y = tb[k];
+    const xn = /^\d+$/.test(x), yn = /^\d+$/.test(y);
+    if (xn && yn) { const d = Number(x) - Number(y); if (d) return d; }
+    else if (xn !== yn) return xn ? -1 : 1;
+    else { const c = x.localeCompare(y, 'zh-Hant', { sensitivity: 'base' }); if (c) return c; }
+  }
+  return ta.length - tb.length;   // 10 排在 10-1 前
+}
+// V172-1：把一份規格（specs 陣列）照球標號排好後回傳「新陣列」，不動原本那份
+//  用在「帶出規格」（檢驗填表／CPK 兩頁）；排序規則與料號規格管理頁完全同一套 cmpBalloon
+function sortSpecsByBalloon(specs) {
+  return (specs || []).slice().sort((a, b) => cmpBalloon(a.fai, b.fai));
+}
+function specRowsInOrder(list) {
+  for (let k = 1; k < list.length; k++) if (cmpBalloon(list[k-1].fai, list[k].fai) > 0) return false;
+  return true;
+}
+function sortSpecRows() {
+  // Array.prototype.sort 自 ES2019 起規範要求穩定 ⇒ 同號、沒填的都維持原本先後
+  //  ⚠ 排完一定要馬上 renderSpecRows()：每一格的 onchange 寫死了 specRows[i] 的 i，
+  //    資料順序變了、畫面沒重繪，下一次輸入就會寫到別列去。
+  specRows.sort((a, b) => cmpBalloon(a.fai, b.fai));
+}
+
+// 球標格「離開」時（onchange）或按 Enter 時呼叫。
+//  按 Enter 另外掛 onkeydown：這張表不在 <form> 裡，按 Enter 不會觸發 change（本機實測），
+//    不補的話打完按 Enter 什麼都不會發生，要等離開格子才搬。Enter 時游標留在同一格（跟著搬過去）。
+//  ⚠ 不能在這裡當場重繪：change 發生時瀏覽器還沒把游標移到下一格，
+//    這時重繪會把「下一格」整個換掉，游標就不見了（按 Tab 會以為沒反應）。
+//    ⇒ 先記值，等游標移好（setTimeout 0）再排序、重繪，並把游標放回「同一列、同一格」。
+function specSetBalloon(i, val) {
+  const row = specRows[i];
+  if (!row) return;
+  row.fai = val;
+  setTimeout(() => {
+    const tbody = document.getElementById('spec-tbody');
+    // ① 先「試排」看這一列會不會移動：不動就什麼都不做（不閃、不跳、也不碰游標）
+    //   ⚠ 一定要先判斷、再碰游標 —— 下面 ③ 的 blur() 會再觸發一次 change、排進第二輪；
+    //     第二輪時這一列已在正確位置，若先 blur 再判斷，會把剛放回去的游標又帶走（本機實測踩到）。
+    const before = specRows.indexOf(row);
+    if (before < 0) return;          // 等待期間這一列被刪掉，或已換成別的料號
+    if (specRows.slice().sort((a, b) => cmpBalloon(a.fai, b.fai)).indexOf(row) === before) return;
+    // ② 游標現在停在哪一列、哪一格（用畫面上的舊順序對回資料列）
+    const act = document.activeElement;
+    const actTr = (act && tbody.contains(act)) ? act.closest('tr') : null;
+    const tgtRow = actTr ? specRows[Number(actTr.dataset.idx)] : null;
+    const tgtCtl = actTr ? Array.prototype.indexOf.call(actTr.querySelectorAll('input,select,button'), act) : -1;
+    //  連游標位置／反白一起記：按 Tab 進格子時瀏覽器會把整格反白（直接打字＝取代預設的 Dial Caliper），
+    //  重繪後只 focus() 不會反白，打的字就變成接在原字前面（本機實測踩到）。
+    //  數字格（type=number）讀不到 selectionStart（null），還原時改用整格反白。
+    let selS = null, selE = null;
+    try { if (actTr && act.tagName === 'INPUT') { selS = act.selectionStart; selE = act.selectionEnd; } } catch(e) {}
+    // ③ 重繪前先讓游標正式離開舊格子（本機實測踩到的寫錯列）：
+    //    按 Enter 時游標還在球標格裡，直接重繪 ⇒ 瀏覽器在移除這一格時補發一次 change，
+    //    而那一格的 onchange 寫死的是「排序前」的 i ⇒ 排序後 specRows[i] 已經是別列，
+    //    結果把別列的球標蓋掉（實測：21 被蓋成 2-1、多出一列 2-1）。
+    //    先 blur() ⇒ 那次 change 在「還沒排序、i 還對」的時候就發完，之後重繪就不會再有舊格子送值。
+    if (actTr) { try { act.blur(); } catch(e) {} }
+    // ④ 排序、重繪，游標放回原本要去的那一格（那一列本身也可能被往後推了一格）
+    sortSpecRows();
+    const after = specRows.indexOf(row);
+    renderSpecRows();
+    if (tgtRow && tgtCtl >= 0) {
+      const tr2 = tbody.rows[specRows.indexOf(tgtRow)];
+      const ctl = tr2 && tr2.querySelectorAll('input,select,button')[tgtCtl];
+      if (ctl) {
+        ctl.focus();
+        if (ctl.tagName === 'INPUT') {
+          try {
+            if (selS != null && selE != null) ctl.setSelectionRange(selS, selE);
+            else ctl.select();
+          } catch(e) { try { ctl.select(); } catch(_) {} }
+        }
+      }
+    }
+    // ⑤ 搬過去的那一列閃一下；游標若在別列（使用者點去別處）就不把畫面捲走
+    const moved = tbody.rows[after];
+    if (moved) {
+      moved.classList.add('spec-moved');
+      if (!tgtRow || tgtRow === row) moved.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      setTimeout(() => { moved.classList.add('spec-fading'); moved.classList.remove('spec-moved'); }, 700);
+      setTimeout(() => moved.classList.remove('spec-fading'), 1700);
+    }
+    setMgrStatus(`球標 ${String(row.fai).trim()} 已依順序移到第 ${after + 1} 列，按「儲存料號」後生效`, '');
+  }, 0);
+}
+
 function addSpecRow() {
   specRows.push({moi:'Dial Caliper', type:'FAI', nom:'', pt:'', mt:''});
   renderSpecRows();
@@ -5593,9 +5817,10 @@ function renderSpecRows() {
     const usl = (!isNaN(nom)&&!isNaN(pt)) ? (nom+pt).toFixed(4) : '—';
     const lsl = (!isNaN(nom)&&!isNaN(mt)) ? (nom-mt).toFixed(4) : '—';
     const tr = document.createElement('tr');
+    tr.dataset.idx = i;   // V171：specSetBalloon 用來把「游標所在的格子」對回資料列
     tr.innerHTML = `
       <td style="color:#999;font-size:10px">${i+1}</td>
-      <td><input value="${r.fai??''}" placeholder="球標" onchange="specRows[${i}].fai=this.value" style="width:100%;text-align:center"></td>
+      <td><input value="${r.fai??''}" placeholder="球標" onchange="specSetBalloon(${i},this.value)" onkeydown="if(event.key==='Enter'&&!event.isComposing)specSetBalloon(${i},this.value)" style="width:100%;text-align:center"></td>
       <td><input value="${r.moi||''}" placeholder="Dial Caliper" onchange="specRows[${i}].moi=this.value"></td>
       <td><select onchange="specRows[${i}].type=this.value;renderSpecRows()" style="border:none;background:transparent;font-size:11px;font-family:Arial,sans-serif;font-weight:700;color:${r.type==='CPK'?'#7b3fa0':'#1a4f8a'}">
         <option ${r.type==='FAI'?'selected':''}>FAI</option>
@@ -5623,6 +5848,10 @@ function savePartSpec() {
   if (!pn)       { setMgrStatus('⚠ 請填寫料號 Part Number', 'err'); return; }
   if (!partname) { setMgrStatus('⚠ 請填寫品名 Part Name', 'err'); return; }
   if (!specRows.length){ setMgrStatus('⚠ 請至少新增一行規格項目（按「＋ 新增規格行」）', 'err'); return; }
+  // V171：存檔前再依球標排一次（保險：打開順序亂掉的舊料號、或打完球標直接按儲存）
+  //  排完馬上重繪 ⇒ 畫面＝存進去的順序，項次也跟著重編
+  const reordered = !specRowsInOrder(specRows);
+  if (reordered) { sortSpecRows(); renderSpecRows(); }
   const validSpecs = specRows.filter(r => r.moi);
   if (!validSpecs.length){ setMgrStatus('⚠ 請填寫量測儀器名稱', 'err'); return; }
 
@@ -5666,7 +5895,7 @@ function savePartSpec() {
     saveSpecDB(PART_SPECS, pn); // V144：只同步這次儲存的料號
   }
   renderPnList();
-  setMgrStatus(`✔ 料號 ${pn} 已儲存，共 ${validSpecs.length} 項規格。可切換到「FAI 填表」使用。`, 'ok');
+  setMgrStatus(`✔ 料號 ${pn} 已儲存，共 ${validSpecs.length} 項規格。${reordered ? '球標已依順序重新排列。' : ''}可切換到「FAI 填表」使用。`, 'ok');
   ['sc1','sc2','sc3'].forEach(id => document.getElementById(id).classList.remove('active-step'));
 }
 
@@ -9783,6 +10012,18 @@ function cpkInitTab() {
 function cpkLoadSpec() {
   const pn = document.getElementById('cpk-partno').value.trim();
   if (!pn) return;
+  // V171：編輯已存的 CPK 單時不重新帶出規格（理由同 loadPartSpec）。
+  //  舊版：編輯舊單時料號欄只要打成任一個現有料號，量測點就整組換成現在的規格、數值清空；
+  //    CPK 有「一格數值都沒有不能存」的擋，但補打幾格就存得進去 ⇒ 舊單被蓋成新規格。
+  //  這支掛在 oninput（每打一個字都會進來）⇒ 只顯示提示、不跳視窗。料號文字照樣可以改（修打錯字），只是不換規格。
+  if (editingCpkKey) {
+    const el = document.getElementById('cpk-status');
+    if (el) {
+      el.textContent = '⚠ 這張是已存的 CPK 單：改料號不會重新帶出規格（避免清空量測值）。要用新規格，請先按「↺ 清空」開一張新單';
+      el.style.color = '#BA7517';
+    }
+    return;
+  }
   PART_SPECS = isAdmin() ? loadAllSpecDB() : loadSpecDB();
   const sp = PART_SPECS[pn];
   if (!sp) return;
@@ -9792,7 +10033,8 @@ function cpkLoadSpec() {
   setV('cpk-rev', sp.rev);
   setV('cpk-supplier', sp.supplier||'');
   // 只帶 CPK 類型的量測點，保留原始 FAI# 編號
-  const allSpecs = sp.specs || [];
+  //  V172-1：帶出來就照球標號排好（同 loadPartSpec，理由見那支的註解）
+  const allSpecs = sortSpecsByBalloon(sp.specs);
   //  V169-8：換料號 ⇒ 量測點整組換掉，舊圖立刻作廢。
   //  這裡刻意「只作廢不重算」——料號是逐字輸入的，每打一個字重畫 20 幾張圖太重。
   //  ⚠ 措辭要精確：這條路徑（cpkLoadSpec）只帶「規格」（球標／名目值／上下限），

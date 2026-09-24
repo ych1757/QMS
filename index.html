@@ -454,7 +454,7 @@ input.spec-inp[type=number] { -moz-appearance:textfield; appearance:textfield; }
 // 用途＝跟使用者溝通「你看到的畫面是不是最新版」，不是品質文件的表單版次
 //（表單版次 Rev 另有其用途、目前維持 V1.0 不動，日後各廠區若有自己的表單版次需求再談）
 // 顯示位置：① 瀏覽器分頁標題 ② 登入畫面副標下方 ③ 主畫面右上（列印時自動隱藏）
-const APP_VER = 'V172-1';   // ★★ 每出一版必須同步改這一行（比照 MHR 的做法），否則畫面版號會對不上檔案版號
+const APP_VER = 'V174-1';   // ★★ 每出一版必須同步改這一行（比照 MHR 的做法），否則畫面版號會對不上檔案版號
 
 const SUPABASE_URL = 'https://vwusebvvsqyjydddupit.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_Ju-c9cuXYJil7PEJ1-NspA_ASzfIzi5';
@@ -7598,6 +7598,37 @@ function importRecords(input) {
   input.value = ''; // 清除，允許重複匯入同一檔
 }
 
+// ══ V173：匯出「量測明細」一列 —— Excel 與 CSV 共用這一支（260922 發現、260923 修）══
+//  ★修掉的三件（線上從 V1 起就有，9/3 的匯出檔可重現）：
+//   ① **欄位整排錯一格**：表頭有「特性」欄，資料列卻從來沒填 characteristic
+//      ⇒ 從「特性」起整排往左錯一格（9/3 匯出檔實例：特性欄＝CPK、Type 欄＝42、名目值欄＝0.25、
+//        LSL 欄＝42.22、S6 欄＝Mean 42.2125……最後「判定」欄變成 %Tol 的 92.5）。Excel 的欄寬陣列也少一格，一併補。
+//   ② **Cpk 用舊的 min 算法**：V170-18 已定案「僅有上限規格的幾何公差只算 Cpu」，但匯出這兩支沒跟著改
+//      ⇒ 位置度／平整度／輪廓度那種列，匯出的 Cpk 會是「製程越好、數字越差」的錯值（正是 −0.276 事故那一類）。
+//      改成直接叫 `calcStats()`／`getJudge()`＝畫面用的同一支 ⇒ 判斷只留一個出處，以後再改也不會漏掉匯出。
+//   ③ **FAI# 寫的是「第幾列」不是球標號**：料號用 8_1／10-1／13-2 這種自訂球標時，匯出完全對不回去。
+//  ★連帶：判定欄原本只填 CPK 型的列、FAI 型留空白；改用 getJudge 之後兩種都填（跟畫面一致）。
+//  numeric=true ⇒ Excel（數字進格子才能排序、加總）；false ⇒ CSV（維持原本的字串格式）。
+function buildExportDetailRow(rec, row, idx, maxS, numeric) {
+  const s  = row.s || [];
+  const st = calcStats(s, row.usl, row.lsl, row.nom);                 // 幾何公差自動改算 Cpu（isUpperOnlyGDT）
+  const jg = getJudge(row.type, st, row.usl ?? null, row.lsl ?? null, s);
+  const num = (v, d) => (v == null || isNaN(v)) ? '' : (numeric ? +(+v).toFixed(d) : (+v).toFixed(d));
+  return [
+    rec.formNo||'', rec.site||'', rec.partno||'', rec.partname||'', rec.date||'', rec.inspector||'',
+    (row.fai !== undefined && String(row.fai).trim() !== '') ? row.fai : (idx+1),
+    row.moi||'', row.characteristic||'', row.type||'',
+    row.nom??'', row.pt??'', row.mt??'', row.usl??'', row.lsl??'',
+    ...Array.from({length: maxS}, (_, i) => s[i] ?? ''),
+    st ? num(st.mean, 4) : '',
+    st ? num(st.sigma, 4) : '',
+    st ? num(st.cpk, 3) : '',
+    st ? num(st.pctTol, 1) : '',
+    (jg && jg.label !== '—') ? jg.label : '',
+    row.comment||''
+  ];
+}
+
 function exportRecordsXLSX() {
   if (typeof XLSX === 'undefined') {
     // XLSX 未載入，提供 CSV 備案
@@ -7652,40 +7683,19 @@ function exportRecordsXLSX() {
       '表單編號', '廠區', '料號', '品名', '檢驗日期', '檢驗員',
       'FAI#', '量測儀器', '特性', 'Type', '名目值', '+Tol', '-Tol', 'USL', 'LSL',
       ...sHdrs,
-      'Mean', 'Sigma', 'Cpk', '%Tol', '判定', '備註'
+      'Mean', 'Sigma', 'Cpk / Cpu', '%Tol', '判定', '備註'   // V173：幾何公差那幾列這一欄是 Cpu，欄名寫清楚
     ];
     const detailRows = [];
     allRecs.forEach(r => {
       (r.data?.rows || []).forEach((row, idx) => {
-        const s = row.s || [];
-        const v = s.filter(x => x !== null && x !== '' && !isNaN(x)).map(Number);
-        let mean='', sigma='', cpk='', pctTol='', judge='';
-        if (v.length >= 2 && row.usl !== null && row.lsl !== null) {
-          const m = v.reduce((a,b)=>a+b,0)/v.length;
-          const sg = Math.sqrt(v.reduce((a,x)=>a+(x-m)**2,0)/(v.length-1));
-          mean = +m.toFixed(4);
-          sigma = sg > 0 ? +sg.toFixed(4) : 0;
-          if (sg > 0) {
-            const ck = Math.min((row.usl-m)/(3*sg),(m-row.lsl)/(3*sg));
-            cpk = +ck.toFixed(3);
-            const tol = row.usl - row.lsl;
-            pctTol = tol > 0 ? +(((m-row.lsl)/tol*100).toFixed(1)) : '';
-            if (row.type === 'CPK') judge = ck >= 1.33 ? 'Pass' : ck >= 1.0 ? 'Alert' : 'Reject';
-          }
-        }
-        const sVals = Array.from({length: maxSamples}, (_, i) => s[i] ?? '');
-        detailRows.push([
-          r.formNo||'', r.site||'', r.partno||'', r.partname||'', r.date||'', r.inspector||'',
-          idx+1, row.moi||'', row.type||'',
-          row.nom??'', row.pt??'', row.mt??'', row.usl??'', row.lsl??'',
-          ...sVals, mean, sigma, cpk, pctTol, judge, row.comment||''
-        ]);
+        detailRows.push(buildExportDetailRow(r, row, idx, maxSamples, true));
       });
     });
     const wsDetail = XLSX.utils.aoa_to_sheet([detailHdr, ...detailRows]);
     wsDetail['!cols'] = [
+      // V173：這裡原本只有 14 個寬度、少「特性」那一欄（與資料列錯一格是同一個成因），補成 15 個
       {wch:22},{wch:6},{wch:16},{wch:28},{wch:12},{wch:10},
-      {wch:5},{wch:18},{wch:5},{wch:8},{wch:7},{wch:7},{wch:8},{wch:8},
+      {wch:6},{wch:18},{wch:7},{wch:6},{wch:8},{wch:7},{wch:7},{wch:8},{wch:8},
       ...Array(maxSamples).fill({wch:7}),
       {wch:9},{wch:9},{wch:7},{wch:7},{wch:7},{wch:20}
     ];
@@ -7762,31 +7772,10 @@ function exportRecordsCSV() {
   let maxS = 3;
   allRecs.forEach(r => { (r.data?.rows||[]).forEach(row => { if ((row.s||[]).length > maxS) maxS = (row.s||[]).length; }); });
   csvRows.push(['=== 量測明細 Measurement Detail ===']);
-  csvRows.push(['表單編號','廠區','料號','品名','檢驗日期','檢驗員','FAI#','量測儀器','特性','Type','名目值','+Tol','-Tol','USL','LSL',...Array.from({length:maxS},(_,i)=>`S${i+1}`),'Mean','Sigma','Cpk','%Tol','判定','備註']);
+  csvRows.push(['表單編號','廠區','料號','品名','檢驗日期','檢驗員','FAI#','量測儀器','特性','Type','名目值','+Tol','-Tol','USL','LSL',...Array.from({length:maxS},(_,i)=>`S${i+1}`),'Mean','Sigma','Cpk / Cpu','%Tol','判定','備註']);
   allRecs.forEach(r => {
     (r.data?.rows||[]).forEach((row, idx) => {
-      const s = row.s||[];
-      const v = s.filter(x=>x!==null&&x!==''&&!isNaN(x)).map(Number);
-      let mean='',sigma='',cpk='',pctTol='',judge='';
-      if (v.length>=2 && row.usl!=null && row.lsl!=null) {
-        const m = v.reduce((a,b)=>a+b,0)/v.length;
-        const sg = Math.sqrt(v.reduce((a,x)=>a+(x-m)**2,0)/(v.length-1));
-        mean = m.toFixed(4); sigma = sg.toFixed(4);
-        if (sg>0) {
-          const ck = Math.min((row.usl-m)/(3*sg),(m-row.lsl)/(3*sg));
-          cpk = ck.toFixed(3);
-          const tol = row.usl-row.lsl;
-          if (tol>0) pctTol = ((m-row.lsl)/tol*100).toFixed(1);
-          if (row.type==='CPK') judge = ck>=1.33?'Pass':ck>=1.0?'Alert':'Reject';
-        }
-      }
-      csvRows.push([
-        r.formNo||'', r.site||'', r.partno||'', r.partname||'', r.date||'', r.inspector||'',
-        idx+1, row.moi||'', row.type||'',
-        row.nom??'', row.pt??'', row.mt??'', row.usl??'', row.lsl??'',
-        ...Array.from({length:maxS},(_,i)=>s[i]??''),
-        mean, sigma, cpk, pctTol, judge, row.comment||''
-      ]);
+      csvRows.push(buildExportDetailRow(r, row, idx, maxS, false));
     });
   });
 
@@ -8449,7 +8438,10 @@ function addUserAccount() {
 }
 
 async function resetUserPassword(site, key, name) {
-  if (!confirm(`確定要重設「${name}」（${site}）的密碼為預設值（${DEFAULT_PWD}）？\n\n重設後，該使用者下次登入需重新設定密碼。`)) return;
+  // V174-1：代驗上線後，這顆只改得到「QMS 這一箱」的密碼（使用者 260924 問到才發現要講清楚）。
+  //  對方若是有 SyncHub 帳號的內部同仁，他平常用的是 SyncHub 那組密碼，在這裡重設不會動到它
+  //  ⇒ 管理員會以為「幫他重設好了」，其實只是多給了一組 QMS 舊密碼。訊息要把範圍講明白。
+  if (!confirm(`確定要重設「${name}」（${site}）的密碼為預設值（${DEFAULT_PWD}）？\n\n重設後，該使用者下次登入需重新設定密碼。\n\n⚠ 這只會重設 QMS 這一箱的密碼。若對方是內部同仁、平常用 SyncHub 那組密碼登入，請改到 OMS「使用者管理」重設，那邊才會四個系統一起生效。`)) return;
   // 🔐 _2CODE：透過 Edge Function 重設 Auth 密碼（並標記下次須改）
   const r = await sbCallAdminFn('resetPassword', { email: key, password: DEFAULT_PWD });
   const toast = document.createElement('div');
@@ -9025,6 +9017,17 @@ async function sbAuthLogin(email, password) {
     }
     const token = data.access_token, refresh = data.refresh_token, uid = data.user && data.user.id;
     const meta  = (data.user && data.user.user_metadata) || {};
+    // V174：拿到通行證之後的檢查（profile／停用／權限／OMS 授權）抽成一支，
+    //  代驗登入（SyncHub 密碼）拿到的通行證走的是同一套檢查 ⇒ 兩條路不會有一邊漏檢
+    return await sbAuthAfterToken(token, refresh, uid, meta.must_change === true);
+  } catch (e) {
+    return { ok: false, msg: '網路錯誤，請稍後再試' };
+  }
+}
+
+// V174：以「已取得的通行證」完成登入檢查（本箱密碼登入與 SyncHub 代驗登入共用）
+async function sbAuthAfterToken(token, refresh, uid, mustChange) {
+  try {
     const pRes = await fetch(
       SUPABASE_URL + '/rest/v1/profiles?id=eq.' + encodeURIComponent(uid) + '&select=*&limit=1',
       { headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + token } }
@@ -9060,9 +9063,35 @@ async function sbAuthLogin(email, password) {
         return { ok: false, msg: '此帳號未授權 QMS —— 請洽管理員於 OMS「系統資料授權」勾選 QMS' };
       }
     }
-    return { ok: true, token, refresh, uid, profile, mustChange: meta.must_change === true };
+    return { ok: true, token, refresh, uid, profile, mustChange: mustChange === true };
   } catch (e) {
     return { ok: false, msg: '網路錯誤，請稍後再試' };
+  }
+}
+
+// ══ V174：單一登入階段②「代驗」——內部人員用 SyncHub（OMS/GHG/PMP 那一組）密碼登入 QMS ══
+//  路線文件：00_平台整合\SyncHub_單一登入三階段路線_260923.md（OMS 對話 260923 通知，使用者 GO）
+//  做法：先問後端 EF `qms-sso-login`（它用 SyncHub 那一箱驗密碼、驗過才用本箱 service_role 簽通行證）。
+//    ・回 mode=sso   → 直接拿它簽好的通行證，走 sbAuthAfterToken 完成同一套檢查
+//    ・回 mode=local → 不歸代驗管（管理員／供應商／TEST／外部帳號），或代驗沒過 ⇒ **照原本的本箱密碼登入**
+//  ⚠ 設計上刻意「驗不過就退回本箱」：Supabase 為防帳號探測，「查無此帳號」與「密碼錯」回同一種錯、分不出來；
+//    126 個授權者裡只有十來個有 SyncHub 帳號 ⇒ 一律當密碼錯會把其餘的人鎖在門外。最差只是舊密碼還能用。
+//  ⚠ EF 掛掉／網路不通也一律退回本箱（登入不能因為代驗壞掉就全員進不來）。
+//  ⚠ 工號與 Email 的配對由 EF 自己向 OMS 查，前端傳什麼都不影響它簽給誰。
+async function sbSsoTryLogin(identifier, password) {
+  try {
+    const res = await fetch(SUPABASE_URL + '/functions/v1/qms-sso-login', {
+      method: 'POST',
+      headers: { 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ identifier, password, system: 'QMS' })   // 同一支 EF 與 MHR 共用，要講清楚問的是哪個系統
+    });
+    if (!res.ok) return { mode: 'local' };                 // 含 404＝EF 還沒部署 ⇒ 完全照舊
+    const d = await res.json().catch(() => ({}));
+    if (d && d.mode === 'sso' && d.access_token) return d;
+    return { mode: 'local' };
+  } catch (e) {
+    console.warn('SyncHub 代驗無法連線，改用 QMS 密碼:', e);
+    return { mode: 'local' };
   }
 }
 
@@ -9449,8 +9478,17 @@ async function doLogin() {
   }
   if (loginBtn) loginBtn.textContent = '⏳ 驗證中...';
 
-  // 🔐 改用 Supabase Auth 驗證
-  const r = await sbAuthLogin(email, password);
+  // 🔐 V174：先試 SyncHub 代驗（內部人員一組密碼走遍四系統），不歸它管或沒過就照原本的 QMS 密碼驗
+  //  ⚠ 管理員虛擬帳號不進代驗（兩箱 admin 密碼各自獨立）；EF 端也會再擋一次。
+  let r = null, viaSso = false;
+  if (email !== ADMIN_EMAIL) {
+    const sso = await sbSsoTryLogin(email, password);
+    if (sso.mode === 'sso') {
+      r = await sbAuthAfterToken(sso.access_token, sso.refresh_token, sso.user_id, sso.must_change === true);
+      viaSso = r.ok;                                   // 檢查沒過就不算代驗成功（訊息照原本的走）
+    }
+  }
+  if (!r) r = await sbAuthLogin(email, password);
   if (loginBtn) loginBtn.textContent = '登入 Login';
   if (!r.ok) { showLoginErr(r.msg); return; }
 
@@ -9484,6 +9522,8 @@ async function doLogin() {
 
   enterSystem(realSite, p.name || email, email,
     { token: r.token, refresh: r.refresh, uid: r.uid, role, mustChange: r.mustChange, isAdmin: false,
+      // V174：記下「這次是用 SyncHub 那一組密碼進來的」⇒ 改密碼的動線要指向 SyncHub，不是改 QMS 這一箱
+      sso: viaSso,
       // V143：跨廠查詢範圍（登入快照；sbPostLoginRefresh 會再向 EF 重算一次＝動態跟隨）
       viewBus: p.view_bus || null, viewSups: p.view_sups || null,
       viewSites: Array.isArray(p.view_sites) ? p.view_sites : [] });
@@ -9659,6 +9699,19 @@ let _forceChangePwd = false;
 function pwdValid(p){ return typeof p === 'string' && p.length >= 8 && /[A-Za-z]/.test(p) && /[0-9]/.test(p); }
 
 function showChangePwdModal(force) {
+  // ══ V174：用 SyncHub 那一組密碼進來的人，密碼不在 QMS 這一箱 ══
+  //  在這裡改只會改到 QMS 箱的舊密碼（代驗之後根本用不到），改完還以為改好了＝典型的「白忙一場」。
+  //  ⇒ 直接說清楚該去哪裡改。強制改密（旗標以 SyncHub 端為準）也一樣，只提示、不擋著不給用。
+  const _ss = getSession();
+  if (_ss && _ss.sso) {
+    if (force) {
+      try { showToast('您的密碼由 SyncHub 統一管理，請到 SyncHub 大廳修改（或洽管理員重設）', 'error', 6000); } catch(e) {}
+    } else {
+      alert('您的密碼由 SyncHub 統一管理（與 OMS／GHG 同一組），不是在 QMS 這裡改。\n\n'
+          + '請到 SyncHub 大廳登入後修改，或洽管理員於 OMS「使用者管理」重設。');
+    }
+    return;
+  }
   _forceChangePwd = !!force;
   const modal = document.getElementById('chg-pwd-modal');
   if (!modal) return;

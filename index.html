@@ -454,7 +454,7 @@ input.spec-inp[type=number] { -moz-appearance:textfield; appearance:textfield; }
 // 用途＝跟使用者溝通「你看到的畫面是不是最新版」，不是品質文件的表單版次
 //（表單版次 Rev 另有其用途、目前維持 V1.0 不動，日後各廠區若有自己的表單版次需求再談）
 // 顯示位置：① 瀏覽器分頁標題 ② 登入畫面副標下方 ③ 主畫面右上（列印時自動隱藏）
-const APP_VER = 'V174-1';   // ★★ 每出一版必須同步改這一行（比照 MHR 的做法），否則畫面版號會對不上檔案版號
+const APP_VER = 'V175';   // ★★ 每出一版必須同步改這一行（比照 MHR 的做法），否則畫面版號會對不上檔案版號
 
 const SUPABASE_URL = 'https://vwusebvvsqyjydddupit.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_Ju-c9cuXYJil7PEJ1-NspA_ASzfIzi5';
@@ -9399,21 +9399,44 @@ async function sbCheckOmsAuth(email) {
   }
 }
 
-async function resolveEmpIdToEmail(empId) {
+// ══ V175：用工號查 OMS 的唯一出處（門禁鐵則第 ⑥ 條三件一次到位）══
+//  ⚠ 三個坑，三件都要做，缺一個就會出事（MHR 260924 踩到大小寫那個、回頭提醒 QMS 查自己）：
+//    ① `eq.` 大小寫敏感 —— OMS 的工號存大寫（SS085／SV1085），現場打小寫會「查無工號」⇒ 用 `ilike`。
+//    ② `ilike` 的 `_` 是萬用字元 —— **實測**：`emp_id=ilike.SS08_` 真的撈到 `SS085`。
+//    ③ `limit=1` 會拿到別人那一筆 —— 所以要放寬 limit，**再由前端精確比對**。
+//  舊版（V174-1 以前）只做到 ①：登入頁打 `SS08_`，即時提示會直接顯示**別人的姓名與 Email**，
+//    按登入又拿別人的 Email 去驗密碼 ⇒ 只看到「帳號或密碼錯誤」，現場無從判斷。
+//  ⇒ 本支是「工號→那個人」的單一出處：登入翻譯與即時提示共用，以後只改這裡。
+//  回傳：{ ok:true, row } ／ { ok:false, reason:'none'|'net' }
+async function omsFindByEmpId(empId, selectCols) {
+  const want = String(empId || '').trim().toLowerCase();
+  if (!want) return { ok:false, reason:'none' };
   try {
     const r = await fetch(OMS_IDENTITY_URL + '/rest/v1/identity_access?emp_id=ilike.' +
-      encodeURIComponent(empId) + '&select=emp_id,email,active&limit=1',
+      encodeURIComponent(String(empId).trim()) +
+      '&select=' + (selectCols || 'emp_id,email,active') + '&limit=20',
       { headers: { apikey: OMS_IDENTITY_KEY, Authorization: 'Bearer ' + OMS_IDENTITY_KEY } });
-    if (!r.ok) return { ok:false, msg:'無法查詢工號，請改用 Email 登入' };
+    if (!r.ok) return { ok:false, reason:'net' };
     const d = await r.json();
-    const hit = Array.isArray(d) && d[0];
-    if (!hit)        return { ok:false, msg:'查無此工號，請確認後重試，或改用 Email 登入' };
-    if (!hit.email)  return { ok:false, msg:'此工號未設定 Email，請洽管理員' };
-    return { ok:true, email: String(hit.email).trim().toLowerCase() };
+    const rows = Array.isArray(d) ? d : [];
+    // ★精確比對：ilike 可能因萬用字元多撈，只認工號完全相同的那一筆（比對時忽略大小寫）
+    const hit = rows.find(x => String(x && x.emp_id || '').trim().toLowerCase() === want);
+    return hit ? { ok:true, row:hit } : { ok:false, reason:'none' };
   } catch (e) {
     console.warn('工號查詢失敗:', e);
-    return { ok:false, msg:'無法查詢工號（網路問題），請改用 Email 登入' };
+    return { ok:false, reason:'net' };
   }
+}
+
+async function resolveEmpIdToEmail(empId) {
+  const f = await omsFindByEmpId(empId, 'emp_id,email,active');
+  if (!f.ok) {
+    return f.reason === 'net'
+      ? { ok:false, msg:'無法查詢工號（網路問題），請改用 Email 登入' }
+      : { ok:false, msg:'查無此工號，請確認後重試，或改用 Email 登入' };
+  }
+  if (!f.row.email) return { ok:false, msg:'此工號未設定 Email，請洽管理員' };
+  return { ok:true, email: String(f.row.email).trim().toLowerCase() };
 }
 
 // V151：即時工號回饋（比照 MHR）——輸入不含 @ 時查 OMS，顯示「✓ 姓名 · Email」；含 @ 或空白則不顯示
@@ -9437,11 +9460,10 @@ function onEmpIdInput() {
     const cur = (document.getElementById('login-email-input')?.value || '').trim();
     if (cur !== v) return;                       // 使用者又改了 → 放掉這次結果
     try {
-      const r = await fetch(OMS_IDENTITY_URL + '/rest/v1/identity_access?emp_id=ilike.' +
-        encodeURIComponent(v) + '&select=emp_id,name,eng_name,email&limit=1',
-        { headers: { apikey: OMS_IDENTITY_KEY, Authorization: 'Bearer ' + OMS_IDENTITY_KEY } });
-      const d = r.ok ? await r.json() : [];
-      const hit = Array.isArray(d) && d[0];
+      // V175：改走共用的 omsFindByEmpId（ilike＋放寬 limit＋前端精確比對）
+      //  舊版只取第一筆 ⇒ 打 `SS08_` 會在登入頁直接顯示別人的姓名與 Email
+      const f = await omsFindByEmpId(v, 'emp_id,name,eng_name,email');
+      const hit = f.ok ? f.row : null;
       const now = (document.getElementById('login-email-input')?.value || '').trim();
       if (now !== v) return;                     // 回來時已過期 → 不覆蓋
       if (hit && hit.email) {

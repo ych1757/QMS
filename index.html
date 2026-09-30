@@ -454,7 +454,7 @@ input.spec-inp[type=number] { -moz-appearance:textfield; appearance:textfield; }
 // 用途＝跟使用者溝通「你看到的畫面是不是最新版」，不是品質文件的表單版次
 //（表單版次 Rev 另有其用途、目前維持 V1.0 不動，日後各廠區若有自己的表單版次需求再談）
 // 顯示位置：① 瀏覽器分頁標題 ② 登入畫面副標下方 ③ 主畫面右上（列印時自動隱藏）
-const APP_VER = 'V175';   // ★★ 每出一版必須同步改這一行（比照 MHR 的做法），否則畫面版號會對不上檔案版號
+const APP_VER = 'V177-1';   // ★★ 每出一版必須同步改這一行（比照 MHR 的做法），否則畫面版號會對不上檔案版號
 
 const SUPABASE_URL = 'https://vwusebvvsqyjydddupit.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_Ju-c9cuXYJil7PEJ1-NspA_ASzfIzi5';
@@ -656,7 +656,9 @@ async function sbSavePartSpec(partno, spec, scope) {
       partno,
       partname:   spec.partname || null,
       material:   spec.material || null,
-      rev:        spec.rev      || null,
+      // V177-1：版本一律送字串（空的送空字串，不送 null）——
+      //  「料號＋歸屬＋版本」唯一鍵（178 第一段 SQL）遇到 null 會當成「每筆都不一樣」，對不上就變成新增一列。
+      rev:        (spec.rev == null ? '' : String(spec.rev).trim()),
       supplier:   spec.supplier || null,
       specs:      spec.specs    || [],
       scope:      resolvedScope,
@@ -665,7 +667,12 @@ async function sbSavePartSpec(partno, spec, scope) {
     // V145：合併鍵改 (partno,scope)——支援「同料號、各歸屬各自規格」並存（大永前段製程檢驗點≠信鋐）。
     // 此寫法新舊 DB 結構皆相容：遷移前打在既有 UNIQUE(partno,scope)、遷移後打在新複合主鍵；
     // 撞到「別人歸屬的同號列」會回錯誤（RLS 擋）→ 由下方失敗提示顯性化，不再假裝成功。
-    const res = await fetch(SUPABASE_URL + '/rest/v1/part_specs?on_conflict=partno,scope', {
+    // ══ V177-1：合併鍵改 (partno,scope,rev)——料號改版（V178）的過渡相容 ══
+    //  178 第一段 SQL 加了「料號＋歸屬＋版本」唯一鍵、舊主鍵「料號＋歸屬」還在 ⇒ 兩種結構下這個寫法都對：
+    //    第二段 SQL 拿掉舊主鍵之後，舊寫法 on_conflict=partno,scope 會直接報錯（找不到對應的唯一鍵），這個不會。
+    //  ⚠ 所以 **178 第一段 SQL 一定要先跑**，這版才能上線（沒有這個唯一鍵，這裡會報錯、存不了檔）。
+    //  編輯時版本欄鎖住（見 editPn），同一筆存回去的一定是同一個版本 ⇒ 不會因為改版本欄而多出一列。
+    const res = await fetch(SUPABASE_URL + '/rest/v1/part_specs?on_conflict=partno,scope,rev', {
       method: 'POST',
       headers: {
         'apikey': SUPABASE_KEY,
@@ -694,21 +701,45 @@ async function sbSavePartSpec(partno, spec, scope) {
 // ══ V140：分頁撈取（Supabase/PostgREST 單次最多只回 1000 筆）══
 // 原本：fai_records limit=500、cpk_records limit=200、part_specs 無 limit(=吃 1000 上限)
 // → 超過就「悄悄」看不到舊資料、不會報錯。改成每次 1000 筆、撈到沒有為止。
-async function sbFetchAllRows(baseUrl, pageSize) {
-  pageSize = pageSize || 1000;
-  const headers = { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer() };
+// ══ V176：分頁的第二層坑——排序不唯一，換頁邊界不穩 ══
+//  只分頁不夠：沒帶 order、或 order 的欄位會同值（例：saved_at 兩筆同一秒），
+//  資料庫每一頁各自決定同值那幾筆誰先誰後 ⇒ 換頁時一筆漏抓、另一筆重複抓，
+//  **總筆數看起來還是對的**（GHG 260916 實測：2043 筆回 2043 筆、去重後只剩 1570）。
+//  ⇒ 三件一起做：① 呼叫端的 order 必須以唯一鍵收尾（本支查不到，靠呼叫端，見各呼叫點註解）
+//                ② 第一頁順便問雲端總筆數（Prefer: count=exact → Content-Range 的「/總數」）
+//                ③ 給了 key 就用它去重，去重後的筆數必須等於雲端總數，對不上就丟錯
+//     （不去重只比筆數＝抓不到「一漏一重」這種組合，正是上面那個實例）。
+//  opts：{ pageSize, headers（跨專案讀 OMS 用）, key: row => 唯一鍵字串 }
+//  相容：第二個參數傳數字＝舊寫法的 pageSize。
+async function sbFetchAllRows(baseUrl, opts) {
+  if (typeof opts === 'number') opts = { pageSize: opts };
+  opts = opts || {};
+  const pageSize = opts.pageSize || 1000;
+  const headers = opts.headers || { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer() };
   const sep = baseUrl.indexOf('?') >= 0 ? '&' : '?';
-  let out = [], offset = 0;
+  let out = [], offset = 0, total = null;
   for (let guard = 0; guard < 200; guard++) {   // 上限 200 頁＝20 萬筆，防無限迴圈
-    const res = await fetch(baseUrl + sep + 'limit=' + pageSize + '&offset=' + offset, { headers });
+    const h = (offset === 0) ? Object.assign({ 'Prefer': 'count=exact' }, headers) : headers;
+    const res = await fetch(baseUrl + sep + 'limit=' + pageSize + '&offset=' + offset, { headers: h });
     // V144：HTTP 失敗要丟出去讓呼叫端知道——原本 break 會把「拉失敗」當成「拉完了」，
     // 資料靜默缺頁、畫面零提示（Kenneth 事件：料號清單缺筆 →「無法執行刪除」的假象）
     if (!res.ok) throw new Error('同步失敗 HTTP ' + res.status);
+    if (offset === 0) {
+      const m = String(res.headers.get('content-range') || '').match(/\/(\d+)\s*$/);
+      if (m) total = parseInt(m[1], 10);        // 「*/0」「0-999/2043」都吃得到；沒給就不核對
+    }
     const chunk = await res.json();
     if (!Array.isArray(chunk) || chunk.length === 0) break;
     out = out.concat(chunk);
     if (chunk.length < pageSize) break;         // 最後一頁，收工
     offset += pageSize;
+  }
+  if (typeof opts.key === 'function') {
+    const seen = new Set();
+    out = out.filter(r => { const k = opts.key(r); if (seen.has(k)) return false; seen.add(k); return true; });
+  }
+  if (total !== null && out.length !== total) {
+    throw new Error('筆數對不上：雲端 ' + total + ' 筆、實際抓到 ' + out.length + ' 筆（請重新同步）');
   }
   return out;
 }
@@ -717,7 +748,9 @@ async function sbPullAllRecords() {
   if (!_sbReady) return 0;
   try {
     // V140：改分頁撈全部（原 limit=500 → 超過 500 筆就看不到更舊的記錄）
-    const data = await sbFetchAllRows(SUPABASE_URL + '/rest/v1/fai_records?select=*&order=saved_at.desc');
+    // V176：order 補 id 收尾（saved_at 會同值）＋用 id 去重核對總數；下面「保留最新」仍靠 saved_at.desc 在前
+    const data = await sbFetchAllRows(SUPABASE_URL + '/rest/v1/fai_records?select=*&order=saved_at.desc,id.desc',
+      { key: r => String(r.id) });
     let count = 0;
     const _seen = new Set(); // v118: 去重，保留最新（資料已按 saved_at desc 排序）
     (data || []).forEach(row => {
@@ -762,7 +795,9 @@ async function sbPullCpkRecords() {
   if (!_sbReady) return 0;
   try {
     // V140：改分頁撈全部（原 limit=200 → 超過 200 筆就看不到更舊的 CPK）
-    const data = await sbFetchAllRows(SUPABASE_URL + '/rest/v1/cpk_records?select=*&order=saved_at.desc');
+    // V176：同 FAI——order 補 id 收尾＋用 id 去重核對總數
+    const data = await sbFetchAllRows(SUPABASE_URL + '/rest/v1/cpk_records?select=*&order=saved_at.desc,id.desc',
+      { key: r => String(r.id) });
     let count = 0;
     const _seen = new Set(); // v121: 去重，保留最新
     (data || []).forEach(row => {
@@ -789,12 +824,20 @@ async function sbPullPartSpecs() {
   if (!_sbReady) return;
   try {
     // V140：改分頁撈全部（原本無 limit → 超過 1000 筆會被靜默截斷、料號會少）
-    const data = await sbFetchAllRows(SUPABASE_URL + '/rest/v1/part_specs?select=*');
-    if (!data || !data.length) return;
+    // V176：原本完全沒 order ⇒ 換頁邊界不穩。主鍵＝(partno, scope)（V145 遷移），就用它排序與去重
+    // V177-1：料號改版過渡——第二段 SQL 之後同一料號同一廠區可能有好幾個版本 ⇒
+    //  排序與去重都要帶版本，否則去重會把不同版本當成重複刪掉、再跟總數對不上而整段報錯（V176 的總數核對）。
+    const data = await sbFetchAllRows(SUPABASE_URL + '/rest/v1/part_specs?select=*&order=partno.asc,scope.asc,rev.asc',
+      { key: r => String(r.partno) + '\u0001' + String(r.scope) + '\u0001' + String(r.rev == null ? '' : r.rev) });
 
     // 依 scope 分組
+    //  V177：雲端 0 筆也要往下走（原本直接 return）——下面清示範複本要靠「雲端有哪些」判斷，
+    //  0 筆正是「全部都不在雲端」；而且 sbFetchAllRows 已核對過總數，走到這裡＝真的拉完了。
     const byScope = {};
-    data.forEach(row => {
+    (data || []).forEach(row => {
+      // V177-1：停用的版本（V178 改版後的舊版）不進這版的料號庫——這版一個料號在一個廠區只放得下一份，
+      //  放使用中的；同一廠區有好幾個使用中版本時，排序在後的（版本號較大）那份為準。
+      if (row.active === false) return;
       const scope = row.scope || 'shared';
       if (!byScope[scope]) byScope[scope] = {};
       byScope[scope][row.partno] = {
@@ -812,13 +855,42 @@ async function sbPullPartSpecs() {
       } catch(e) {}
     });
 
-    const total = data.length;
+    purgeInjectedDemoSpecs(byScope);   // V177
+
+    const total = (data || []).length;
     console.log('☁ 料號規格已同步:', total, '筆，涵蓋', Object.keys(byScope).length, '個 scope');
   } catch(e) {
     // V144：料號同步失敗不再靜默——Kenneth 事件根因：失敗無聲 → 清單缺筆 →「料號無法刪除」的假象
     console.warn('☁ 料號規格同步失敗:', e);
     try { showSyncBanner('⚠ 料號規格同步失敗，清單可能不完整——請檢查網路後重新整理頁面', 8000); } catch(e2) {}
   }
+}
+
+// ══ V177：清掉舊版自動塞進本機的示範料號複本 ══
+//  舊版（≤V176）的 loadSpecDB()／initDefaultData() 會把 DEFAULT_SPECS 兩筆寫進各台電腦的料號庫（見 loadSpecDB 說明）。
+//  程式不再塞之後，已經塞進去的還留在各人電腦裡 ⇒ 同步完成時順手清掉。三個條件都成立才刪，一筆真資料都不會碰：
+//    ① 料號是示範那兩筆 ② 內容跟示範版一字不差（有人改過就不算）③ 雲端這個歸屬沒有這個料號（有的話上面已用雲端版蓋過）
+//  只在 sbFetchAllRows 成功（總數核對過）之後呼叫——雲端讀失敗時不清，寧可多留不可錯刪。
+function purgeInjectedDemoSpecs(byScope) {
+  let n = 0;
+  const demo = {};
+  Object.keys(DEFAULT_SPECS).forEach(pn => { demo[pn] = JSON.stringify(DEFAULT_SPECS[pn]); });
+  Object.keys(localStorage)
+    .filter(k => k === SPEC_DB_KEY || k.startsWith(SPEC_DB_KEY + '_'))
+    .forEach(k => {
+      const scope = k === SPEC_DB_KEY ? 'shared' : k.slice(SPEC_DB_KEY.length + 1);
+      let db;
+      try { db = JSON.parse(localStorage.getItem(k) || '{}') || {}; } catch(e) { return; }
+      let changed = false;
+      Object.keys(demo).forEach(pn => {
+        if (db[pn] && JSON.stringify(db[pn]) === demo[pn] && !(byScope[scope] && byScope[scope][pn])) {
+          delete db[pn]; changed = true; n++;
+        }
+      });
+      if (changed) { try { localStorage.setItem(k, JSON.stringify(db)); } catch(e) {} }
+    });
+  if (n) console.log('🧹 已清掉舊版自動塞入的示範料號複本', n, '筆');
+  return n;
 }
 
 async function sbDeleteFaiRecord(localKey) {
@@ -1043,10 +1115,10 @@ async function sbDeleteSite(code) {
 async function sbPullSiteConfig() {
   if (!_sbReady) return;
   try {
-    const res = await fetch(SUPABASE_URL + '/rest/v1/qms_site_config?select=*&order=sort_order.asc',
-      { headers: { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer() } });
-    if (!res.ok) return;
-    const data = await res.json();
+    // V176：改走分頁（原本單次讀＝吃 1000 上限、靜默截斷；260930 現有 16 筆）；
+    //   sort_order 會同值 ⇒ 以 code（on_conflict 鍵＝唯一）收尾。失敗照舊只記 Console、不動本機。
+    const data = await sbFetchAllRows(SUPABASE_URL + '/rest/v1/qms_site_config?select=*&order=sort_order.asc,code.asc',
+      { key: r => String(r.code) });
     if (!data || !data.length) return;
     const list = data.map(r => ({ code: r.code, name: r.name, lang: r.lang, active: r.active, sort: r.sort_order }));
     saveSiteConfig(list, false);   // V169：剛從雲端拉下來的，不要再推回去
@@ -1077,10 +1149,9 @@ async function sbSaveSupplier(supplier) {
 async function sbPullSupplierList() {
   if (!_sbReady) return;
   try {
-    const res = await fetch(SUPABASE_URL + '/rest/v1/qms_supplier_list?select=*',
-      { headers: { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer() } });
-    if (!res.ok) return;
-    const data = await res.json();
+    // V176：改走分頁＋唯一排序（原本單次讀、無 order；260930 現有 3 筆）
+    const data = await sbFetchAllRows(SUPABASE_URL + '/rest/v1/qms_supplier_list?select=*&order=code.asc',
+      { key: r => String(r.code) });
     if (!data || !data.length) return;
     const list = data.map(r => ({ code: r.code, name: r.name, active: r.active }));
     saveSupplierList(list, false);   // V169：剛從雲端拉下來的，不要再推回去
@@ -2098,8 +2169,9 @@ async function sbInit() {
   <div id="sys-no-permission" style="display:none;text-align:center;padding:60px 20px">
     <div style="font-size:48px;margin-bottom:16px">🔒</div>
     <div style="font-size:16px;font-weight:700;color:#1a4f8a;margin-bottom:8px">需要管理員權限</div>
-    <div style="font-size:13px;color:#888;margin-bottom:20px">此頁面僅限管理員操作<br>Admin access required</div>
-    <button onclick="showAdminUpgrade()" style="height:36px;padding:0 20px;background:#1a4f8a;color:#fff;border:none;border-radius:6px;font-size:13px;cursor:pointer;font-family:Arial,sans-serif">🔐 輸入管理員密碼</button>
+    <div style="font-size:13px;color:#888;margin-bottom:20px">此頁面僅限管理員操作，請登出後改用管理員帳號登入<br>Admin access required — please sign in with the admin account</div>
+    <!-- V177：拿掉「🔐 輸入管理員密碼」按鈕——它比對的是寫死在網頁裡的舊預設密碼（不是 admin@id 真正的登入密碼），
+         一般帳號輸入就能把畫面切成管理員模式。管理員一律用 admin@id 登入；密碼在本頁「🔑 修改管理員密碼」管理。 -->
   </div>
   <!-- 管理員內容 -->
   <div id="sys-admin-content" style="display:none">
@@ -2562,24 +2634,19 @@ function getSpecDBKey() {
   return SPEC_DB_KEY;
 }
 
+// ══ V177：不再自動塞示範料號（使用者 260930）══
+//  舊版每次開頁：自己那個料號庫裡沒有 DEFAULT_SPECS 那兩筆（05360000-003／-004）就補回去，
+//  第一次使用更是整包寫入 ⇒ ① 管理員把「共用」那兩列刪了，重新整理又冒出來（-003 還是 19 項示範版，
+//  不是 SH 現行的 22 項）② 每個廠區帳號（VN 等）的清單都被塞這兩筆，看起來像自己廠的料號。
+//  QMS 已經多廠區正式使用，料號＝哪個廠新增就歸哪個廠，不該有程式自己生出來的料號。
+//  已經被塞進各台電腦的舊複本，由 sbPullPartSpecs() 同步完成後清掉（見 purgeInjectedDemoSpecs）。
 function loadSpecDB() {
   const key = getSpecDBKey();
   try {
     const saved = localStorage.getItem(key);
-    if (saved) {
-      const db = JSON.parse(saved);
-      // 合併預設料號（若本機沒有則補入，已有的不覆蓋）
-      let updated = false;
-      Object.keys(DEFAULT_SPECS).forEach(pn => {
-        if (!db[pn]) { db[pn] = DEFAULT_SPECS[pn]; updated = true; }
-      });
-      if (updated) localStorage.setItem(key, JSON.stringify(db));
-      return db;
-    }
+    if (saved) return JSON.parse(saved) || {};
   } catch(e){}
-  // 首次使用：寫入預設料號
-  localStorage.setItem(key, JSON.stringify(DEFAULT_SPECS));
-  return JSON.parse(JSON.stringify(DEFAULT_SPECS));
+  return {};
 }
 
 // Admin 合併載入所有 Site 和供應商的料號（唯讀瀏覽用）
@@ -5530,6 +5597,8 @@ function clearEditor() {
   document.getElementById('e-partno').style.background = '';
   document.getElementById('e-partname').value  = '';
   document.getElementById('e-rev').value       = '';
+  { const _eRev = document.getElementById('e-rev');   // V177-1：新增料號時版本欄可以填
+    _eRev.readOnly = false; _eRev.style.background = ''; _eRev.title = ''; }
   document.getElementById('e-material').value  = '';
   document.getElementById('e-supplier').value  = '';
   specRows = [];
@@ -5554,6 +5623,11 @@ function editPn(pn, scope) {
   document.getElementById('e-partno').style.background = '#f0f5ff';
   document.getElementById('e-partname').value  = s.partname  || '';
   document.getElementById('e-rev').value       = s.rev       || '';
+  // V177-1：編輯既有料號時版本欄鎖住——存檔的合併鍵已改成「料號＋歸屬＋版本」，
+  //  這裡改了版本號再存，會變成「新增一個版本」而不是改這一份（改版功能在 V178 另外做）
+  const _eRev = document.getElementById('e-rev');
+  _eRev.readOnly = true; _eRev.style.background = '#f0f5ff';
+  _eRev.title = '編輯時不能改版本。要換新版本，請等 V178 的「改版」功能';
   document.getElementById('e-material').value  = s.material  || '';
   document.getElementById('e-supplier').value  = s.supplier  || '';
   specRows = (s.specs||[]).map(r=>({...r}));
@@ -5636,13 +5710,15 @@ function deletePn(pn, scope) {
   if (_adm && scope) {
     if (!confirm(`確定刪除料號 ${pn}（歸屬：${scopeLabel(scope)}）？此操作無法復原。`)) return;
     const storeKey = scope === '__shared__' ? SPEC_DB_KEY : SPEC_DB_KEY + '_' + scope;
+    let _rev = '';   // V177-1：只刪畫面上這一版（V178 之後同歸屬可能還有停用的舊版，不能一起刪掉）
     try {
       const db = JSON.parse(localStorage.getItem(storeKey) || '{}');
-      if (db[pn]) { delete db[pn]; localStorage.setItem(storeKey, JSON.stringify(db)); }
+      if (db[pn]) { _rev = db[pn].rev == null ? '' : String(db[pn].rev); delete db[pn]; localStorage.setItem(storeKey, JSON.stringify(db)); }
     } catch(e) {}
     if (_sbReady) {
       const cloudScope = scope === '__shared__' ? 'shared' : scope;
-      fetch(SUPABASE_URL + '/rest/v1/part_specs?partno=eq.' + encodeURIComponent(pn) + '&scope=eq.' + encodeURIComponent(cloudScope),
+      fetch(SUPABASE_URL + '/rest/v1/part_specs?partno=eq.' + encodeURIComponent(pn) + '&scope=eq.' + encodeURIComponent(cloudScope)
+          + '&rev=eq.' + encodeURIComponent(_rev),
         { method: 'DELETE', headers: { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer() } }
       ).catch(e => console.warn('料號雲端刪除失敗:', pn, e));
     }
@@ -5673,13 +5749,15 @@ function deletePn(pn, scope) {
     }
   } else {
     // 廠區/供應商：只刪自己 scope（本機 + 雲端對應 scope）
+    const _rev = (PART_SPECS[pn] && PART_SPECS[pn].rev != null) ? String(PART_SPECS[pn].rev) : '';   // V177-1：只刪這一版
     delete PART_SPECS[pn];
     saveSpecDB(PART_SPECS); // V144：不帶 syncPn＝純本機保存；雲端由下面的 DELETE 處理（不再整包重傳）
     if (_sbReady) {
       const s = getSession();
       const myScope = s?.isSupplier ? s.supplierCode : (getCurrentSite() || s?.site || '');
       if (myScope) {
-        fetch(SUPABASE_URL + '/rest/v1/part_specs?partno=eq.' + encodeURIComponent(pn) + '&scope=eq.' + encodeURIComponent(myScope),
+        fetch(SUPABASE_URL + '/rest/v1/part_specs?partno=eq.' + encodeURIComponent(pn) + '&scope=eq.' + encodeURIComponent(myScope)
+            + '&rev=eq.' + encodeURIComponent(_rev),
           { method: 'DELETE', headers: { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer() } }
         ).catch(e => console.warn('料號雲端刪除失敗:', pn, e));
       }
@@ -5848,6 +5926,16 @@ function savePartSpec() {
   if (!pn)       { setMgrStatus('⚠ 請填寫料號 Part Number', 'err'); return; }
   if (!partname) { setMgrStatus('⚠ 請填寫品名 Part Name', 'err'); return; }
   if (!specRows.length){ setMgrStatus('⚠ 請至少新增一行規格項目（按「＋ 新增規格行」）', 'err'); return; }
+  // ══ V177：管理員存檔一定要勾歸屬（使用者 260930：料號＝哪個廠新增就歸哪個廠，共用只能刻意設）══
+  //  舊版 STEP 4 全部不勾就按儲存，程式默默存成「共用」，畫面沒有任何提醒。
+  //  一般廠區帳號不看這裡（沒有 STEP 4，存檔一律歸自己的廠區），行為不變。
+  if (isAdmin()) {
+    const _sc = getSelectedScopes();
+    if (!_sc || !_sc.length) {
+      setMgrStatus('⚠ 請在 STEP 4「歸屬設定」勾選至少一個廠區／供應商（這個料號要給誰用），再按儲存', 'err');
+      return;
+    }
+  }
   // V171：存檔前再依球標排一次（保險：打開順序亂掉的舊料號、或打完球標直接按儲存）
   //  排完馬上重繪 ⇒ 畫面＝存進去的順序，項次也跟著重編
   const reordered = !specRowsInOrder(specRows);
@@ -5886,10 +5974,8 @@ function savePartSpec() {
           localStorage.setItem(storeKey, JSON.stringify(db));
         } catch(e) {}
       });
-    } else {
-      // 沒有勾選任何歸屬時，存到共用 key
-      saveSpecDB(PART_SPECS, pn); // V144：只同步這次儲存的料號
     }
+    // V177：原本這裡有「沒勾任何歸屬 → 存到共用」的 else 分支，已由函式開頭的檢查擋掉、整段拿掉
     PART_SPECS = loadAllSpecDB();
   } else {
     saveSpecDB(PART_SPECS, pn); // V144：只同步這次儲存的料號
@@ -7193,14 +7279,8 @@ function initDefaultData() {
   saveSupplierUsers(supDB);
 
   // ── 各 Site 和供應商初始料號庫 ──
-  const defaultSpecs = JSON.parse(JSON.stringify(DEFAULT_SPECS));
-  const specScopes = ['SH','VN','TEST','SDY','YUKE','Huayan'];
-  specScopes.forEach(scope => {
-    const specKey = SPEC_DB_KEY + '_' + scope;
-    if (!localStorage.getItem(specKey)) {
-      localStorage.setItem(specKey, JSON.stringify(defaultSpecs));
-    }
-  });
+  //  V177：拿掉。原本第一次開啟時把示範料號寫進 SH／VN／TEST／SDY／YUKE／Huayan 六個廠的料號庫，
+  //  理由同 loadSpecDB() 的說明——料號只來自各廠自己新增（雲端 part_specs），程式不自己生。
 
   localStorage.setItem(INIT_FLAG, '1');
   console.log('✅ 初始資料已灌入');
@@ -7806,14 +7886,19 @@ let editingSiteCode = null; // null=新增, code=編輯
 const OMS_IDENTITY_URL = 'https://drfqoraijhzvvllncbei.supabase.co';
 const OMS_IDENTITY_KEY = 'sb_publishable_PG_IHNnOMAe3oTMV6yV25w_-U-FjDwq'; // OMS/synchub 公開 anon key（唯讀用）
 // 讀「OMS 已授權 QMS、在職」的內部員工
+// ══ V176：讀不到要「丟錯」，不可回空陣列 ══
+//  舊版失敗時 return []，呼叫端（人員管理頁）分不出「讀不到」和「名單真的是空的」，
+//  而 V164 那道「撈不到就不分流」的保護是靠 catch 觸發的 ⇒ 永遠不會觸發，
+//  結果**所有內部人員被分到「🚫 OMS 已撤銷」、畫面還叫管理員按「清除設定」**。
+//  讀到 0 筆也當成讀不到：OMS 收緊讀取權限後，公開金鑰讀被擋的表會回 200＋[]（不是 401），
+//  跟「沒人被授權」長得一模一樣；而 QMS 有在用、授權名單卻是 0 人，實務上不會發生。
+//  另：原本單次讀、無 order（260930 現有 32 筆）→ 改走分頁＋工號排序去重（工號在 OMS 唯一，149 筆實查無重複）。
 async function loadOmsQmsRoster() {
-  try {
-    const r = await fetch(OMS_IDENTITY_URL + '/rest/v1/identity_access?systems=cs.%5B%22QMS%22%5D&active=eq.true&select=emp_id,name,eng_name,email,factory_code,dept,title',
-      { headers: { apikey: OMS_IDENTITY_KEY, Authorization: 'Bearer ' + OMS_IDENTITY_KEY } });
-    if (!r.ok) { console.warn('讀 OMS 授權名單 HTTP', r.status); return []; }
-    const d = await r.json();
-    return Array.isArray(d) ? d : [];
-  } catch (e) { console.warn('讀 OMS 授權名單失敗（QMS 照常運作）:', e); return []; }
+  const d = await sbFetchAllRows(OMS_IDENTITY_URL + '/rest/v1/identity_access?systems=cs.%5B%22QMS%22%5D&active=eq.true&select=emp_id,name,eng_name,email,factory_code,dept,title&order=emp_id.asc,email.asc',
+    { headers: { apikey: OMS_IDENTITY_KEY, Authorization: 'Bearer ' + OMS_IDENTITY_KEY },
+      key: r => String(r.emp_id || '') + '\u0001' + String(r.email || '').toLowerCase() });   // 萬一有人沒工號，靠 email 區分
+  if (!d.length) throw new Error('OMS 授權名單讀到 0 筆（可能被權限擋下）');
+  return d;
 }
 // ── V143：🌐 跨廠區查詢範圍（admin 設定；BU 動態跟隨、供應商可增選）──
 let _scopeEditEmail = null;
@@ -8092,6 +8177,7 @@ async function renderUserMgrTable(useCache) {
   //        ③ ⚠ OMS 已撤銷授權（QMS 還留著設定，但 OMS 已取消勾選）— 不靜默隱藏，提示清理
   //  ⚠ 只對「內部員工」分流：admin 虛擬帳號與供應商不在 OMS 名單，永遠留在①（同門③的排除規則）
   let omsAuthedEmails = new Set(), omsAuthedEmpIds = new Set(), omsRosterOk = false;
+  let omsRosterErr = '';   // V176：讀不到時畫面要講（原本只進 Console，管理員看到的是分流錯的名單）
   try {
     const omsRoster = (useCache && _umgrCache && _umgrCache.roster) ? _umgrCache.roster : await loadOmsQmsRoster();
     _umgrCache = Object.assign({}, _umgrCache, { roster: omsRoster });   // V170-9
@@ -8103,11 +8189,23 @@ async function renderUserMgrTable(useCache) {
       if (p.emp_id) omsAuthedEmpIds.add(p.emp_id);
     });
     omsRosterOk = true;   // V164：撈到 OMS 名單才做三區分流（撈不到就維持舊行為，不誤判成全部撤銷）
+    // ══ V177：「未設權限」區兩個補丁（使用者 260930 截圖＋OMS 對話來信）══
+    //  ① 排除 OMS 的管理員虛擬帳號（emp_id='admin'、沒有 Email、廠區 DTO）與 TEST 類——比照登入門③的排除規則。
+    //    那一列是 OMS 刻意留的（GHG 管理員登入名單要用），QMS 端 admin@id 早就有帳號，不該叫人按「＋ 帶入」。
+    //  ② 跟著上方的廠區篩選：原本只有 QMS 帳號那幾區有篩，這一區不管選哪個廠都列全部（選 VN 還看到 DTO）。
+    const _isExemptOms = p => String(p.emp_id || '').trim().toLowerCase() === 'admin'
+      || String(p.email || '').trim().toLowerCase() === ADMIN_EMAIL
+      || String(p.factory_code || '').trim().toUpperCase() === 'TEST';
     ghostRows = omsRoster
+      .filter(p => !_isExemptOms(p))
+      .filter(p => !filterSite || String(p.factory_code || '') === filterSite)
       .filter(p => !(p.emp_id && qmsEmpIds.has(p.emp_id)) && !(p.email && qmsEmails.has(String(p.email).toLowerCase())))
       .map(p => ({ site: p.factory_code || '—', emp_id: p.emp_id || '',
         name: p.name || p.eng_name || p.email || '(無名)', engName: p.eng_name || '', email: p.email || '' }));
-  } catch (e) { console.warn('OMS 未設權限名單載入失敗（QMS 照常）:', e); }
+  } catch (e) {
+    console.warn('OMS 未設權限名單載入失敗（QMS 照常）:', e);
+    omsRosterErr = (e && e.message) ? e.message : String(e || '未知錯誤');
+  }
   window._omsGhosts = ghostRows; // 供帶入按鈕依索引取用
 
   // ── V142：可連結工號（既有帳號 email 對到 OMS、但自己 emp_id 是空的 → 一鍵補工號、免跑 SQL）──
@@ -8319,6 +8417,15 @@ async function renderUserMgrTable(useCache) {
     return;
   }
 
+  // V176：OMS 名單讀不到 ⇒ 置頂講清楚這次沒分流（否則管理員不知道下面少了哪兩區）
+  if (!omsRosterOk) {
+    html += `<tr><td colspan="7" style="padding:8px 8px 6px;font-size:12px;font-weight:700;color:#c0392b;background:#fff3f0;border-top:2px solid #f0b0a0">⚠ 這次讀不到 OMS 授權名單（${String(omsRosterErr).replace(/&/g,'&amp;').replace(/</g,'&lt;')}）—— 下面<b>暫時不分</b>「OMS 已授權、還沒建 QMS 帳號」與「OMS 已撤銷」兩區，也不顯示 OMS 姓名；<b>請先不要清除任何人的設定</b>，稍後重新進入本頁再看</td></tr>`;
+  }
+  // ══ V177：「＋ 帶入」按鈕的索引要對「畫面上這份」——搜尋後帶到別人的 bug ══
+  //  按鈕寫的是 importFromOmsIdx(第幾列)，而 window._omsGhosts 原本在上面「篩選前」就存好了；
+  //  V170-9 加了搜尋／角色／狀態篩選之後，畫面上第 0 列 ≠ 陣列第 0 筆 ⇒ 實測搜 ss085（郭淑珍），
+  //  按帶入，確認框寫的卻是「顏清輝 SH0001」。改成畫出來之前才存，兩邊永遠是同一份。
+  window._omsGhosts = ghostRows;
   // V139：未設權限（OMS 已授權 QMS、QMS 尚無帳號）置頂
   if (ghostRows.length) {
     html += `<tr><td colspan="7" style="padding:8px 8px 6px;font-size:12px;font-weight:700;color:#c0392b;background:#fff3f0;border-top:2px solid #f0b0a0">⚠ 有 ${ghostRows.length} 位已在 OMS 授權 QMS、尚未建立 QMS 帳號 —— 請按「＋ 帶入」建立帳號後設權限</td></tr>`;
@@ -10101,7 +10208,23 @@ function cpkLoadSpec() {
   }
   PART_SPECS = isAdmin() ? loadAllSpecDB() : loadSpecDB();
   const sp = PART_SPECS[pn];
-  if (!sp) return;
+  // ══ V177：找不到料號要講（北越 260930：打 V5 料號什麼都沒出現，以為系統壞了）══
+  //  FAI 填表頁按「帶出規格」找不到會寫「找不到料號規格」，這頁原本 return 就沒了、一個字都不給。
+  //  這支每打一個字都會進來 ⇒ 停手 0.8 秒、料號沒再變才顯示，打到一半不會一直閃「找不到」。
+  clearTimeout(window._cpkNotFoundTimer);
+  if (!sp) {
+    window._cpkNotFoundTimer = setTimeout(() => {
+      const cur = String((document.getElementById('cpk-partno') || {}).value || '').trim();
+      if (cur !== pn) return;
+      const el = document.getElementById('cpk-status');
+      if (el) {
+        el.textContent = '⚠ 找不到料號「' + pn + '」的規格——' + (isAdmin() ? '還沒有任何廠區建立' : '本廠區還沒建立')
+          + '，請到「⚙ 料號規格管理」新增後再輸入';
+        el.style.color = '#c0392b';
+      }
+    }, 800);
+    return;
+  }
   const setV = (id, v) => { const el=document.getElementById(id); if(el) el.value=v||''; };
   setV('cpk-partname', sp.partname);
   setV('cpk-material', sp.material);
@@ -12031,14 +12154,13 @@ function renderSysTab() {
 }
 
 // 在設定頁顯示管理員密碼輸入框（臨時提升權限）
+// ══ V177：停用（使用者 260930 同意拿掉）══
+//  舊做法：比對 getAdminConfig().password——那是 localStorage 裡的舊值，沒有就用寫死在程式裡的 ADMIN_DEFAULT；
+//  qms_admin_config 雲端表 V170 起已刪、真正的管理員密碼在 Supabase Auth（admin@id）⇒ 這裡比對的從來不是真密碼，
+//  任何人看網頁原始碼就知道，輸入後 session.isAdmin=true、畫面變管理員模式（資料庫 RLS 仍會擋寫入，但畫面會亂）。
+//  按鈕已拿掉；函式留著但什麼都不做，防止從 Console 呼叫。
 async function showAdminUpgrade() {
-  const pwd = await showCustomPwdDialog('🔐 請輸入管理員密碼 Admin Password');
-  if (!pwd) return;
-  const cfg = getAdminConfig();
-  if (pwd !== cfg.password) { alert('密碼錯誤 Wrong password'); return; }
-  const s = getSession();
-  if (s) { s.isAdmin = true; saveSession(s); }
-  renderSysTab();
+  alert('此功能已停用。請登出後改用管理員帳號登入。');
 }
 
 // 管理員可修改密碼（修正 v94：函數本身加 Admin 驗證）
@@ -12201,6 +12323,7 @@ async function bulkUploadToSupabase() {
   //  這顆按鈕的用途正好是「懷疑雲端漏資料時拿來補推」，報假成功等於讓人以為補好了。
   let faiOk=0, faiErr=0, cpkOk=0, cpkErr=0, specOk=0, specErr=0;
   let faiDup=0, cpkDup=0;   // V170-3：雲端本來就有的（409），不是失敗
+  let specDup=0;            // V177：料號規格也改成「雲端已有就略過」
   // ══ V170-6：進度顯示要數「處理到第幾筆」，不是「成功幾筆」══
   //  V170-2 把 faiOk 改成「只有新寫入才 +1」之後，遇到「雲端本來就有」的情況
   //  faiOk 會一直是 0 ⇒ 按鈕上的進度卡在 (0/195) 不動，看起來像當掉。
@@ -12244,20 +12367,45 @@ async function bulkUploadToSupabase() {
   }
 
   // ── 第三階段：料號規格（含廠區別 key） ──
-  const specKeys = Object.keys(localStorage).filter(k => k.startsWith('fai_part_specs'));
+  // ══ V177：照原本的歸屬上傳、只補雲端沒有的（使用者 260930）══
+  //  事故：9/7 17:03 管理員按這顆，13 筆 SH／SDY 料號被複製成「共用」——
+  //    舊版呼叫 sbSavePartSpec(pn, spec) 沒帶歸屬，管理員身分的預設歸屬＝共用。
+  //  改成三件：
+  //    ① 歸屬＝這份資料所在的本機料號庫（fai_part_specs_SH → SH），不再用登入身分猜
+  //    ② 「共用」那個料號庫整個不推——共用只能由管理員在料號規格頁刻意設定，不經批次產生
+  //    ③ 雲端已經有「同料號＋同歸屬」的就略過、不覆蓋：本機只是快取，可能比雲端舊（別人剛改過），
+  //       這顆按鈕的職責是「補推雲端沒有的」（同 FAI／CPK 的「雲端已有」語意，見 V170-3）
+  //    另：舊版程式自動塞的示範料號複本（內容跟 DEFAULT_SPECS 一字不差）不推。
+  const specKeys = Object.keys(localStorage).filter(k => k.startsWith(SPEC_DB_KEY + '_'));
   btn.textContent = `⏳ 料號規格上傳中...`;
-  for (const skey of specKeys) {
-    try {
-      const db = JSON.parse(localStorage.getItem(skey) || '{}');
-      for (const [pn, spec] of Object.entries(db)) {
-        try {
-          const r = await sbSavePartSpec(pn, spec);
-          if (r === true) specOk++;
-          else { specErr++; _fails.push('料號 ' + pn + '：' + _why(r)); }
-        } catch(e) { specErr++; _fails.push('料號 ' + pn + '：' + e.message); }
-        await new Promise(r => setTimeout(r, 60));
-      }
-    } catch(e) { specErr++; _fails.push('料號庫 ' + skey + '：' + e.message); }
+  let specCloud = null;
+  try {
+    // V177-1：同料號同歸屬可能有好幾個版本（V178）⇒ 讀的時候帶版本去重；「雲端已有」仍以「料號＋歸屬」判斷
+    //  （任何一個版本在就算有，本機的舊快取不可以拿來補出一個版本）
+    const _rows = await sbFetchAllRows(SUPABASE_URL + '/rest/v1/part_specs?select=partno,scope,rev&order=partno.asc,scope.asc,rev.asc',
+      { key: r => String(r.partno) + '\u0001' + String(r.scope) + '\u0001' + String(r.rev == null ? '' : r.rev) });
+    specCloud = new Set(_rows.map(r => String(r.partno) + '\u0001' + String(r.scope)));
+  } catch(e) {
+    specErr++;
+    _fails.push('料號規格：讀不到雲端現況，這一段整段沒推（' + e.message + '）');
+  }
+  if (specCloud) {
+    for (const skey of specKeys) {
+      const scope = skey.slice(SPEC_DB_KEY.length + 1);
+      try {
+        const db = JSON.parse(localStorage.getItem(skey) || '{}');
+        for (const [pn, spec] of Object.entries(db)) {
+          if (DEFAULT_SPECS[pn] && JSON.stringify(spec) === JSON.stringify(DEFAULT_SPECS[pn])) continue;   // 示範複本
+          if (specCloud.has(pn + '\u0001' + scope)) { specDup++; continue; }                             // 雲端已有
+          try {
+            const r = await sbSavePartSpec(pn, spec, scope);
+            if (r === true) specOk++;
+            else { specErr++; _fails.push('料號 ' + pn + '（' + scope + '）：' + _why(r)); }
+          } catch(e) { specErr++; _fails.push('料號 ' + pn + '（' + scope + '）：' + e.message); }
+          await new Promise(r => setTimeout(r, 60));
+        }
+      } catch(e) { specErr++; _fails.push('料號庫 ' + skey + '：' + e.message); }
+    }
   }
 
   // ── 第四階段（使用者帳號）已於 V170-2 移除 ──
@@ -12298,7 +12446,7 @@ async function bulkUploadToSupabase() {
   // V170-2：這些數字現在真的代表「雲端確認收到幾筆」；失敗一併列出原因
   const totalErr = faiErr + cpkErr + specErr + siteErr + supErr;
   const totalNew = faiOk + cpkOk + specOk + siteOk + supOk;
-  const totalDup = faiDup + cpkDup;
+  const totalDup = faiDup + cpkDup + specDup;
   // V170-3：三段分開講。「雲端已有」是好消息（代表沒漏），不能算進失敗嚇人。
   const head = totalErr
     ? `\u26a0 完成，有 ${totalErr} 筆真的沒上去`
@@ -12306,7 +12454,7 @@ async function bulkUploadToSupabase() {
   // ⚠ 用「已同步」不用「新上傳」：料號規格／廠區／供應商三類的網址帶 on_conflict，
   //   走的是 upsert（覆蓋既有列）不是新增；只有 FAI／CPK 是純 POST 才分得出新舊。
   const detail = `已同步：FAI ${faiOk}\u3000CPK ${cpkOk}\u3000料號規格 ${specOk}\u3000廠區 ${siteOk}\u3000供應商 ${supOk}`
-    + (totalDup ? `\u3000<span style="color:#666">｜雲端已有、略過：FAI ${faiDup}\u3000CPK ${cpkDup}</span>` : '');
+    + (totalDup ? `\u3000<span style="color:#666">｜雲端已有、略過：FAI ${faiDup}\u3000CPK ${cpkDup}　料號規格 ${specDup}</span>` : '');
   const list = _fails.length
     ? '<div style="margin-top:6px;font-size:11px;color:#c0392b;text-align:left">'
       + _fails.slice(0, 8).map(x => '\u30fb' + x).join('<br>')

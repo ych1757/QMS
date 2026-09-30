@@ -454,7 +454,7 @@ input.spec-inp[type=number] { -moz-appearance:textfield; appearance:textfield; }
 // 用途＝跟使用者溝通「你看到的畫面是不是最新版」，不是品質文件的表單版次
 //（表單版次 Rev 另有其用途、目前維持 V1.0 不動，日後各廠區若有自己的表單版次需求再談）
 // 顯示位置：① 瀏覽器分頁標題 ② 登入畫面副標下方 ③ 主畫面右上（列印時自動隱藏）
-const APP_VER = 'V177-1';   // ★★ 每出一版必須同步改這一行（比照 MHR 的做法），否則畫面版號會對不上檔案版號
+const APP_VER = 'V178-7';   // ★★ 每出一版必須同步改這一行（比照 MHR 的做法），否則畫面版號會對不上檔案版號
 
 const SUPABASE_URL = 'https://vwusebvvsqyjydddupit.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_Ju-c9cuXYJil7PEJ1-NspA_ASzfIzi5';
@@ -830,32 +830,19 @@ async function sbPullPartSpecs() {
     const data = await sbFetchAllRows(SUPABASE_URL + '/rest/v1/part_specs?select=*&order=partno.asc,scope.asc,rev.asc',
       { key: r => String(r.partno) + '\u0001' + String(r.scope) + '\u0001' + String(r.rev == null ? '' : r.rev) });
 
-    // 依 scope 分組
-    //  V177：雲端 0 筆也要往下走（原本直接 return）——下面清示範複本要靠「雲端有哪些」判斷，
-    //  0 筆正是「全部都不在雲端」；而且 sbFetchAllRows 已核對過總數，走到這裡＝真的拉完了。
+    // ══ V178：本機清單＝雲端原樣（每一版一列，停用的也在；誰看得到哪些由資料庫權限決定）══
+    //  整份換掉、不合併：雲端刪掉的版本，這裡就跟著消失（舊版只合併不刪，刪掉的會一直留在各台電腦）。
+    //  走到這裡＝sbFetchAllRows 已核對過總數、真的拉完了；雲端讀失敗會丟到下面的 catch，本機清單不動。
+    specCacheSave((data || []).map(specNormRow));
+
+    //  V177：清舊版塞進各台電腦的示範複本（舊的 fai_part_specs_* key；V178 不再讀寫它們）
+    //  雲端 0 筆也要跑——0 筆正是「全部都不在雲端」
     const byScope = {};
     (data || []).forEach(row => {
-      // V177-1：停用的版本（V178 改版後的舊版）不進這版的料號庫——這版一個料號在一個廠區只放得下一份，
-      //  放使用中的；同一廠區有好幾個使用中版本時，排序在後的（版本號較大）那份為準。
-      if (row.active === false) return;
       const scope = row.scope || 'shared';
-      if (!byScope[scope]) byScope[scope] = {};
-      byScope[scope][row.partno] = {
-        partname: row.partname, material: row.material,
-        rev: row.rev, supplier: row.supplier, specs: row.specs || []
-      };
+      (byScope[scope] = byScope[scope] || {})[row.partno] = true;
     });
-
-    // 寫入各自的 localStorage key
-    Object.entries(byScope).forEach(([scope, db]) => {
-      const storeKey = scope === 'shared' ? 'fai_part_specs' : 'fai_part_specs_' + scope;
-      try {
-        const existing = JSON.parse(localStorage.getItem(storeKey) || '{}');
-        localStorage.setItem(storeKey, JSON.stringify({ ...existing, ...db }));
-      } catch(e) {}
-    });
-
-    purgeInjectedDemoSpecs(byScope);   // V177
+    purgeInjectedDemoSpecs(byScope);
 
     const total = (data || []).length;
     console.log('☁ 料號規格已同步:', total, '筆，涵蓋', Object.keys(byScope).length, '個 scope');
@@ -2079,12 +2066,14 @@ async function sbInit() {
       <table class="pn-list-table" id="pn-list-table">
         <thead>
           <tr>
-            <th id="mgr-th-partno" style="width:140px;white-space:nowrap">料號 Part No.</th>
+            <!-- V178-1：材料 80→220px（長材料原本折成 6 行，使用者 260930「請加寬材料欄」）；料號 140→120px（12 碼一行放得下）；
+                 操作 110→170px（跟 V178 四顆按鈕的實際寬度一致）；品名不定寬、吃剩下的 -->
+            <th id="mgr-th-partno" style="width:120px;white-space:nowrap">料號 Part No.</th>
             <th id="mgr-th-partname" style="white-space:nowrap">品名 Part Name</th>
             <th id="mgr-th-rev" style="width:60px;white-space:nowrap">版本</th>
-            <th id="mgr-th-mat" style="width:80px;white-space:nowrap">材料</th>
+            <th id="mgr-th-mat" style="width:220px;white-space:nowrap">材料</th>
             <th id="mgr-th-specs" style="width:60px;white-space:nowrap">規格數</th>
-            <th id="mgr-th-action" style="width:110px;white-space:nowrap">操作</th>
+            <th id="mgr-th-action" style="width:170px;white-space:nowrap">操作</th>
           </tr>
         </thead>
         <tbody id="pn-tbody">
@@ -2106,8 +2095,9 @@ async function sbInit() {
           <input id="e-partname" placeholder="例：KICKSTAND LEG">
         </div>
         <div class="ef">
-          <label id="mgr-lbl-rev-el">版本 Revision</label>
-          <input id="e-rev" placeholder="A">
+          <!-- V178-4：版本必填、提示字改「例：A」（原本只寫「A」，灰字看起來像已經填好，260930 使用者就存成了無版本） -->
+          <label id="mgr-lbl-rev-el">版本 Revision <span style="color:#c0392b">*必填</span></label>
+          <input id="e-rev" placeholder="例：A">
         </div>
         <div class="ef">
           <label id="mgr-lbl-mat-el">材料 Material</label>
@@ -2132,7 +2122,7 @@ async function sbInit() {
             <th id="spec-th-type" style="width:52px">類型 Type</th>
             <th id="spec-th-nom" style="width:72px">名目值 Nominal</th>
             <th style="width:62px">+Tol</th>
-            <th style="width:62px">−Tol</th>
+            <th style="width:62px" title="上下限＝名目值＋(+Tol)／名目值－(−Tol)；−Tol 打 2 代表下限＝名目值－2">−Tol<div id="spec-th-mt-hint" style="font-size:9px;font-weight:400;opacity:.8">打正數</div></th>
             <th style="width:75px">USL</th>
             <th style="width:75px">LSL</th>
             <th id="spec-th-del" style="width:32px">刪</th>
@@ -2649,65 +2639,271 @@ function loadSpecDB() {
   return {};
 }
 
-// Admin 合併載入所有 Site 和供應商的料號（唯讀瀏覽用）
-function loadAllSpecDB() {
-  const merged = {};
-  // 掃描所有 localStorage key
-  for (let i = 0; i < localStorage.length; i++) {
-    const k = localStorage.key(i);
-    if (k && k.startsWith(SPEC_DB_KEY)) {
-      const scope = k === SPEC_DB_KEY ? '(共用)' : k.replace(SPEC_DB_KEY + '_', '');
-      try {
-        const db = JSON.parse(localStorage.getItem(k));
-        Object.entries(db).forEach(([pn, spec]) => {
-          if (!merged[pn]) {
-            merged[pn] = { ...spec, _owner: scope };
-          } else {
-            // 已存在：記錄多個歸屬
-            if (!merged[pn]._owner.includes(scope)) {
-              merged[pn]._owner += ', ' + scope;
-            }
-          }
-        });
-      } catch(e){}
-    }
-  }
-  return merged;
+// ══════════════════════════════════════════════════════════════════
+// ══ V178：料號改版與停用（使用者 260930 選 B 案）══
+// ══════════════════════════════════════════════════════════════════
+//  資料模型：一份規格＝「料號＋歸屬＋版本」一列（雲端 part_specs；178 第二段 SQL 後主鍵就是這三欄）。
+//    每一列有「使用中／停用」、停用日期、停用人；同料號同歸屬可以同時有好幾個版本使用中
+//    （使用者 260930：改版交替期「可能會」兩版都在用）。
+//  本機只留一份跟雲端一模一樣的清單（qms_part_specs_v2），取代舊的 fai_part_specs_<歸屬> 好幾個 key：
+//    ① 存檔／改版／停用／刪除一律「先寫雲端、雲端確認了才更新畫面」——不再「本機先存、雲端背景補」，
+//       所以不會再有「畫面說存好了、雲端其實沒有」；沒連上雲端就直接說存不了。
+//    ② 清單由雲端決定：雲端刪掉的，下次同步就消失（舊版只合併不刪，刪掉的會一直留在各台電腦）。
+//  舊的 fai_part_specs_* key 不再讀寫；舊版塞進去的示範複本仍由 purgeInjectedDemoSpecs 清掉。
+//  共用（scope='shared'）：使用者 260930 定調「料號＝哪個廠新增就歸哪個廠、共用只限系統管理員」——
+//    一般帳號填表不帶共用（同舊版），管理員看得到、可停用／刪除。
+const SPEC_V2_KEY = 'qms_part_specs_v2';
+function specNormRow(r) {
+  r = r || {};
+  return {
+    partno: String(r.partno || ''),
+    scope:  String(r.scope || 'shared'),
+    rev:    r.rev == null ? '' : String(r.rev),
+    active: r.active !== false,                         // 第一段 SQL 前沒有這欄 ⇒ 當作使用中
+    deactivatedAt: r.deactivated_at || r.deactivatedAt || null,
+    deactivatedBy: r.deactivated_by || r.deactivatedBy || null,
+    partname: r.partname || '', material: r.material || '', supplier: r.supplier || '',
+    specs: Array.isArray(r.specs) ? r.specs : [],
+    updatedAt: r.updated_at || r.updatedAt || null,
+  };
+}
+function specCacheAll() {
+  //  讀出來一律再整理一次：雲端欄位（deactivated_at）與整理過的（deactivatedAt）兩種寫法都認，缺的欄位補預設
+  try { const a = JSON.parse(localStorage.getItem(SPEC_V2_KEY) || '[]'); return Array.isArray(a) ? a.map(specNormRow) : []; }
+  catch(e) { return []; }
+}
+function specCacheSave(rows) {
+  try { localStorage.setItem(SPEC_V2_KEY, JSON.stringify(rows || [])); }
+  catch(e) { console.warn('料號規格快取寫入失敗:', e); }
+}
+function specSameId(a, partno, scope, rev) { return a.partno === partno && a.scope === scope && a.rev === rev; }
+function specCacheFind(partno, scope, rev) { return specCacheAll().find(x => specSameId(x, partno, scope, rev)) || null; }
+function specCachePut(row) {
+  const r = specNormRow(row);
+  const all = specCacheAll().filter(x => !specSameId(x, r.partno, r.scope, r.rev));
+  all.push(r);
+  specCacheSave(all);
+  return r;
+}
+function specCacheDrop(partno, scope, rev) { specCacheSave(specCacheAll().filter(x => !specSameId(x, partno, scope, rev))); }
+//  我的歸屬：廠區帳號＝廠區碼、供應商＝供應商碼、管理員＝null（看全部）
+function mySpecScope() {
+  const s = getSession();
+  if (!s || s.isAdmin) return null;
+  if (s.isSupplier && s.supplierCode) return s.supplierCode;
+  if (s.site && s.site !== '__nosite__' && s.site !== '__admin__') return s.site;
+  return null;
+}
+//  填表（FAI／CPK）能用的規格：管理員＝全部歸屬；其他人＝只有自己的歸屬（共用、別廠都不帶，同舊版）
+function specRowsUsable() {
+  const all = specCacheAll();
+  if (isAdmin()) return all;
+  const mine = mySpecScope();
+  return mine ? all.filter(r => r.scope === mine) : [];
+}
+//  排序：料號 → 歸屬 → 使用中在前 → 版本新的在前
+function specCmp(a, b) {
+  return String(a.partno).localeCompare(String(b.partno))
+      || String(a.scope).localeCompare(String(b.scope))
+      || (a.active === b.active ? 0 : (a.active ? -1 : 1))
+      || String(b.rev).localeCompare(String(a.rev), 'en', { numeric: true });
+}
+function specFmtDate(ts, withYear) {
+  if (!ts) return '';
+  const d = new Date(ts);
+  if (isNaN(d)) return '';
+  const p = n => String(n).padStart(2, '0');
+  return (withYear ? d.getFullYear() + '/' : '') + p(d.getMonth() + 1) + '/' + p(d.getDate());
+}
+function specRevText(rev) { return rev ? rev + ' 版' : '（無版本）'; }
+//  清單／對話框共用的一行說明，例：「SH・B 版・22 項・09/30 修改」
+function specRowLabel(r, withScope) {
+  return (withScope ? scopeLabel(r.scope) + '・' : '') + specRevText(r.rev) + '・' + (r.specs || []).length + ' 項'
+       + (r.updatedAt ? '・' + specFmtDate(r.updatedAt) + ' 修改' : '');
 }
 
-// V144：第二參數 syncPn＝這次實際動到的料號，雲端只同步那一筆。
-// 原本「整包重傳每一筆」有兩個結構病：
-// ① 別台機器快取裡「已被刪除」的料號會被重新上傳＝刪掉的料號復活（刪不掉）
-// ② 雲端 part_specs 主鍵是 partno 單欄，整包重傳會把同號料號的歸屬蓋成自己的（歸屬搶奪）
-function saveSpecDB(db, syncPn) {
-  const key = getSpecDBKey();
-  localStorage.setItem(key, JSON.stringify(db));
-  if (syncPn && db[syncPn]) {
-    sbSavePartSpec(syncPn, db[syncPn]).catch(e => console.warn('料號同步失敗:', syncPn, e));
-  }
+//  通用小對話框：標題＋說明＋幾個選項按鈕＋取消；回傳按了哪個 key（取消／按外面／Esc＝null）
+function qmsChoose(title, message, choices) {
+  return new Promise(resolve => {
+    const ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px';
+    const box = document.createElement('div');
+    box.style.cssText = 'background:#fff;border-radius:10px;max-width:520px;width:100%;padding:18px 18px 14px;box-shadow:0 8px 30px rgba(0,0,0,.25);font-size:13px;color:#333';
+    const h = document.createElement('div');
+    h.style.cssText = 'font-size:15px;font-weight:700;color:#1a4f8a;margin-bottom:8px';
+    h.textContent = title;
+    const m = document.createElement('div');
+    m.style.cssText = 'white-space:pre-line;line-height:1.6;margin-bottom:14px';
+    m.textContent = message || '';
+    const list = document.createElement('div');
+    list.style.cssText = 'display:flex;flex-direction:column;gap:8px';
+    const done = v => { document.removeEventListener('keydown', onKey); ov.remove(); resolve(v); };
+    const onKey = e => { if (e.key === 'Escape') done(null); };
+    (choices || []).concat([{ key: null, label: '取消' }]).forEach(c => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = c.label;
+      b.style.cssText = 'text-align:left;padding:9px 12px;border-radius:6px;font-size:13px;cursor:pointer;'
+        + (c.primary ? 'border:1px solid #1a4f8a;background:#1a4f8a;color:#fff;font-weight:700'
+           : c.key == null ? 'border:1px solid #ddd;background:#fff;color:#666;text-align:center'
+           : 'border:1px solid #ccd6e3;background:#f7f9fc;color:#1a3050');
+      b.onclick = () => done(c.key);
+      list.appendChild(b);
+    });
+    box.appendChild(h); box.appendChild(m); box.appendChild(list);
+    ov.appendChild(box);
+    ov.addEventListener('click', e => { if (e.target === ov) done(null); });
+    document.addEventListener('keydown', onKey);
+    document.body.appendChild(ov);
+  });
+}
+//  通用輸入框：回傳輸入的文字（取消＝null）；check(文字) 回傳錯誤訊息就留在框裡不關
+function qmsAskText(title, message, placeholder, check) {
+  return new Promise(resolve => {
+    const ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px';
+    const box = document.createElement('div');
+    box.style.cssText = 'background:#fff;border-radius:10px;max-width:460px;width:100%;padding:18px;box-shadow:0 8px 30px rgba(0,0,0,.25);font-size:13px;color:#333';
+    const h = document.createElement('div');
+    h.style.cssText = 'font-size:15px;font-weight:700;color:#1a4f8a;margin-bottom:8px';
+    h.textContent = title;
+    const m = document.createElement('div');
+    m.style.cssText = 'white-space:pre-line;line-height:1.6;margin-bottom:10px';
+    m.textContent = message || '';
+    const inp = document.createElement('input');
+    inp.type = 'text'; inp.placeholder = placeholder || '';
+    inp.style.cssText = 'width:100%;height:34px;border:1px solid #bbb;border-radius:6px;padding:0 10px;font-size:14px;box-sizing:border-box';
+    const err = document.createElement('div');
+    err.style.cssText = 'color:#c0392b;font-size:12px;min-height:18px;margin-top:4px';
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;gap:8px;justify-content:flex-end;margin-top:8px';
+    const ok = document.createElement('button');
+    ok.type = 'button'; ok.textContent = '確定';
+    ok.style.cssText = 'padding:7px 18px;border-radius:6px;border:1px solid #1a4f8a;background:#1a4f8a;color:#fff;font-weight:700;cursor:pointer';
+    const cancel = document.createElement('button');
+    cancel.type = 'button'; cancel.textContent = '取消';
+    cancel.style.cssText = 'padding:7px 18px;border-radius:6px;border:1px solid #ddd;background:#fff;color:#666;cursor:pointer';
+    const done = v => { document.removeEventListener('keydown', onKey); ov.remove(); resolve(v); };
+    const submit = () => {
+      const v = inp.value.trim();
+      const bad = check ? check(v) : (v ? '' : '請輸入');
+      if (bad) { err.textContent = bad; inp.focus(); return; }
+      done(v);
+    };
+    const onKey = e => { if (e.key === 'Escape') done(null); else if (e.key === 'Enter') submit(); };
+    ok.onclick = submit; cancel.onclick = () => done(null);
+    row.appendChild(cancel); row.appendChild(ok);
+    box.appendChild(h); box.appendChild(m); box.appendChild(inp); box.appendChild(err); box.appendChild(row);
+    ov.appendChild(box);
+    document.addEventListener('keydown', onKey);
+    document.body.appendChild(ov);
+    setTimeout(() => { try { inp.focus(); } catch(e) {} }, 0);
+  });
 }
 
-let PART_SPECS = loadSpecDB();
+//  帶出規格要用哪一份：沒有使用中的＝null；只有一份＝那份；兩份以上＝跳清單讓人選（取消＝null）
+//  管理員的清單同時列出各歸屬（例「SH・B 版」「SDY・A 版」）——舊版管理員帶出哪一份看瀏覽器心情（260930 實測過）
+async function pickSpecForForm(pn) {
+  const cands = specRowsUsable().filter(r => r.partno === pn && r.active).sort(specCmp);
+  if (cands.length <= 1) return cands[0] || null;
+  const adm = isAdmin();
+  const key = await qmsChoose('料號 ' + pn + ' 有 ' + cands.length + ' 份使用中的規格',
+    '請選這次檢驗要用哪一份：', cands.map((r, i) => ({ key: String(i), label: specRowLabel(r, adm) })));
+  return key == null ? null : cands[+key];
+}
+//  這個料號在「我能用的規格」裡的狀況：{ any：有沒有任何版本, active：有沒有使用中的 }
+function specAvailability(pn) {
+  const rows = specRowsUsable().filter(r => r.partno === pn);
+  return { any: rows.length > 0, active: rows.some(r => r.active) };
+}
+
+//  寫雲端失敗時，把資料庫的錯誤翻成人話
+function specWriteErrMsg(status, text) {
+  const t = String(text || '');
+  if (/part_specs_pkey/.test(t) && (status === 409 || /23505/.test(t))) return '資料庫還不能在同一個歸屬存第二個版本（178 第二段 SQL 還沒執行）';
+  if (/42P10|no unique or exclusion constraint/i.test(t)) return '資料庫還沒更新（178 第一段 SQL 還沒執行）';
+  if (/42703|column .* does not exist/i.test(t)) return '資料庫還沒更新（178 第一段 SQL 還沒執行）';
+  if (/23505/.test(t) || status === 409) return '雲端已經有這個料號的這個版本';
+  if (status === 401 || status === 403 || /42501|row-level security/i.test(t)) return '沒有權限（只能改自己廠區的料號）';
+  return 'HTTP ' + status + (t ? ' ' + t.slice(0, 120) : '');
+}
+//  存一份規格到雲端（料號＋歸屬＋版本，已有就更新內容、沒有就新增）；回傳 { ok, row } 或 { ok:false, msg }
+//  ⚠ 不送 active ⇒ 更新既有版本時不會動到它的使用中／停用狀態；新增的版本由資料庫預設為使用中
+async function sbSaveSpecRow(partno, scope, spec) {
+  const payload = {
+    partno, scope,
+    rev:      spec.rev == null ? '' : String(spec.rev).trim(),
+    partname: spec.partname || null,
+    material: spec.material || null,
+    supplier: spec.supplier || null,
+    specs:    spec.specs || [],
+    updated_at: new Date().toISOString(),
+  };
+  let res;
+  try {
+    res = await fetch(SUPABASE_URL + '/rest/v1/part_specs?on_conflict=partno,scope,rev', {
+      method: 'POST',
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer(), 'Content-Type': 'application/json',
+                 'Prefer': 'resolution=merge-duplicates,return=representation' },
+      body: JSON.stringify(payload)
+    });
+  } catch(e) { return { ok: false, msg: '網路錯誤：' + e.message }; }
+  if (!res.ok) { const t = await res.text().catch(() => ''); return { ok: false, msg: specWriteErrMsg(res.status, t) }; }
+  const data = await res.json().catch(() => null);
+  const row = specCachePut(Array.isArray(data) && data[0] ? data[0] : payload);
+  return { ok: true, row };
+}
+//  停用／啟用某一版（只改狀態，不動規格內容與「修改日期」）
+async function sbSetSpecActive(partno, scope, rev, makeActive) {
+  const s = getSession();
+  const who = (s && (s.userName || s.userKey)) || '';
+  const patch = makeActive
+    ? { active: true,  deactivated_at: null, deactivated_by: null }
+    : { active: false, deactivated_at: new Date().toISOString(), deactivated_by: who };
+  let res;
+  try {
+    res = await fetch(SUPABASE_URL + '/rest/v1/part_specs?partno=eq.' + encodeURIComponent(partno)
+        + '&scope=eq.' + encodeURIComponent(scope) + '&rev=eq.' + encodeURIComponent(rev), {
+      method: 'PATCH',
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer(), 'Content-Type': 'application/json',
+                 'Prefer': 'return=representation' },
+      body: JSON.stringify(patch)
+    });
+  } catch(e) { return { ok: false, msg: '網路錯誤：' + e.message }; }
+  if (!res.ok) { const t = await res.text().catch(() => ''); return { ok: false, msg: specWriteErrMsg(res.status, t) }; }
+  const data = await res.json().catch(() => null);
+  //  PATCH 對 0 列也回 200（被權限擋掉或已被別人刪掉）⇒ 一定要看有沒有真的改到
+  if (!Array.isArray(data) || !data.length) return { ok: false, msg: '雲端沒有改到這一版（可能沒有權限，或已被刪除）——請按「🔄 重新同步雲端」後再試' };
+  return { ok: true, row: specCachePut(data[0]) };
+}
+//  刪除某一版
+async function sbDeleteSpecRow(partno, scope, rev) {
+  let res;
+  try {
+    res = await fetch(SUPABASE_URL + '/rest/v1/part_specs?partno=eq.' + encodeURIComponent(partno)
+        + '&scope=eq.' + encodeURIComponent(scope) + '&rev=eq.' + encodeURIComponent(rev), {
+      method: 'DELETE',
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer(), 'Prefer': 'return=representation' }
+    });
+  } catch(e) { return { ok: false, msg: '網路錯誤：' + e.message }; }
+  if (!res.ok) { const t = await res.text().catch(() => ''); return { ok: false, msg: specWriteErrMsg(res.status, t) }; }
+  const data = await res.json().catch(() => null);
+  if (!Array.isArray(data) || !data.length) return { ok: false, msg: '雲端沒有刪到這一版（可能沒有權限，或已被刪除）——請按「🔄 重新同步雲端」後再試' };
+  specCacheDrop(partno, scope, rev);
+  return { ok: true };
+}
+
+//  舊變數：V178 起不用（清單、填表都改讀 specCacheAll／specRowsUsable），留著避免漏改的地方報錯
+let PART_SPECS = {};
 
 // ── V146：admin 料號「一歸屬一列」＋歸屬篩選 ──
 let pnScopeFilter = '';   // 歸屬篩選（''＝全部、'__shared__'＝共用、其餘＝廠區/供應商碼）
-let editingScope  = null; // admin 正在編輯的歸屬（配合 editingPn；非 admin 恆為 null）
-function listAllSpecRows() {
-  // 掃描本機所有料號庫 key → 每個「料號×歸屬」一列（admin 清單用；PART_SPECS 合併版仍留給表單帶出）
-  const rows = [];
-  for (let i = 0; i < localStorage.length; i++) {
-    const k = localStorage.key(i);
-    if (!k || !k.startsWith(SPEC_DB_KEY)) continue;
-    const scope = k === SPEC_DB_KEY ? '__shared__' : k.replace(SPEC_DB_KEY + '_', '');
-    try {
-      const db = JSON.parse(localStorage.getItem(k) || '{}');
-      Object.entries(db).forEach(([pn, spec]) => rows.push({ pn, scope, spec }));
-    } catch(e) {}
-  }
-  rows.sort((a, b) => a.pn === b.pn ? String(a.scope).localeCompare(String(b.scope)) : String(a.pn).localeCompare(String(b.pn)));
-  return rows;
-}
-function scopeLabel(scope) { return scope === '__shared__' ? '(共用)' : scope; }
+let editingScope  = null; // 正在編輯的歸屬（V178 起一般帳號也記：＝自己的廠區）
+let editingRev    = null; // V178：正在編輯的版本
+let specEditMode  = 'new';// V178：'new' 新增料號／'edit' 編輯某一版／'revise' 改版（從某一版複製出新版）
+let reviseFromRev = null; // V178：改版時「從哪一版」複製來的
+//  V178：共用在雲端存 'shared'、舊畫面慣用 '__shared__'，兩種都認
+function scopeLabel(scope) { return (scope === '__shared__' || scope === 'shared') ? '(共用)' : scope; }
 
 // ══ V170-12：料號規格依「可看廠區」顯示（使用者 260908）══
 //  症狀：料號規格管理頁只看得到 2 筆（＝內建預設料號），別廠的一筆都沒有。
@@ -2727,16 +2923,22 @@ function listCrossScopeSpecRows() {
   //  自己的那個 scope 不重複列（上面正常清單已經有了）
   const mine = (s.isSupplier && s.supplierCode) ? s.supplierCode
              : (s.site && s.site !== '__nosite__') ? s.site : null;
-  const out = [];
-  scopes.forEach(sc => {
-    if (!sc || sc === mine) return;
-    let db = {};
-    try { db = JSON.parse(localStorage.getItem(SPEC_DB_KEY + '_' + sc) || '{}'); } catch(e) {}
-    Object.entries(db).forEach(([pn, spec]) => { if (spec) out.push({ pn, spec, scope: sc }); });
-  });
-  return out.sort((a, b) => (a.scope + '|' + a.pn).localeCompare(b.scope + '|' + b.pn));
+  //  V178：改讀雲端清單（每一版一列，停用的也列，唯讀）
+  const want = new Set(scopes.filter(sc => sc && sc !== mine));
+  return specCacheAll().filter(r => want.has(r.scope))
+    .sort((a, b) => String(a.scope).localeCompare(String(b.scope)) || specCmp(a, b));
 }
 function setPnScopeFilter(v) { pnScopeFilter = v; renderPnList(); }
+// ══ V178-1：料號清單再加兩個篩選——料號／品名關鍵字、狀態（使用者 260930「篩選請增加料號跟狀態」）══
+let pnKwFilter     = '';   // 料號或品名包含這段字（不分大小寫）
+let pnStatusFilter = '';   // ''＝全部、'active'＝使用中、'inactive'＝停用
+function setPnKwFilter(v)     { pnKwFilter = v; renderPnList(); }
+function setPnStatusFilter(v) { pnStatusFilter = v; renderPnList(); }
+function clearPnFilters() {
+  pnScopeFilter = ''; pnKwFilter = ''; pnStatusFilter = '';
+  const kw = document.getElementById('pn-f-kw'); if (kw) kw.value = '';
+  renderPnList();
+}
 
 function specsToRows(specs) {
   return specs.map(s => ({
@@ -2749,7 +2951,7 @@ function specsToRows(specs) {
   }));
 }
 
-function loadPartSpec() {
+async function loadPartSpec() {
   // ══ V171：編輯已存的檢驗單時，不可重新帶出規格（使用者 260922 提出的疑慮，查證屬實）══
   //  漏洞：從「歷史查詢」打開舊單來改 → 按「帶出規格」（料號格按 Enter、📷 掃條碼也走這裡）
   //    → 整張表換成「現在的料號規格」、量測值全部清空；再按「確認修改 → 覆蓋」
@@ -2762,13 +2964,19 @@ function loadPartSpec() {
     setStatus('⚠ 編輯已存的檢驗單時不能重新帶出規格（避免清空量測值）', 'err');
     return;
   }
-  PART_SPECS = isAdmin() ? loadAllSpecDB() : loadSpecDB();
   const pn = document.getElementById('h-partno').value.trim();
-  const spec = PART_SPECS[pn];
-  if (!spec) {
+  // ══ V178：只帶「使用中」的版本；兩份以上使用中（改版交替期、或管理員看得到好幾個廠）就跳清單選 ══
+  const _av = specAvailability(pn);
+  if (!_av.any) {
     setStatus('找不到料號規格，請手動輸入或新增至資料庫', 'err');
     return;
   }
+  if (!_av.active) {
+    setStatus('料號 ' + pn + ' 的版本都已停用——請到「⚙ 料號規格管理」啟用，或按「📑 改版」建立新版', 'err');
+    return;
+  }
+  const spec = await pickSpecForForm(pn);
+  if (!spec) { setStatus('已取消帶出規格（沒有選版本）', ''); return; }
   document.getElementById('h-partname').value = spec.partname || '';
   document.getElementById('h-material').value  = spec.material || '';
   document.getElementById('h-rev').value        = spec.rev || '';
@@ -2777,7 +2985,7 @@ function loadPartSpec() {
   //  ⚠ 排的是「帶出來的這張單」，不會回頭改料號規格存的順序（那是料號規格管理頁的事）。
   rows = specsToRows(sortSpecsByBalloon(spec.specs));
   render();
-  setStatus(`✔ 已載入 ${pn} 規格，共 ${rows.length} 項　樣本值已清空`, 'ok');
+  setStatus(`✔ 已載入 ${pn}${spec.rev ? ' ' + spec.rev + ' 版' : ''}${isAdmin() ? '（' + scopeLabel(spec.scope) + '）' : ''} 規格，共 ${rows.length} 項　樣本值已清空`, 'ok');
 }
 
 const INIT = [
@@ -4047,7 +4255,7 @@ function switchTab(tab) {
       }
     }
   });
-  if (tab==='mgr')  { PART_SPECS = isAdmin() ? loadAllSpecDB() : loadSpecDB(); renderPnList(); }
+  if (tab==='mgr')  { renderPnList(); ensureScopePanelForNew(); }   // V178：清單直接讀雲端清單；V178-2：管理員新增料號要看得到 STEP 4
   if (tab==='hist') { cleanDuplicateRecords(); initHistSiteFilter(); initHistProcFilter(); runHistQuery(); }
   if (tab==='dash') { renderDashboard(); }
   if (tab==='sys')  { renderSysTab(); }
@@ -4079,7 +4287,7 @@ function switchTabForce(tab) {
       }
     }
   });
-  if (tab==='mgr')  { PART_SPECS = isAdmin() ? loadAllSpecDB() : loadSpecDB(); renderPnList(); }
+  if (tab==='mgr')  { renderPnList(); ensureScopePanelForNew(); }   // V178：清單直接讀雲端清單；V178-2：管理員新增料號要看得到 STEP 4
   if (tab==='hist') { cleanDuplicateRecords(); initHistSiteFilter(); initHistProcFilter(); runHistQuery(); }
   if (tab==='dash') { renderDashboard(); }
   if (tab==='sys')  { renderSysTab(); }
@@ -5466,7 +5674,6 @@ let specRows  = [];
 
 function renderPnList() {
   const tbody = document.getElementById('pn-tbody');
-  const keys  = Object.keys(PART_SPECS);
   const isAdm = isAdmin();
   const colCount = isAdm ? 7 : 6;
 
@@ -5485,81 +5692,92 @@ function renderPnList() {
     }
   }
 
-  // ── V146：admin 歸屬篩選列（表格上方；非 admin 自動移除）──
+  // ══ V178-1：篩選列＝歸屬（管理員才有）＋料號／品名＋狀態（使用者 260930「篩選請增加料號跟狀態」）══
+  //  平台通則（多篩選連動）：每個下拉只列「通過其他條件」後還有資料的選項並標筆數；選到的值沒資料了自動清掉；要有清除鈕。
+  //  篩選列只建一次、之後只換下拉選項與筆數——整列重畫會讓正在打字的料號框失去游標。
   const tableEl = tbody.closest('table');
   let filterBar = document.getElementById('pn-scope-filterbar');
-  if (isAdm) {
-    if (!filterBar && tableEl && tableEl.parentElement) {
-      filterBar = document.createElement('div');
-      filterBar.id = 'pn-scope-filterbar';
-      filterBar.style.cssText = 'margin:0 0 8px;display:flex;align-items:center;gap:8px;font-size:12px';
-      tableEl.parentElement.insertBefore(filterBar, tableEl);
-    }
-    if (filterBar) {
-      let supList = [];
-      supList = activeSuppliers();                                            // V158:共用來源
-      const opts = [['', '— 全部 All —'], ['__shared__', '(共用) Shared']]
-        .concat(activeSites().map(x => [x.code, x.code + ' — ' + x.name]))      // V158:共用來源
-        .concat(supList.map(x => [x.code, '🏢 ' + x.code + (x.name ? ' — ' + x.name : '')]));
-      filterBar.innerHTML = '<span style="font-weight:700;color:#1a4f8a">歸屬篩選 Filter by Owner：</span>' +
-        '<select onchange="setPnScopeFilter(this.value)" style="height:28px;border:1px solid #ccc;border-radius:4px;font-size:12px;padding:0 6px">' +
-        opts.map(o => `<option value="${o[0]}" ${pnScopeFilter === o[0] ? 'selected' : ''}>${o[1]}</option>`).join('') +
-        '</select>';
-    }
-  } else if (filterBar) { filterBar.remove(); }
-
-  if (isAdm) {
-    // ── V146：一歸屬一列——同料號各歸屬各自一列，各編各刪、互不相蓋 ──
-    let rows = listAllSpecRows();
-    if (pnScopeFilter) rows = rows.filter(r => r.scope === pnScopeFilter);
-    if (!rows.length) {
-      tbody.innerHTML = `<tr><td colspan="${colCount}" class="empty-hint">${pnScopeFilter ? '此歸屬尚無料號' : '資料庫尚無料號，請在下方填寫後儲存'}</td></tr>`;
-      return;
-    }
-    const esc = v => String(v == null ? '' : v).replace(/'/g, '');
-    tbody.innerHTML = rows.map(r => {
-      const s = r.spec, pn = r.pn;
-      const isShared = r.scope === '__shared__';
-      return `<tr style="border-bottom:2px solid #e0e0e0">
-        <td style="font-weight:700;color:#1a4f8a">${pn}</td>
-        <td>${s.partname||''}</td>
-        <td><span class="pn-badge">${s.rev||''}</span></td>
-        <td><span class="pn-badge" style="background:#f0fff4;color:#1D6E50">${s.material||''}</span></td>
-        <td style="text-align:center"><span class="pn-badge">${(s.specs||[]).length} 項</span></td>
-        <td style="text-align:center"><span style="font-size:10px;font-weight:700;background:${isShared?'#fff3cd':'#e8f0fb'};color:${isShared?'#856404':'#1a4f8a'};border-radius:3px;padding:1px 6px">${scopeLabel(r.scope)}</span></td>
-        <td style="width:160px">
-          <div style="display:flex;gap:4px">
-            <button class="pn-btn pn-btn-edit" style="white-space:nowrap" onclick="editPn('${esc(pn)}','${esc(r.scope)}')">✏ 編輯</button>
-            <button class="pn-btn pn-btn-del" style="white-space:nowrap" onclick="deletePn('${esc(pn)}','${esc(r.scope)}')">🗑 刪除</button>
-          </div>
-        </td>
-      </tr>`;
-    }).join('');
-    return;
+  if (!filterBar && tableEl && tableEl.parentElement) {
+    filterBar = document.createElement('div');
+    filterBar.id = 'pn-scope-filterbar';
+    filterBar.style.cssText = 'margin:0 0 8px;display:flex;align-items:center;gap:8px;font-size:12px;flex-wrap:wrap';
+    const sel = 'height:28px;width:auto;border:1px solid #ccc;border-radius:4px;font-size:12px;padding:0 6px';
+    filterBar.innerHTML =
+        '<span style="font-weight:700;color:#1a4f8a">篩選 Filter：</span>'
+      + `<select id="pn-f-owner" onchange="setPnScopeFilter(this.value)" style="${sel}"></select>`
+      + '<input id="pn-f-kw" type="text" placeholder="料號／品名" oninput="setPnKwFilter(this.value)"'
+      + ' style="height:28px;width:170px;border:1px solid #ccc;border-radius:4px;font-size:12px;padding:0 8px">'
+      + `<select id="pn-f-status" onchange="setPnStatusFilter(this.value)" style="${sel}"></select>`
+      + '<button type="button" onclick="clearPnFilters()" style="height:28px;padding:0 12px;border:1px solid #ccc;border-radius:4px;background:#fff;font-size:12px;cursor:pointer">清除</button>'
+      + '<span id="pn-f-count" style="color:#666;white-space:nowrap"></span>';
+    tableEl.parentElement.insertBefore(filterBar, tableEl);
   }
 
-  // ── 非 admin：自己歸屬（一號一列，可編可刪）＋ V170-12 跨廠唯讀區 ──
-  const _cross = listCrossScopeSpecRows();
-  if (!keys.length && !_cross.length) {
+  // ══ V178：每一「料號＋歸屬＋版本」一列；停用的變灰、標停用日期與停用人；
+  //    按鈕＝✏ 編輯／📑 改版／⏸ 停用（停用的是 ▶ 啟用）／🗑 刪除，全部帶著那一列的歸屬＋版本 ══
+  const all   = specCacheAll();
+  const mine  = isAdm ? null : mySpecScope();
+  const base  = isAdm ? all : (mine ? all.filter(r => r.scope === mine) : []);   // 自己能操作的
+  const cross = isAdm ? [] : listCrossScopeSpecRows();                           // 🌐 跨廠唯讀
+  if (!isAdm) pnScopeFilter = '';
+  const kw        = String(pnKwFilter || '').trim().toLowerCase();
+  const ownerVal  = pnScopeFilter === '__shared__' ? 'shared' : pnScopeFilter;
+  const passKw     = r => !kw || String(r.partno).toLowerCase().includes(kw) || String(r.partname || '').toLowerCase().includes(kw);
+  const passOwner  = r => !ownerVal || r.scope === ownerVal;
+  const passStatus = r => !pnStatusFilter || (pnStatusFilter === 'active' ? r.active : !r.active);
+  //  連動：選到的值在「其他條件」下已經沒有資料 ⇒ 自動清掉（例：搜 55500000 之後，只剩 SH，歸屬選 SDY 就失效）
+  if (ownerVal && !base.some(r => passKw(r) && passStatus(r) && passOwner(r))) pnScopeFilter = '';
+  const ownerNow = pnScopeFilter === '__shared__' ? 'shared' : pnScopeFilter;
+  const passOwner2 = r => !ownerNow || r.scope === ownerNow;
+  const statusPool = base.filter(r => passKw(r) && passOwner2(r)).concat(cross.filter(passKw));
+  if (pnStatusFilter && !statusPool.some(passStatus)) pnStatusFilter = '';
+
+  //  下拉選項（只列還有資料的，並標筆數）
+  const ownerSel = document.getElementById('pn-f-owner');
+  if (ownerSel) {
+    ownerSel.style.display = isAdm ? '' : 'none';
+    if (isAdm) {
+      const cnt = {};
+      base.filter(r => passKw(r) && passStatus(r)).forEach(r => { cnt[r.scope] = (cnt[r.scope] || 0) + 1; });
+      const nameOf = code => {
+        if (code === 'shared') return '(共用) Shared';
+        const s = activeSites().find(x => x.code === code);                 // V158:共用來源
+        if (s) return code + ' — ' + s.name;
+        const p = activeSuppliers().find(x => x.code === code);             // V158:共用來源
+        return p ? '🏢 ' + code + (p.name ? ' — ' + p.name : '') : code;
+      };
+      const codes = Object.keys(cnt).sort((a, b) => (a === 'shared' ? -1 : b === 'shared' ? 1 : a.localeCompare(b)));
+      const total = codes.reduce((s, c) => s + cnt[c], 0);
+      ownerSel.innerHTML = `<option value="">— 全部歸屬（${total}）—</option>`
+        + codes.map(c => `<option value="${c === 'shared' ? '__shared__' : c}">${nameOf(c)}（${cnt[c]}）</option>`).join('');
+      ownerSel.value = pnScopeFilter || '';
+    }
+  }
+  const statusSel = document.getElementById('pn-f-status');
+  if (statusSel) {
+    const nAct = statusPool.filter(r => r.active).length, nOff = statusPool.length - nAct;
+    statusSel.innerHTML = `<option value="">全部狀態（${statusPool.length}）</option>`
+      + (nAct ? `<option value="active">使用中（${nAct}）</option>` : '')
+      + (nOff ? `<option value="inactive">停用（${nOff}）</option>` : '');
+    statusSel.value = pnStatusFilter || '';
+  }
+  const kwInp = document.getElementById('pn-f-kw');
+  if (kwInp && kwInp.value !== pnKwFilter && document.activeElement !== kwInp) kwInp.value = pnKwFilter;
+
+  const rows = base.filter(r => passKw(r) && passOwner2(r) && passStatus(r)).sort(specCmp);
+  const _cross = cross.filter(r => passKw(r) && passStatus(r));
+  const totalN = base.length + cross.length, shownN = rows.length + _cross.length;
+  const cntEl = document.getElementById('pn-f-count');
+  if (cntEl) { cntEl.textContent = `顯示 ${shownN} / ${totalN} 筆`; cntEl.style.color = (totalN && !shownN) ? '#c0392b' : '#666'; }
+  if (!totalN) {
     tbody.innerHTML = `<tr><td colspan="${colCount}" class="empty-hint">資料庫尚無料號，請在下方填寫後儲存</td></tr>`;
     return;
   }
-  let _html = keys.map(pn => {
-    const s = PART_SPECS[pn];
-    return `<tr style="border-bottom:2px solid #e0e0e0">
-      <td style="font-weight:700;color:#1a4f8a">${pn}</td>
-      <td>${s.partname||''}</td>
-      <td><span class="pn-badge">${s.rev||''}</span></td>
-      <td><span class="pn-badge" style="background:#f0fff4;color:#1D6E50">${s.material||''}</span></td>
-      <td style="text-align:center"><span class="pn-badge">${(s.specs||[]).length} 項</span></td>
-      <td style="width:160px">
-        <div style="display:flex;gap:4px">
-          <button class="pn-btn pn-btn-edit" style="white-space:nowrap" onclick="editPn('${pn}')">✏ 編輯</button>
-          <button class="pn-btn pn-btn-del" style="white-space:nowrap" onclick="deletePn('${pn}')">🗑 刪除</button>
-        </div>
-      </td>
-    </tr>`;
-  }).join('');
+  if (!shownN) {
+    tbody.innerHTML = `<tr><td colspan="${colCount}" class="empty-hint" style="color:#c0392b">查無符合條件的料號 —— 請按「清除」重設篩選</td></tr>`;
+    return;
+  }
+  let _html = rows.map(r => specListRowHtml(r, { editable: true, showOwner: isAdm })).join('');
 
   // ══ V170-12：🌐 範圍內、別廠的料號規格（唯讀）══
   //  刻意接在自己的清單「後面」而不是混排：上面是你能改的，下面是只能看的，
@@ -5569,28 +5787,73 @@ function renderPnList() {
     _html += `<tr><td colspan="${colCount}" style="padding:8px 10px 6px;font-size:12px;font-weight:700;color:#0f6e56;background:#f0fff8;border-top:2px solid #9fd8c0">
         🌐 以下 ${_cross.length} 筆是<b>跨廠區檢視範圍</b>內的料號規格 —— <b>唯讀</b>，不能編輯或刪除
       </td></tr>`;
-    _html += _cross.map(r => {
-      const s = r.spec;
-      return `<tr style="border-bottom:1px solid #e8e8e8;background:#fbfefc">
-        <td style="font-weight:700;color:#0f6e56">${r.pn}</td>
-        <td style="color:#555">${s.partname||''}</td>
-        <td><span class="pn-badge">${s.rev||''}</span></td>
-        <td><span class="pn-badge" style="background:#f0fff4;color:#1D6E50">${s.material||''}</span></td>
-        <td style="text-align:center"><span class="pn-badge">${(s.specs||[]).length} 項</span></td>
-        <td style="width:160px">
-          <span style="font-size:10px;font-weight:700;background:#e8f5ee;color:#0f6e56;border:1px solid #9fd8c0;border-radius:3px;padding:2px 7px;white-space:nowrap">🔒 ${scopeLabel(r.scope)}　唯讀</span>
-        </td>
-      </tr>`;
-    }).join('');
+    _html += _cross.map(r => specListRowHtml(r, { editable: false, showOwner: false })).join('');
   }
   tbody.innerHTML = _html;
+}
+
+// ══ V178：料號清單的一列（自己的＝可操作；🌐 跨廠的＝唯讀）══
+function specListRowHtml(r, opt) {
+  const h = v => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const a = v => String(v == null ? '' : v).replace(/[\\'"]/g, '');   // 放進 onclick 參數：去掉引號與反斜線
+  const stopped = !r.active;
+  const isShared = r.scope === 'shared';
+  const args = `'${a(r.partno)}','${a(r.scope)}','${a(r.rev)}'`;
+  //  版本欄很窄（約 60px）⇒ 這裡只標「停用」兩個字；停用日期與停用人放在品名欄第二行（nameCell）
+  const revCell = `<span class="pn-badge">${h(r.rev) || '—'}</span>`
+    + (stopped ? `<div style="font-size:10px;color:#BA7517;margin-top:3px;white-space:nowrap">⏸ 停用</div>` : '');
+  const nameCell = h(r.partname)
+    + (stopped ? `<div style="font-size:11px;color:#BA7517;margin-top:3px">⏸ ${specFmtDate(r.deactivatedAt, true) || '（日期不明）'} 停用${r.deactivatedBy ? '・' + h(r.deactivatedBy) : ''}</div>` : '');
+  const ownerCell = opt.showOwner
+    ? `<td style="text-align:center"><span style="font-size:10px;font-weight:700;background:${isShared?'#fff3cd':'#e8f0fb'};color:${isShared?'#856404':'#1a4f8a'};border-radius:3px;padding:1px 6px">${h(scopeLabel(r.scope))}</span></td>`
+    : '';
+  const actCell = opt.editable
+    ? `<td style="width:170px">
+         <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px">
+           <button class="pn-btn pn-btn-edit" style="white-space:nowrap" onclick="editPn(${args})">✏ 編輯</button>
+           <button class="pn-btn pn-btn-edit" style="white-space:nowrap" onclick="revisePn(${args})" title="複製這一版的檢驗項目，建立新版本">📑 改版</button>
+           ${stopped
+             ? `<button class="pn-btn pn-btn-edit" style="white-space:nowrap;color:#1D6E50;border-color:#9fd8c0" onclick="toggleSpecActive(${args},true)">▶ 啟用</button>`
+             : `<button class="pn-btn pn-btn-edit" style="white-space:nowrap;color:#BA7517;border-color:#f0d080" onclick="toggleSpecActive(${args},false)" title="不再帶出這一版，資料留著，可再啟用">⏸ 停用</button>`}
+           <button class="pn-btn pn-btn-del" style="white-space:nowrap" onclick="deletePn(${args})">🗑 刪除</button>
+         </div>
+       </td>`
+    : `<td style="width:170px">
+         <span style="font-size:10px;font-weight:700;background:#e8f5ee;color:#0f6e56;border:1px solid #9fd8c0;border-radius:3px;padding:2px 7px;white-space:nowrap">🔒 ${h(scopeLabel(r.scope))}　唯讀</span>
+       </td>`;
+  const rowStyle = stopped ? 'border-bottom:1px solid #e8e8e8;background:#f5f5f5;color:#999'
+                 : opt.editable ? 'border-bottom:2px solid #e0e0e0' : 'border-bottom:1px solid #e8e8e8;background:#fbfefc';
+  const pnColor = stopped ? '#999' : (opt.editable ? '#1a4f8a' : '#0f6e56');
+  return `<tr style="${rowStyle}">
+      <td style="font-weight:700;color:${pnColor}">${h(r.partno)}</td>
+      <td${stopped || !opt.editable ? ' style="color:' + (stopped ? '#999' : '#555') + '"' : ''}>${nameCell}</td>
+      <td>${revCell}</td>
+      <td>${r.material ? `<span class="pn-badge" style="background:#f0fff4;color:#1D6E50${stopped ? ';opacity:.6' : ''}">${h(r.material)}</span>` : ''}</td>
+      <td style="text-align:center"><span class="pn-badge"${stopped ? ' style="opacity:.6"' : ''}>${(r.specs || []).length} 項</span></td>
+      ${ownerCell}
+      ${actCell}
+    </tr>`;
+}
+
+// V178-2：切到料號規格管理頁時，管理員若在「新增料號」狀態、STEP 4 又是藏著的 ⇒ 打開它（全部不勾）
+//  只在藏著時才畫——已經打開、使用者可能勾到一半，重畫會把勾選清掉
+function ensureScopePanelForNew() {
+  if (!isAdmin() || specEditMode !== 'new' || editingPn) return;
+  const sp = document.getElementById('scope-panel');
+  if (sp && sp.style.display === 'none') renderScopeCheckboxes('', null);
 }
 
 function clearEditor() {
   editingPn = null;
   editingScope = null; // V146
+  editingRev = null; specEditMode = 'new'; reviseFromRev = null;   // V178
+  // ══ V178-2：管理員「新增料號」也要看得到 STEP 4 歸屬設定（使用者 260930 截圖：沒有 STEP 4，存檔卻叫人勾 STEP 4）══
+  //  舊版清空編輯區就把 STEP 4 藏起來，只有按「✏ 編輯」既有料號才會出現；V175 以前沒勾歸屬會默默存成共用，所以沒人發現。
+  //  V177 起「沒勾歸屬就擋下」⇒ 管理員新增料號卡死。改成：管理員清空時顯示 STEP 4、全部不勾，讓人自己選。
+  //  一般帳號照舊藏起來（存檔一律歸自己的廠區）。
   const sp = document.getElementById('scope-panel');
-  if (sp) sp.style.display = 'none';
+  if (isAdmin()) renderScopeCheckboxes('', null);
+  else if (sp) sp.style.display = 'none';
   document.getElementById('editor-title').textContent = 'STEP 2　填寫料號基本資料 Part Info';
   document.getElementById('e-partno').value    = '';
   document.getElementById('e-partno').readOnly = false;
@@ -5607,46 +5870,90 @@ function clearEditor() {
   ['sc1','sc2','sc3'].forEach(id => document.getElementById(id).classList.remove('active-step'));
 }
 
-function editPn(pn, scope) {
-  editingPn = pn;
-  editingScope = (isAdmin() && scope) ? scope : null; // V146：admin 記住「編的是哪個歸屬」
-  let s = PART_SPECS[pn];
-  if (editingScope) {
-    // V146：讀「該歸屬」那一份內容（多歸屬並存後，同號各家內容可能不同）
-    const storeKey = editingScope === '__shared__' ? SPEC_DB_KEY : SPEC_DB_KEY + '_' + editingScope;
-    try { const db = JSON.parse(localStorage.getItem(storeKey) || '{}'); if (db[pn]) s = db[pn]; } catch(e) {}
-  }
-  if (!s) return;
-  document.getElementById('editor-title').textContent = `STEP 2　編輯料號 ${pn}` + (editingScope ? `（歸屬：${scopeLabel(editingScope)}）` : '');
-  document.getElementById('e-partno').value    = pn;
-  document.getElementById('e-partno').readOnly = true;
-  document.getElementById('e-partno').style.background = '#f0f5ff';
-  document.getElementById('e-partname').value  = s.partname  || '';
-  document.getElementById('e-rev').value       = s.rev       || '';
-  // V177-1：編輯既有料號時版本欄鎖住——存檔的合併鍵已改成「料號＋歸屬＋版本」，
-  //  這裡改了版本號再存，會變成「新增一個版本」而不是改這一份（改版功能在 V178 另外做）
-  const _eRev = document.getElementById('e-rev');
-  _eRev.readOnly = true; _eRev.style.background = '#f0f5ff';
-  _eRev.title = '編輯時不能改版本。要換新版本，請等 V178 的「改版」功能';
-  document.getElementById('e-material').value  = s.material  || '';
-  document.getElementById('e-supplier').value  = s.supplier  || '';
-  specRows = (s.specs||[]).map(r=>({...r}));
-  renderSpecRows();
-  // ── 歸屬設定（Admin 才顯示）──
-  renderScopeCheckboxes(pn, editingScope);
+// ══ V178：編輯某一版（料號＋歸屬＋版本）══
+//  版本欄鎖住：這裡改的是「這一版」的內容；要新版本走「📑 改版」（V177-1 起就鎖，避免改版本號變成多出一列）
+function editPn(pn, scope, rev) {
+  const s = specCacheFind(pn, scope, rev == null ? '' : String(rev));
+  if (!s) { setMgrStatus(`⚠ 找不到料號 ${pn}（${scopeLabel(scope)}・${specRevText(rev)}），請按「🔄 重新同步雲端」後再試`, 'err'); return; }
+  specEditMode = 'edit'; reviseFromRev = null;
+  editingPn = pn; editingScope = s.scope; editingRev = s.rev;
+  specFillEditor(s, s.rev,
+    `STEP 2　編輯料號 ${pn}（歸屬：${scopeLabel(s.scope)}・${specRevText(s.rev)}${s.active ? '' : '・已停用'}）`);
+  //  V178-3：編輯只改這一列 ⇒ 勾選鎖住（管理員才顯示 STEP 4）
+  renderScopeCheckboxes(pn, s.scope, `編輯只會改這一列（歸屬：${scopeLabel(s.scope)}），這裡不能改；要放到別的廠區，請清除後用「新增」`);
   // V171：順序亂掉的舊料號「只提示、不偷排」—— 畫面要跟存起來的樣子一致，按儲存才重排
-  if (specRowsInOrder(specRows)) setMgrStatus(`正在編輯料號 ${pn}，修改後按「儲存料號」`, '');
+  if (specRowsInOrder(specRows)) setMgrStatus(`正在編輯料號 ${pn} ${specRevText(s.rev)}，修改後按「儲存料號」`, '');
   else setMgrStatus(`正在編輯料號 ${pn}。⚠ 這個料號的球標不是由小到大排列，按「儲存料號」就會自動重新排序`, 'warn');
+}
+
+// ══ V178：改版——複製某一版的全部檢驗項目，填新版號，改完按儲存才建立新版 ══
+//  存檔時再問「舊版要不要同時停用」（預設停用；交替期兩版都要用就選不停用）。見 savePartSpec。
+async function revisePn(pn, scope, rev) {
+  const caps = ROLE_CAPS[getCurrentUserRole()] || ROLE_CAPS.query;
+  if (!caps.edit) { showNoPermToast('改版 需要「修改」以上權限'); return; }
+  const s = specCacheFind(pn, scope, rev == null ? '' : String(rev));
+  if (!s) { setMgrStatus(`⚠ 找不到料號 ${pn}（${scopeLabel(scope)}・${specRevText(rev)}），請按「🔄 重新同步雲端」後再試`, 'err'); return; }
+  const have = specCacheAll().filter(r => r.partno === pn && r.scope === s.scope).map(r => r.rev);
+  const newRev = await qmsAskText(`料號 ${pn} 改版（${scopeLabel(s.scope)}）`,
+    `從 ${specRevText(s.rev)} 複製 ${(s.specs || []).length} 項檢驗項目，建立新版本。\n`
+    + `${scopeLabel(s.scope)} 目前已有：${have.map(v => specRevText(v)).join('、')}\n請輸入新版號：`,
+    '例：B',
+    v => !v ? '請輸入新版號'
+       : have.some(x => x.toLowerCase() === v.toLowerCase()) ? `${scopeLabel(s.scope)} 已經有 ${v} 版了，請換一個版號`
+       : /['"\\]/.test(v) ? '版號不能有引號或反斜線' : '');
+  if (newRev == null) return;
+  specEditMode = 'revise'; reviseFromRev = s.rev;
+  editingPn = pn; editingScope = s.scope; editingRev = newRev;
+  specFillEditor(s, newRev, `STEP 2　改版 料號 ${pn}（歸屬：${scopeLabel(s.scope)}）：${specRevText(s.rev)} → ${newRev} 版`);
+  renderScopeCheckboxes(pn, s.scope, true);   // 改版只改這個歸屬：勾選鎖住
+  setMgrStatus(`📑 已複製 ${specRevText(s.rev)} 的 ${(s.specs || []).length} 項檢驗項目——修改有變的地方，按「儲存料號」就會建立 ${newRev} 版`, 'warn');
+}
+
+//  把一份規格填進編輯器（料號與版本欄鎖住）
+function specFillEditor(s, revValue, title, noScroll) {
+  document.getElementById('editor-title').textContent = title;
+  const ePn = document.getElementById('e-partno');
+  ePn.value = s.partno; ePn.readOnly = true; ePn.style.background = '#f0f5ff';
+  document.getElementById('e-partname').value = s.partname || '';
+  const eRev = document.getElementById('e-rev');
+  eRev.value = revValue == null ? '' : revValue;
+  eRev.readOnly = true; eRev.style.background = '#f0f5ff';
+  eRev.title = '版本不能在這裡改。要建立新版本，請按清單上該列的「📑 改版」';
+  document.getElementById('e-material').value = s.material || '';
+  document.getElementById('e-supplier').value = s.supplier || '';
+  specRows = (s.specs || []).map(r => ({ ...r }));
+  renderSpecRows();
   document.getElementById('sc2').classList.add('active-step');
   document.getElementById('sc3').classList.add('active-step');
-  document.getElementById('e-partname').scrollIntoView({behavior:'smooth', block:'center'});
+  if (!noScroll) document.getElementById('e-partname').scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+// ══ V178：停用／啟用某一版 ══
+async function toggleSpecActive(pn, scope, rev, makeActive) {
+  const caps = ROLE_CAPS[getCurrentUserRole()] || ROLE_CAPS.query;
+  if (!caps.edit) { showNoPermToast((makeActive ? '啟用' : '停用') + ' 需要「修改」以上權限'); return; }
+  const r = specCacheFind(pn, scope, rev == null ? '' : String(rev));
+  if (!r) { setMgrStatus(`⚠ 找不到料號 ${pn}（${scopeLabel(scope)}・${specRevText(rev)}），請按「🔄 重新同步雲端」後再試`, 'err'); return; }
+  const tag = `料號 ${pn}（${scopeLabel(r.scope)}・${specRevText(r.rev)}）`;
+  if (!makeActive) {
+    const others = specCacheAll().filter(x => x.partno === pn && x.scope === r.scope && x.active && x.rev !== r.rev);
+    if (!confirm(`停用${tag}？\n\n停用後 FAI／CPK 不會再帶出這一版；資料留著，之後可以再按「▶ 啟用」恢復。`
+        + (others.length ? '' : `\n\n⚠ 這是 ${scopeLabel(r.scope)} 最後一個使用中的版本——停用後，這個料號在 ${scopeLabel(r.scope)} 就帶不出規格了。`))) return;
+  } else if (!confirm(`重新啟用${tag}？\n\n啟用後 FAI／CPK 又會帶出這一版。`)) return;
+  if (!_sbReady) { setMgrStatus('⚠ 雲端未連線，無法' + (makeActive ? '啟用' : '停用') + '，請稍後再試', 'err'); return; }
+  const res = await sbSetSpecActive(r.partno, r.scope, r.rev, makeActive);
+  if (!res.ok) { setMgrStatus('⚠ ' + (makeActive ? '啟用' : '停用') + '失敗：' + res.msg, 'err'); return; }
+  renderPnList();
+  setMgrStatus(`${makeActive ? '▶ 已啟用' : '⏸ 已停用'} ${tag}`, 'ok');
 }
 
 // ── 歸屬設定：渲染 Checkbox 列表 ──
-function renderScopeCheckboxes(pn, onlyScope) {
+function renderScopeCheckboxes(pn, onlyScope, lockAll) {
   const panel = document.getElementById('scope-panel');
   if (!isAdmin()) { panel.style.display = 'none'; return; }
   panel.style.display = '';
+  // V178：共用在雲端存 'shared'，清單傳進來的就是 'shared'；舊寫法 '__shared__' 一起認
+  if (onlyScope === '__shared__') onlyScope = 'shared';
 
   // 找出要預勾的歸屬
   // V146：從「歸屬列」進來編輯時只預勾那一個——儲存只寫回該歸屬，不會把同一份內容蓋到其他歸屬
@@ -5654,25 +5961,16 @@ function renderScopeCheckboxes(pn, onlyScope) {
   const currentScopes = new Set();
   if (onlyScope) {
     currentScopes.add(onlyScope);
-  } else {
-  for (let i = 0; i < localStorage.length; i++) {
-    const k = localStorage.key(i);
-    if (!k || !k.startsWith(SPEC_DB_KEY)) continue;
-    try {
-      const db = JSON.parse(localStorage.getItem(k) || '{}');
-      if (db[pn]) {
-        const scope = k === SPEC_DB_KEY ? '__shared__' : k.replace(SPEC_DB_KEY + '_', '');
-        currentScopes.add(scope);
-      }
-    } catch(e) {}
-  }
+  } else if (pn) {
+    // V178：改看雲端清單（原本掃本機各廠料號庫）
+    specCacheAll().forEach(r => { if (r.partno === pn) currentScopes.add(r.scope); });
   }
 
   // 建立 checkbox 清單：廠區 + 供應商（+ 共用僅限維護既有共用列時顯示）
   // V146-1：「共用」不再開放新設（使用者 2026-07-24 定案：除內建示範外不用共用、各歸屬各自維護規格）
-  //         僅在「編輯既有共用列」（onlyScope='__shared__'）時顯示共用選項，讓內建示範仍可維護
+  //         僅在「編輯既有共用列」（onlyScope='shared'）時顯示共用選項，讓內建示範仍可維護
   const allScopes = [
-    ...(onlyScope === '__shared__' ? [{ key: '__shared__', label: '(共用) 所有人' }] : []),
+    ...(onlyScope === 'shared' ? [{ key: 'shared', label: '(共用) 所有人' }] : []),
     ...activeSites().map(s => ({ key: s.code, label: s.code + ' ' + s.name })),        // V158:共用來源
     ...activeSuppliers().map(s => ({ key: s.code, label: s.code + ' ' + s.name }))     // V158:共用來源
   ];
@@ -5681,11 +5979,15 @@ function renderScopeCheckboxes(pn, onlyScope) {
   box.innerHTML = allScopes.map(sc => `
     <label style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer;
       background:#f5f7fa;border:0.5px solid #ddd;border-radius:4px;padding:4px 10px;white-space:nowrap">
-      <input type="checkbox" value="${sc.key}" ${currentScopes.has(sc.key)?'checked':''}
+      <input type="checkbox" value="${sc.key}" ${currentScopes.has(sc.key)?'checked':''} ${lockAll ? 'disabled' : ''}
         style="width:14px;height:14px;cursor:pointer">
       ${sc.label}
     </label>
-  `).join('');
+  `).join('')
+    // V178：改版時只建立在原本那個歸屬，勾選鎖住；V178-3：編輯也鎖（lockAll 傳字串＝顯示那段說明）
+    + (lockAll ? '<div style="flex-basis:100%;font-size:11px;color:#888;margin-top:4px">'
+        + (typeof lockAll === 'string' ? lockAll.replace(/&/g, '&amp;').replace(/</g, '&lt;') : '改版只會建立在原本的歸屬，這裡不能改')
+        + '</div>' : '');
 }
 
 // ── 歸屬設定：取得目前勾選的 scope 清單 ──
@@ -5695,78 +5997,23 @@ function getSelectedScopes() {
   return Array.from(box.querySelectorAll('input[type=checkbox]:checked')).map(cb => cb.value);
 }
 
-function deletePn(pn, scope) {
-  const _adm = isAdmin();
-  // 🔒 共用料號只有 admin 能刪：非 admin 若該料號存在於「共用」scope，擋下並提示
-  if (!_adm) {
-    let isShared = false;
-    try { isShared = !!JSON.parse(localStorage.getItem(SPEC_DB_KEY) || '{}')[pn]; } catch(e){}
-    if (isShared) {
-      setMgrStatus(`料號 ${pn} 為共用料號，僅管理員可刪除，請洽管理員`, 'err');
-      return;
-    }
-  }
-  // ── V146：admin 從「歸屬列」刪——只刪該歸屬那一份（本機＋雲端），不動其他家的同號料號 ──
-  if (_adm && scope) {
-    if (!confirm(`確定刪除料號 ${pn}（歸屬：${scopeLabel(scope)}）？此操作無法復原。`)) return;
-    const storeKey = scope === '__shared__' ? SPEC_DB_KEY : SPEC_DB_KEY + '_' + scope;
-    let _rev = '';   // V177-1：只刪畫面上這一版（V178 之後同歸屬可能還有停用的舊版，不能一起刪掉）
-    try {
-      const db = JSON.parse(localStorage.getItem(storeKey) || '{}');
-      if (db[pn]) { _rev = db[pn].rev == null ? '' : String(db[pn].rev); delete db[pn]; localStorage.setItem(storeKey, JSON.stringify(db)); }
-    } catch(e) {}
-    if (_sbReady) {
-      const cloudScope = scope === '__shared__' ? 'shared' : scope;
-      fetch(SUPABASE_URL + '/rest/v1/part_specs?partno=eq.' + encodeURIComponent(pn) + '&scope=eq.' + encodeURIComponent(cloudScope)
-          + '&rev=eq.' + encodeURIComponent(_rev),
-        { method: 'DELETE', headers: { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer() } }
-      ).catch(e => console.warn('料號雲端刪除失敗:', pn, e));
-    }
-    PART_SPECS = loadAllSpecDB();
-    renderPnList();
-    if (editingPn === pn) clearEditor();
-    setMgrStatus(`已刪除料號 ${pn}（${scopeLabel(scope)}）`, 'ok');
-    return;
-  }
-  if (!confirm(`確定刪除料號 ${pn}？此操作無法復原。`)) return;
-
-  if (_adm) {
-    // Admin：刪本機所有 scope key
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
-      if (k && k.startsWith(SPEC_DB_KEY)) {
-        try {
-          const db = JSON.parse(localStorage.getItem(k));
-          if (db[pn]) { delete db[pn]; localStorage.setItem(k, JSON.stringify(db)); }
-        } catch(e){}
-      }
-    }
-    // ☁ 雲端：刪除此料號所有 scope 記錄（修正：原本只刪本機，重新同步會復活→刪不掉）
-    if (_sbReady) {
-      fetch(SUPABASE_URL + '/rest/v1/part_specs?partno=eq.' + encodeURIComponent(pn),
-        { method: 'DELETE', headers: { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer() } }
-      ).catch(e => console.warn('料號雲端刪除失敗:', pn, e));
-    }
-  } else {
-    // 廠區/供應商：只刪自己 scope（本機 + 雲端對應 scope）
-    const _rev = (PART_SPECS[pn] && PART_SPECS[pn].rev != null) ? String(PART_SPECS[pn].rev) : '';   // V177-1：只刪這一版
-    delete PART_SPECS[pn];
-    saveSpecDB(PART_SPECS); // V144：不帶 syncPn＝純本機保存；雲端由下面的 DELETE 處理（不再整包重傳）
-    if (_sbReady) {
-      const s = getSession();
-      const myScope = s?.isSupplier ? s.supplierCode : (getCurrentSite() || s?.site || '');
-      if (myScope) {
-        fetch(SUPABASE_URL + '/rest/v1/part_specs?partno=eq.' + encodeURIComponent(pn) + '&scope=eq.' + encodeURIComponent(myScope)
-            + '&rev=eq.' + encodeURIComponent(_rev),
-          { method: 'DELETE', headers: { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer() } }
-        ).catch(e => console.warn('料號雲端刪除失敗:', pn, e));
-      }
-    }
-  }
-  PART_SPECS = _adm ? loadAllSpecDB() : loadSpecDB();
+// ══ V178：刪除「某一版」（料號＋歸屬＋版本）——先刪雲端，雲端確認刪到了才更新畫面 ══
+//  舊版：先刪本機、雲端 DELETE 丟出去不看結果（權限擋掉也不知道），管理員從別處呼叫還會刪掉「所有歸屬」。
+//  不想用、但要留紀錄的，請用「⏸ 停用」（刪除無法復原）。
+async function deletePn(pn, scope, rev) {
+  rev = rev == null ? '' : String(rev);
+  const r = specCacheFind(pn, scope, rev);
+  if (!r) { setMgrStatus(`⚠ 找不到料號 ${pn}（${scopeLabel(scope)}・${specRevText(rev)}），請按「🔄 重新同步雲端」後再試`, 'err'); return; }
+  //  非管理員只能刪自己歸屬的（清單本來就只列自己的；這裡保險）
+  if (!isAdmin() && r.scope !== mySpecScope()) { setMgrStatus(`料號 ${pn} 不屬於你的廠區，不能刪除`, 'err'); return; }
+  const tag = `料號 ${pn}（${scopeLabel(r.scope)}・${specRevText(r.rev)}）`;
+  if (!confirm(`確定刪除${tag}？\n\n只刪這一個版本；刪除無法復原。\n（不想再用、但要留紀錄，請改按「⏸ 停用」）`)) return;
+  if (!_sbReady) { setMgrStatus('⚠ 雲端未連線，無法刪除，請稍後再試', 'err'); return; }
+  const res = await sbDeleteSpecRow(r.partno, r.scope, r.rev);
+  if (!res.ok) { setMgrStatus('⚠ 刪除失敗：' + res.msg, 'err'); return; }
   renderPnList();
-  if (editingPn === pn) clearEditor();
-  setMgrStatus(`已刪除料號 ${pn}`, 'ok');
+  if (editingPn === pn && editingScope === r.scope && editingRev === r.rev) clearEditor();
+  setMgrStatus(`已刪除${tag}`, 'ok');
 }
 
 // ══ V171：料號規格的球標自動依序排列（Noris 邱泊鈞 260922 反映）══
@@ -5883,6 +6130,12 @@ function addSpecRow() {
   document.getElementById('sc3').classList.add('active-step');
 }
 
+//  V178-5：規格行是不是空白（球標、名目值、正負公差都沒打；0 算有打）
+function specRowIsBlank(r) {
+  const blank = v => v === undefined || v === null || String(v).trim() === '';
+  return blank(r.fai) && blank(r.nom) && blank(r.pt) && blank(r.mt);
+}
+
 function renderSpecRows() {
   const tbody = document.getElementById('spec-tbody');
   tbody.innerHTML = '';
@@ -5904,9 +6157,9 @@ function renderSpecRows() {
         <option ${r.type==='FAI'?'selected':''}>FAI</option>
         <option ${r.type==='CPK'?'selected':''}>CPK</option>
       </select></td>
-      <td><input type="number" step="any" value="${r.nom??''}" placeholder="0" onchange="specRows[${i}].nom=this.value;renderSpecRows()"></td>
-      <td><input type="number" step="any" value="${r.pt??''}"  placeholder="0.1" onchange="specRows[${i}].pt=this.value;renderSpecRows()"></td>
-      <td><input type="number" step="any" value="${r.mt??''}"  placeholder="0.1" onchange="specRows[${i}].mt=this.value;renderSpecRows()"></td>
+      <td><input type="number" step="any" value="${r.nom??''}" placeholder="例：10" onchange="specRows[${i}].nom=this.value;renderSpecRows()"></td>
+      <td><input type="number" step="any" value="${r.pt??''}"  placeholder="例：0.1" onchange="specRows[${i}].pt=this.value;renderSpecRows()"></td>
+      <td><input type="number" step="any" value="${r.mt??''}"  placeholder="例：0.1" onchange="specRows[${i}].mt=this.value;renderSpecRows()"></td>
       <td class="usl-col">${usl}</td>
       <td class="usl-col">${lsl}</td>
       <td><button onclick="specRows.splice(${i},1);renderSpecRows()" style="border:none;background:none;color:#c0392b;cursor:pointer;font-size:15px;font-weight:700">✕</button></td>
@@ -5915,7 +6168,12 @@ function renderSpecRows() {
   });
 }
 
-function savePartSpec() {
+// ══ V178：存檔——三種情況（新增料號／編輯某一版／改版），一律先寫雲端、雲端確認了才更新畫面 ══
+//  ・新增：這個料號在要存的歸屬已經有任何版本 ⇒ 擋下，請改用「✏ 編輯」或「📑 改版」
+//    （避免新增時打了不同版號、默默多出一個沒人管的版本，或打了同版號蓋掉既有內容）
+//  ・編輯：只改這一版的內容，使用中／停用狀態不動；管理員多勾別的歸屬＝把這一版也發到那些歸屬（V146 行為）
+//  ・改版：建立新版本，存檔前問「舊版要不要同時停用」（預設停用；交替期兩版都用就選不停用）
+async function savePartSpec() {
   const caps = ROLE_CAPS[getCurrentUserRole()] || ROLE_CAPS.query;
   if (!caps.edit) {
     showNoPermToast('儲存料號 需要「修改」以上權限');
@@ -5926,26 +6184,62 @@ function savePartSpec() {
   if (!pn)       { setMgrStatus('⚠ 請填寫料號 Part Number', 'err'); return; }
   if (!partname) { setMgrStatus('⚠ 請填寫品名 Part Name', 'err'); return; }
   if (!specRows.length){ setMgrStatus('⚠ 請至少新增一行規格項目（按「＋ 新增規格行」）', 'err'); return; }
-  // ══ V177：管理員存檔一定要勾歸屬（使用者 260930：料號＝哪個廠新增就歸哪個廠，共用只能刻意設）══
-  //  舊版 STEP 4 全部不勾就按儲存，程式默默存成「共用」，畫面沒有任何提醒。
-  //  一般廠區帳號不看這裡（沒有 STEP 4，存檔一律歸自己的廠區），行為不變。
-  if (isAdmin()) {
-    const _sc = getSelectedScopes();
-    if (!_sc || !_sc.length) {
-      setMgrStatus('⚠ 請在 STEP 4「歸屬設定」勾選至少一個廠區／供應商（這個料號要給誰用），再按儲存', 'err');
+  const mode = specEditMode;
+  // ── 要存到哪些歸屬 ──
+  //  V177：管理員存檔一定要勾歸屬（使用者 260930：料號＝哪個廠新增就歸哪個廠，共用只能刻意設）
+  const _needScopeMsg = '⚠ 請在 STEP 4「歸屬設定」勾選至少一個廠區／供應商（這個料號要給誰用），再按儲存';
+  let scopes;
+  // ══ V178-3：「✏ 編輯」一律只存回這一列自己的歸屬（STEP 4 鎖住）══
+  //  事故（使用者 260930）：編輯 55500000-005（共用）時把 STEP 4 改勾 SH 想「把共用改成 SH」，
+  //  舊寫法照勾的歸屬存 ⇒ 用共用那份（10 項）**覆蓋了 SH 原本的 A 版（9 項）**，而且共用那列還在。
+  //  （V146 起「編輯時多勾歸屬＝把同一份發到那些歸屬」；覆蓋提醒只寫在「勾兩個以上」時，單勾別的歸屬直接蓋掉。）
+  //  ⇒ 編輯＝只改這一列；要放到別的廠區請用「新增」（該廠區已有這個料號會擋下）。
+  if (mode === 'revise' || mode === 'edit') {
+    scopes = [editingScope];
+  } else if (isAdmin()) {
+    const sc = getSelectedScopes();
+    if (!sc || !sc.length) { setMgrStatus(_needScopeMsg, 'err'); return; }
+    scopes = sc.map(x => x === '__shared__' ? 'shared' : x);
+  } else {
+    const mine = mode === 'edit' ? editingScope : mySpecScope();
+    if (!mine) { setMgrStatus('⚠ 這個帳號沒有所屬的廠區／供應商，不能存料號規格', 'err'); return; }
+    scopes = [mine];
+  }
+  const rev = mode === 'new' ? document.getElementById('e-rev').value.trim() : String(editingRev == null ? '' : editingRev);
+  if (mode === 'new' && !rev) { setMgrStatus('⚠ 請填寫版本 Revision（例：A）', 'err'); return; }
+  if (/['"\\]/.test(rev)) { setMgrStatus('⚠ 版本不能有引號或反斜線', 'err'); return; }
+  if (mode === 'new') {
+    const clash = scopes
+      .map(sc => ({ sc, revs: specCacheAll().filter(r => r.partno === pn && r.scope === sc).map(r => specRevText(r.rev)) }))
+      .filter(x => x.revs.length);
+    if (clash.length) {
+      setMgrStatus(`⚠ 料號 ${pn} 在 ${clash.map(x => scopeLabel(x.sc) + '（已有 ' + x.revs.join('、') + '）').join('、')} 已經建立過了——`
+        + '要改內容請按清單上該列的「✏ 編輯」，要建立新版本請按「📑 改版」', 'err');
       return;
     }
   }
+  if (mode === 'edit' && scopes.length > 1) {
+    const over = scopes.filter(sc => sc !== editingScope && specCacheFind(pn, sc, rev));
+    if (over.length && !confirm(`${over.map(scopeLabel).join('、')} 已經有 ${pn} ${specRevText(rev)}，存檔會用這份內容蓋掉，確定嗎？`)) return;
+  }
+  if (mode === 'revise' && specCacheFind(pn, editingScope, rev)) {
+    setMgrStatus(`⚠ ${scopeLabel(editingScope)} 已經有 ${specRevText(rev)}，請重新按「📑 改版」換一個版號`, 'err');
+    return;
+  }
+  if (!_sbReady) { setMgrStatus('⚠ 雲端未連線——料號規格要連上雲端才能存（V178 起不再只存在這台電腦）', 'err'); return; }
   // V171：存檔前再依球標排一次（保險：打開順序亂掉的舊料號、或打完球標直接按儲存）
   //  排完馬上重繪 ⇒ 畫面＝存進去的順序，項次也跟著重編
   const reordered = !specRowsInOrder(specRows);
   if (reordered) { sortSpecRows(); renderSpecRows(); }
-  const validSpecs = specRows.filter(r => r.moi);
-  if (!validSpecs.length){ setMgrStatus('⚠ 請填寫量測儀器名稱', 'err'); return; }
-
-  PART_SPECS[pn] = {
+  // V178-5：空白行（球標、名目值、正負公差都沒打，只剩系統帶好的儀器／類型）存檔時略過
+  //  使用者 260930：按「＋ 新增規格行」沒輸入就存，舊寫法只看儀器有沒有填（新行預設就有 Dial Caliper）
+  //  ⇒ 存成一項「球標＝列號、名目值 0、公差 0」的假項目，FAI 填表會多一項
+  const skippedBlank = specRows.filter(specRowIsBlank).length;
+  const validSpecs = specRows.filter(r => r.moi && !specRowIsBlank(r));
+  if (!validSpecs.length){ setMgrStatus(skippedBlank ? '⚠ 規格行都是空白的——請至少填一行（球標、名目值或公差）' : '⚠ 請填寫量測儀器名稱', 'err'); return; }
+  const spec = {
     partname,
-    rev:      document.getElementById('e-rev').value.trim(),
+    rev,
     material: document.getElementById('e-material').value.trim(),
     supplier: document.getElementById('e-supplier').value.trim(),
     specs: validSpecs.map((r,i) => ({
@@ -5954,35 +6248,74 @@ function savePartSpec() {
       nom: parseFloat(r.nom)||0, pt: parseFloat(r.pt)||0, mt: parseFloat(r.mt)||0,
     }))
   };
-  if (isAdmin()) {
-    // Admin：依歸屬設定寫入對應的 scope key
-    const selectedScopes = getSelectedScopes();
-    if (selectedScopes && selectedScopes.length > 0) {
-      // V146：只「寫入勾選的歸屬」，不再先全域刪除——
-      // 舊寫法「刪光此料號所有歸屬 → 重建勾選的」在多歸屬並存的世界，會把別家（如大永）的同號規格整包蓋掉/刪掉。
-      // 新語意：儲存＝更新勾選歸屬的內容；要移除某歸屬的料號 → 用清單上「該歸屬那一列」的 🗑 刪除。
-      selectedScopes.forEach(scope => {
-        sbSavePartSpec(pn, PART_SPECS[pn], scope === '__shared__' ? 'shared' : scope)
-          .catch(e => console.warn('料號同步失敗:', pn, scope, e));
-      });
-
-      selectedScopes.forEach(scope => {
-        const storeKey = scope === '__shared__' ? SPEC_DB_KEY : SPEC_DB_KEY + '_' + scope;
-        try {
-          const db = JSON.parse(localStorage.getItem(storeKey) || '{}');
-          db[pn] = PART_SPECS[pn];
-          localStorage.setItem(storeKey, JSON.stringify(db));
-        } catch(e) {}
-      });
-    }
-    // V177：原本這裡有「沒勾任何歸屬 → 存到共用」的 else 分支，已由函式開頭的檢查擋掉、整段拿掉
-    PART_SPECS = loadAllSpecDB();
-  } else {
-    saveSpecDB(PART_SPECS, pn); // V144：只同步這次儲存的料號
+  // ══ V178-6：上下限沒把名目值包在中間 ⇒ 存檔前問一次（使用者 260930 同意）══
+  //  系統算法：上限＝名目值＋(+Tol)、下限＝名目值－(−Tol)，所以 −Tol 要打正數。
+  //  事例：TEST-178 名目值 20、+Tol 4、−Tol 打 -2 ⇒ 下限＝20－(－2)＝22，比名目值還高，舊版不吭聲。
+  //  打負數也有正當用途（上下限都在名目值同一邊，例如 +0.1／+0.05），所以不擋、只確認。
+  const oddTol = spec.specs.filter(s => s.pt < 0 || s.mt < 0);
+  if (oddTol.length) {
+    const f4 = v => +v.toFixed(4);
+    const lines = oddTol.slice(0, 8).map(s => {
+      const usl = f4(s.nom + s.pt), lsl = f4(s.nom - s.mt), why = [];
+      if (s.mt < 0) why.push(`下限 ${lsl} 比名目值高`);
+      if (s.pt < 0) why.push(`上限 ${usl} 比名目值低`);
+      return `・球標 ${s.fai}：名目值 ${s.nom}、上限 ${usl}、下限 ${lsl}（${why.join('、')}）`;
+    });
+    if (oddTol.length > 8) lines.push(`・…另外還有 ${oddTol.length - 8} 項`);
+    const k = await qmsChoose('上下限沒有包住名目值，確定嗎？',
+      `下面 ${oddTol.length} 項，名目值不在上下限中間：\n${lines.join('\n')}\n\n`
+      + '−Tol 要打正數：名目值 20、−Tol 打 2 ⇒ 下限＝20－2＝18。\n'
+      + '如果這幾項本來就是上下限都在名目值同一邊（例如 +0.1／+0.05，−Tol 打 -0.05），才按「照這樣存」。',
+      [{ key: 'save', label: '照這樣存（這幾項本來就是這樣）' }]);
+    if (k !== 'save') { setMgrStatus('已取消，還沒有存檔——請修改 +Tol／−Tol 後再按「儲存料號」', 'warn'); return; }
+  }
+  // ── 改版：先問舊版要不要一起停用 ──
+  let stopOld = false;
+  if (mode === 'revise') {
+    const oldTxt = specRevText(reviseFromRev);
+    const k = await qmsChoose(`建立 ${pn} ${rev} 版（${scopeLabel(editingScope)}）`,
+      `${oldTxt}要同時停用嗎？\n・停用：FAI／CPK 不再帶出${oldTxt}；資料留著，之後可以再啟用。\n・改版交替期間兩版都要檢驗，就選「兩版都使用中」，帶出規格時會讓檢驗員選。`,
+      [{ key: 'stop', label: `✅ 存檔，並停用${oldTxt}（建議）`, primary: true },
+       { key: 'keep', label: `存檔，${oldTxt}也繼續使用（兩版都使用中）` }]);
+    if (k == null) { setMgrStatus('已取消，還沒有存檔（編輯的內容還在，可以再按「儲存料號」）', 'warn'); return; }
+    stopOld = (k === 'stop');
+  }
+  // ── 寫雲端 ──
+  setMgrStatus('⏳ 儲存中…', '');
+  const fails = [];
+  for (const sc of scopes) {
+    const r = await sbSaveSpecRow(pn, sc, spec);
+    if (!r.ok) fails.push(scopeLabel(sc) + '：' + r.msg);
   }
   renderPnList();
-  setMgrStatus(`✔ 料號 ${pn} 已儲存，共 ${validSpecs.length} 項規格。${reordered ? '球標已依順序重新排列。' : ''}可切換到「FAI 填表」使用。`, 'ok');
+  if (fails.length) { setMgrStatus('⚠ 儲存失敗——' + fails.join('；'), 'err'); return; }
+  let extra = '';
+  if (mode === 'revise') {
+    const oldTxt = specRevText(reviseFromRev);
+    if (stopOld) {
+      const r = await sbSetSpecActive(pn, editingScope, reviseFromRev, false);
+      extra = r.ok ? `${oldTxt}已停用。` : `⚠ 但${oldTxt}停用失敗（${r.msg}），請在清單上該列手動按「⏸ 停用」。`;
+      renderPnList();
+    } else extra = `${oldTxt}也繼續使用中（帶出規格時會讓檢驗員選）。`;
+  }
+  const msg = `✔ 料號 ${pn} ${specRevText(rev)}已${mode === 'revise' ? '建立' : '儲存'}（${scopes.map(scopeLabel).join('、')}），共 ${spec.specs.length} 項規格。`
+            + `${skippedBlank ? `略過 ${skippedBlank} 行空白行。` : ''}${reordered ? '球標已依順序重新排列。' : ''}${extra}可切換到「FAI 填表」使用。`;
+  //  V178-5：編輯模式存完不重新帶入 ⇒ 空白行從畫面拿掉，畫面＝存進去的內容
+  if (mode === 'edit' && skippedBlank) { specRows = specRows.filter(r => !specRowIsBlank(r)); renderSpecRows(); }
+  // ══ V178-4：存好之後內容留在畫面上（使用者 260930「輸入完成上面資料會清空」）══
+  //  V178 原本新增／改版存好就清空編輯區（怕再按一次儲存又新增一次）；改成切到「編輯剛存好的這一版」：
+  //  內容都在、可以接著改，再按儲存＝更新這一版，不會多出一筆。勾了好幾個歸屬時，接著編輯的是第一個。
+  if (mode !== 'edit') {
+    const saved = specCacheFind(pn, scopes[0], rev);
+    if (saved) {
+      specEditMode = 'edit'; reviseFromRev = null;
+      editingPn = pn; editingScope = saved.scope; editingRev = saved.rev;
+      specFillEditor(saved, saved.rev, `STEP 2　編輯料號 ${pn}（歸屬：${scopeLabel(saved.scope)}・${specRevText(saved.rev)}）`, true);
+      renderScopeCheckboxes(pn, saved.scope, `編輯只會改這一列（歸屬：${scopeLabel(saved.scope)}），這裡不能改；要放到別的廠區，請清除後用「新增」`);
+    } else clearEditor();
+  }
   ['sc1','sc2','sc3'].forEach(id => document.getElementById(id).classList.remove('active-step'));
+  setMgrStatus(msg, extra.startsWith('⚠') ? 'warn' : 'ok');
 }
 
 // ── 步驟說明收合切換 ──
@@ -6175,7 +6508,7 @@ const I18N = {
     'mgr-th-partno': '料號 Part No.', 'mgr-th-partname': '品名 Part Name',
     'mgr-th-rev': '版本', 'mgr-th-mat': '材料', 'mgr-th-specs': '規格數', 'mgr-th-action': '操作',
     'mgr-empty-hint': '資料庫尚無料號，請在下方新增',
-    'spec-th-moi': '量測儀器 Instrument', 'spec-th-type': '類型 Type', 'spec-th-nom': '名目值 Nominal', 'spec-th-del': '刪',
+    'spec-th-moi': '量測儀器 Instrument', 'spec-th-type': '類型 Type', 'spec-th-nom': '名目值 Nominal', 'spec-th-del': '刪', 'spec-th-mt-hint': '打正數',
     'mgr-btn-edit': '編輯', 'mgr-btn-del': '刪除',
     // AQL
     'aql-label':      'AQL Sampling Plan 抽樣計畫：',
@@ -6339,7 +6672,7 @@ const I18N = {
     'mgr-th-partno': '料号 Part No.', 'mgr-th-partname': '品名 Part Name',
     'mgr-th-rev': '版本', 'mgr-th-mat': '材料', 'mgr-th-specs': '规格数', 'mgr-th-action': '操作',
     'mgr-empty-hint': '数据库暂无料号，请在下方新增',
-    'spec-th-moi': '量测仪器 Instrument', 'spec-th-type': '类型 Type', 'spec-th-nom': '名目值 Nominal', 'spec-th-del': '删',
+    'spec-th-moi': '量测仪器 Instrument', 'spec-th-type': '类型 Type', 'spec-th-nom': '名目值 Nominal', 'spec-th-del': '删', 'spec-th-mt-hint': '打正数',
     'mgr-btn-edit': '编辑', 'mgr-btn-del': '删除',
     'aql-label':      'AQL Sampling Plan 抽样计划：',
     'aql-lot-label':  'Lot Size 批量',
@@ -6502,7 +6835,7 @@ const I18N = {
     'mgr-th-partno': 'Mã vật tư', 'mgr-th-partname': 'Tên chi tiết',
     'mgr-th-rev': 'Phiên bản', 'mgr-th-mat': 'Vật liệu', 'mgr-th-specs': 'Số quy cách', 'mgr-th-action': 'Thao tác',
     'mgr-empty-hint': 'Chưa có mã vật tư, vui lòng thêm bên dưới',
-    'spec-th-moi': 'Dụng cụ đo', 'spec-th-type': 'Loại', 'spec-th-nom': 'Giá trị danh nghĩa', 'spec-th-del': 'Xóa',
+    'spec-th-moi': 'Dụng cụ đo', 'spec-th-type': 'Loại', 'spec-th-nom': 'Giá trị danh nghĩa', 'spec-th-del': 'Xóa', 'spec-th-mt-hint': 'nhập số dương',
     'mgr-btn-edit': 'Sửa', 'mgr-btn-del': 'Xóa',
     'aql-label':      'Kế hoạch lấy mẫu AQL：',
     'aql-lot-label':  'Cỡ lô Lot Size',
@@ -6665,7 +6998,7 @@ const I18N = {
     'mgr-th-partno': 'รหัสชิ้นส่วน', 'mgr-th-partname': 'ชื่อชิ้นส่วน',
     'mgr-th-rev': 'รุ่น', 'mgr-th-mat': 'วัสดุ', 'mgr-th-specs': 'จำนวนสเปก', 'mgr-th-action': 'การดำเนินการ',
     'mgr-empty-hint': 'ยังไม่มีรหัสชิ้นส่วน กรุณาเพิ่มด้านล่าง',
-    'spec-th-moi': 'เครื่องมือวัด', 'spec-th-type': 'ประเภท', 'spec-th-nom': 'ค่าตามแบบ', 'spec-th-del': 'ลบ',
+    'spec-th-moi': 'เครื่องมือวัด', 'spec-th-type': 'ประเภท', 'spec-th-nom': 'ค่าตามแบบ', 'spec-th-del': 'ลบ', 'spec-th-mt-hint': 'ใส่ค่าบวก',
     'mgr-btn-edit': 'แก้ไข', 'mgr-btn-del': 'ลบ',
     'aql-label':      'แผนการสุ่มตัวอย่าง AQL：',
     'aql-lot-label':  'ขนาดล็อต Lot Size',
@@ -6883,7 +7216,7 @@ function applyI18n() {
     if (el) el.textContent = t(key);
   });
   // Step3 規格表格標頭
-  ['spec-th-moi','spec-th-type','spec-th-nom','spec-th-del'].forEach(id => {
+  ['spec-th-moi','spec-th-type','spec-th-nom','spec-th-del','spec-th-mt-hint'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.textContent = t(id);
   });
@@ -6895,7 +7228,7 @@ function applyI18n() {
   const lbl2map = {
     'mgr-lbl-partno-el': t('mgr-lbl-partno') + ' ' + req,
     'mgr-lbl-partname-el': t('mgr-lbl-partname') + ' ' + req,
-    'mgr-lbl-rev-el': t('mgr-lbl-rev'),
+    'mgr-lbl-rev-el': t('mgr-lbl-rev') + ' ' + req,   // V178-4：版本改必填（改版要靠版本號分）
     'mgr-lbl-mat-el': t('mgr-lbl-mat'),
     'mgr-lbl-sup-el': t('mgr-lbl-sup'),
   };
@@ -8809,7 +9142,7 @@ function renderSysInfo() {
   const cpkCount    = allKeys.filter(k=>k.startsWith('cpk_record_')).length;
   const recordCount = faiCount + cpkCount;
   const draftCount  = allKeys.filter(k=>k.startsWith('fai_draft_')).length;
-  const partCount   = Object.keys(isAdmin() ? loadAllSpecDB() : loadSpecDB()).length;
+  const partCount   = specRowsUsable().length;   // V178：每一版算一筆（含停用的）
   let storageUsed = 0;
   try { allKeys.forEach(k=>{ storageUsed += (localStorage.getItem(k)||'').length; }); } catch(e) {}
   const rows = [
@@ -9308,7 +9641,7 @@ function refreshActiveTabAfterSync() {
   if (activeTab === 'tab-dash') renderDashboard();
   if (activeTab === 'tab-hist') runHistQuery();
   // V144：料號頁開著時，同步完成後重載清單
-  if (activeTab === 'tab-mgr') { PART_SPECS = isAdmin() ? loadAllSpecDB() : loadSpecDB(); renderPnList(); }
+  if (activeTab === 'tab-mgr') { renderPnList(); }   // V178：清單直接讀雲端清單
   // V170-4：設定頁的「系統資訊」也要重算（記錄是第二批才寫進 localStorage）
   if (activeTab === 'tab-sys') renderSysInfo();
 }
@@ -10084,7 +10417,8 @@ function clearLocalCache() {
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i);
       if (!k) continue;
-      if (k.startsWith('fai_record_') || k.startsWith('cpk_record_') || k.startsWith('fai_part_specs_')) {
+      //  V178：料號規格清單（qms_part_specs_v2）也清——每個帳號看得到的歸屬不同，換帳號不能沿用上一個人的
+      if (k.startsWith('fai_record_') || k.startsWith('cpk_record_') || k.startsWith('fai_part_specs_') || k === SPEC_V2_KEY) {
         keysToRemove.push(k);
       }
     }
@@ -10206,25 +10540,42 @@ function cpkLoadSpec() {
     }
     return;
   }
-  PART_SPECS = isAdmin() ? loadAllSpecDB() : loadSpecDB();
-  const sp = PART_SPECS[pn];
   // ══ V177：找不到料號要講（北越 260930：打 V5 料號什麼都沒出現，以為系統壞了）══
   //  FAI 填表頁按「帶出規格」找不到會寫「找不到料號規格」，這頁原本 return 就沒了、一個字都不給。
   //  這支每打一個字都會進來 ⇒ 停手 0.8 秒、料號沒再變才顯示，打到一半不會一直閃「找不到」。
+  // ══ V178：只帶「使用中」的版本；兩份以上使用中就跳清單選 ══
+  //  同樣是停手 0.8 秒、料號沒再變才跳（打字途中不跳）；同一個料號選過或取消過就不再跳，料號改了才重來。
+  if (window._cpkPickedFor && window._cpkPickedFor !== pn) window._cpkPickedFor = null;
   clearTimeout(window._cpkNotFoundTimer);
-  if (!sp) {
+  const _cands = specRowsUsable().filter(r => r.partno === pn);
+  const _act = _cands.filter(r => r.active);
+  const _stillPn = () => String((document.getElementById('cpk-partno') || {}).value || '').trim() === pn;
+  if (!_act.length) {
     window._cpkNotFoundTimer = setTimeout(() => {
-      const cur = String((document.getElementById('cpk-partno') || {}).value || '').trim();
-      if (cur !== pn) return;
+      if (!_stillPn()) return;
       const el = document.getElementById('cpk-status');
       if (el) {
-        el.textContent = '⚠ 找不到料號「' + pn + '」的規格——' + (isAdmin() ? '還沒有任何廠區建立' : '本廠區還沒建立')
-          + '，請到「⚙ 料號規格管理」新增後再輸入';
+        el.textContent = _cands.length
+          ? '⚠ 料號「' + pn + '」的版本都已停用——請到「⚙ 料號規格管理」啟用，或按「📑 改版」建立新版'
+          : '⚠ 找不到料號「' + pn + '」的規格——' + (isAdmin() ? '還沒有任何廠區建立' : '本廠區還沒建立')
+            + '，請到「⚙ 料號規格管理」新增後再輸入';
         el.style.color = '#c0392b';
       }
     }, 800);
     return;
   }
+  if (_act.length === 1) { cpkApplySpec(_act[0]); return; }
+  window._cpkNotFoundTimer = setTimeout(async () => {
+    if (!_stillPn() || window._cpkPickedFor === pn) return;
+    window._cpkPickedFor = pn;
+    const sp = await pickSpecForForm(pn);
+    if (sp) { cpkApplySpec(sp); return; }
+    const el = document.getElementById('cpk-status');
+    if (el) { el.textContent = '已取消帶出規格（沒有選版本）——要重選，請把料號清掉再輸入一次'; el.style.color = '#BA7517'; }
+  }, 800);
+}
+// V178：把選好的那一份規格套到 CPK 頁（原 cpkLoadSpec 的後半段，內容不變，只多顯示版本）
+function cpkApplySpec(sp) {
   const setV = (id, v) => { const el=document.getElementById(id); if(el) el.value=v||''; };
   setV('cpk-partname', sp.partname);
   setV('cpk-material', sp.material);
@@ -10262,7 +10613,7 @@ function cpkLoadSpec() {
   });
   cpkRenderTable();
   const el = document.getElementById('cpk-status');
-  if (el) { el.textContent = `✅ 已帶入 ${cpkPoints.length} 個 CPK 量測點`; el.style.color='#1d9e75'; }
+  if (el) { el.textContent = `✅ 已帶入${sp.rev ? ' ' + sp.rev + ' 版' : ''}${isAdmin() ? '（' + scopeLabel(sp.scope) + '）' : ''} ${cpkPoints.length} 個 CPK 量測點`; el.style.color='#1d9e75'; }
 }
 
 function cpkRenderTable() {
@@ -11241,11 +11592,8 @@ async function resyncFromCloud() {
     //  中間這段時間，料號規格管理頁與 CPK 頁的料號帶入會少料號。
     //  （共用的 `fai_part_specs`──不帶廠區碼那個──不在清除範圍內，不受影響。）
     await sbPullPartSpecs();
-    //  ⚠ 記憶體裡的 PART_SPECS 也是舊的，一定要重載：
-    //    它是 renderPnList() 與 cpkLoadSpec()（CPK 頁打料號帶規格）共用的全域變數，
-    //    只重拉 localStorage 而不重載這個，CPK 頁帶進來的還是清空前的舊規格。
-    PART_SPECS = isAdmin() ? loadAllSpecDB() : loadSpecDB();
-    const nSpec = Object.keys(PART_SPECS || {}).length;
+    //  V178：清單、帶出規格都直接讀雲端清單（specCacheAll），不再有要另外重載的全域變數
+    const nSpec = specRowsUsable().length;
     refreshActiveTabAfterSync();             // V170-5：收斂後的共用刷新（含歷史查詢／料號頁／設定頁）
     if (st) { st.textContent = `✅ 已同步：FAI ${n1||0} 筆、CPK ${n2||0} 筆、料號規格 ${nSpec} 筆`; st.style.color = '#1d9e75'; }
   } catch(e) {
@@ -12138,7 +12486,7 @@ function renderSysTab() {
       btnDiv.style.cssText = 'margin-top:16px;padding:12px;background:#f0fff4;border:1px solid #1d9e75;border-radius:8px;grid-column:1/-1';
       btnDiv.innerHTML = `
         <div style="font-size:12px;font-weight:700;color:#1d9e75;margin-bottom:6px">☁ 一鍵上傳所有本機資料到 Supabase</div>
-        <div style="font-size:11px;color:#555;margin-bottom:10px">同步範圍：FAI 記錄、CPK 記錄、料號規格、廠區設定、供應商清單，讓所有裝置都能查看最新資料。<br><span style="color:#888">（帳號不從這裡推——帳號主檔在 Supabase Auth 與 OMS 授權）</span></div>
+        <div style="font-size:11px;color:#555;margin-bottom:10px">同步範圍：FAI 記錄、CPK 記錄、廠區設定、供應商清單，讓所有裝置都能查看最新資料。（料號規格 V178 起存檔時就直接存雲端，不經這裡）<br><span style="color:#888">（帳號不從這裡推——帳號主檔在 Supabase Auth 與 OMS 授權）</span></div>
         <button id="bulk-upload-btn" onclick="bulkUploadToSupabase()"
           style="height:32px;padding:0 16px;background:#1d9e75;color:#fff;border:none;border-radius:6px;font-size:12px;cursor:pointer;font-weight:700">
           ☁ 開始上傳
@@ -12366,48 +12714,11 @@ async function bulkUploadToSupabase() {
     await new Promise(r => setTimeout(r, 80));
   }
 
-  // ── 第三階段：料號規格（含廠區別 key） ──
-  // ══ V177：照原本的歸屬上傳、只補雲端沒有的（使用者 260930）══
-  //  事故：9/7 17:03 管理員按這顆，13 筆 SH／SDY 料號被複製成「共用」——
-  //    舊版呼叫 sbSavePartSpec(pn, spec) 沒帶歸屬，管理員身分的預設歸屬＝共用。
-  //  改成三件：
-  //    ① 歸屬＝這份資料所在的本機料號庫（fai_part_specs_SH → SH），不再用登入身分猜
-  //    ② 「共用」那個料號庫整個不推——共用只能由管理員在料號規格頁刻意設定，不經批次產生
-  //    ③ 雲端已經有「同料號＋同歸屬」的就略過、不覆蓋：本機只是快取，可能比雲端舊（別人剛改過），
-  //       這顆按鈕的職責是「補推雲端沒有的」（同 FAI／CPK 的「雲端已有」語意，見 V170-3）
-  //    另：舊版程式自動塞的示範料號複本（內容跟 DEFAULT_SPECS 一字不差）不推。
-  const specKeys = Object.keys(localStorage).filter(k => k.startsWith(SPEC_DB_KEY + '_'));
-  btn.textContent = `⏳ 料號規格上傳中...`;
-  let specCloud = null;
-  try {
-    // V177-1：同料號同歸屬可能有好幾個版本（V178）⇒ 讀的時候帶版本去重；「雲端已有」仍以「料號＋歸屬」判斷
-    //  （任何一個版本在就算有，本機的舊快取不可以拿來補出一個版本）
-    const _rows = await sbFetchAllRows(SUPABASE_URL + '/rest/v1/part_specs?select=partno,scope,rev&order=partno.asc,scope.asc,rev.asc',
-      { key: r => String(r.partno) + '\u0001' + String(r.scope) + '\u0001' + String(r.rev == null ? '' : r.rev) });
-    specCloud = new Set(_rows.map(r => String(r.partno) + '\u0001' + String(r.scope)));
-  } catch(e) {
-    specErr++;
-    _fails.push('料號規格：讀不到雲端現況，這一段整段沒推（' + e.message + '）');
-  }
-  if (specCloud) {
-    for (const skey of specKeys) {
-      const scope = skey.slice(SPEC_DB_KEY.length + 1);
-      try {
-        const db = JSON.parse(localStorage.getItem(skey) || '{}');
-        for (const [pn, spec] of Object.entries(db)) {
-          if (DEFAULT_SPECS[pn] && JSON.stringify(spec) === JSON.stringify(DEFAULT_SPECS[pn])) continue;   // 示範複本
-          if (specCloud.has(pn + '\u0001' + scope)) { specDup++; continue; }                             // 雲端已有
-          try {
-            const r = await sbSavePartSpec(pn, spec, scope);
-            if (r === true) specOk++;
-            else { specErr++; _fails.push('料號 ' + pn + '（' + scope + '）：' + _why(r)); }
-          } catch(e) { specErr++; _fails.push('料號 ' + pn + '（' + scope + '）：' + e.message); }
-          await new Promise(r => setTimeout(r, 60));
-        }
-      } catch(e) { specErr++; _fails.push('料號庫 ' + skey + '：' + e.message); }
-    }
-  }
-
+  // ── 第三階段（料號規格）V178 起拿掉 ──
+  //  V178 起料號規格「先寫雲端、雲端確認了才算存好」（見 savePartSpec），本機不會再有「只存在這台電腦」的料號，
+  //  這一段已經沒有東西要補推。留著反而危險：舊版留在各台電腦的 fai_part_specs_* 快取，
+  //  會把雲端已刪除／已改版的料號用舊內容推回去（9/7 17:03 那 13 筆共用就是這顆按鈕推出來的）。
+  //  specOk／specErr／specDup 維持 0，結果訊息不再列料號規格。
   // ── 第四階段（使用者帳號）已於 V170-2 移除 ──
   //  它打的 qms_users 在 DB 端已刪；V170 讓 sbSaveUser 第一行就 return，
   //  等於一個 request 都沒發，迴圈卻照數 userOk、畫面照印「帳號 N 筆」。
@@ -12453,8 +12764,8 @@ async function bulkUploadToSupabase() {
     : (totalNew ? `\u2705 完成，已同步 ${totalNew} 筆` : '\u2705 完成，雲端本來就是最新的');
   // ⚠ 用「已同步」不用「新上傳」：料號規格／廠區／供應商三類的網址帶 on_conflict，
   //   走的是 upsert（覆蓋既有列）不是新增；只有 FAI／CPK 是純 POST 才分得出新舊。
-  const detail = `已同步：FAI ${faiOk}\u3000CPK ${cpkOk}\u3000料號規格 ${specOk}\u3000廠區 ${siteOk}\u3000供應商 ${supOk}`
-    + (totalDup ? `\u3000<span style="color:#666">｜雲端已有、略過：FAI ${faiDup}\u3000CPK ${cpkDup}　料號規格 ${specDup}</span>` : '');
+  const detail = `已同步：FAI ${faiOk}\u3000CPK ${cpkOk}\u3000廠區 ${siteOk}\u3000供應商 ${supOk}`
+    + (totalDup ? `\u3000<span style="color:#666">｜雲端已有、略過：FAI ${faiDup}\u3000CPK ${cpkDup}</span>` : '');
   const list = _fails.length
     ? '<div style="margin-top:6px;font-size:11px;color:#c0392b;text-align:left">'
       + _fails.slice(0, 8).map(x => '\u30fb' + x).join('<br>')

@@ -454,7 +454,7 @@ input.spec-inp[type=number] { -moz-appearance:textfield; appearance:textfield; }
 // 用途＝跟使用者溝通「你看到的畫面是不是最新版」，不是品質文件的表單版次
 //（表單版次 Rev 另有其用途、目前維持 V1.0 不動，日後各廠區若有自己的表單版次需求再談）
 // 顯示位置：① 瀏覽器分頁標題 ② 登入畫面副標下方 ③ 主畫面右上（列印時自動隱藏）
-const APP_VER = 'V184';   // ★★ 每出一版必須同步改這一行（比照 MHR 的做法），否則畫面版號會對不上檔案版號
+const APP_VER = 'V185';   // ★★ 每出一版必須同步改這一行（比照 MHR 的做法），否則畫面版號會對不上檔案版號
 
 const SUPABASE_URL = 'https://vwusebvvsqyjydddupit.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_Ju-c9cuXYJil7PEJ1-NspA_ASzfIzi5';
@@ -7410,18 +7410,18 @@ const DEFAULT_SITE_LIST = [
   { code: 'VN',   name: 'Syncmold Vietnam',   lang: 'vi'    },
   { code: 'TEST', name: 'TEST',               lang: 'zh-TW' },
   { code: 'TH',   name: 'Syncmold Thailand',  lang: 'th',    active: false },
-  { code: 'SY',   name: '臺北信錦(零組件)',    lang: 'zh-TW', active: false },
+  { code: 'SY',   name: '台北總公司',          lang: 'zh-TW', active: false },
   { code: 'JS',   name: '中山富鴻齊',          lang: 'zh-CN', active: false },
   { code: 'SF',   name: '蘇州富鴻齊',          lang: 'zh-CN', active: false },
   { code: 'FF',   name: '福州富鴻齊',          lang: 'zh-CN', active: false },
   { code: 'CF',   name: '重慶富鴻齊',          lang: 'zh-CN', active: false },
-  { code: 'GH',   name: '福清冠華',            lang: 'zh-CN', active: false },
+  { code: 'GH',   name: '福建冠華',            lang: 'zh-CN', active: false },
   { code: 'FQ',   name: '福清富群',            lang: 'zh-CN', active: false },
   { code: 'KH',   name: '東莞冠皇',            lang: 'zh-CN', active: false },
   { code: 'KS',   name: '昆山鴻嘉駿',          lang: 'zh-CN', active: false },
-  { code: 'GT',   name: '敬得觀音',            lang: 'zh-TW', active: false },
-  { code: 'TC',   name: '敬得太倉',            lang: 'zh-CN', active: false },
-  { code: 'LH',   name: '陸合',               lang: 'zh-TW', active: false },
+  { code: 'GT',   name: '敬得(觀音)',          lang: 'zh-TW', active: false },
+  { code: 'TC',   name: '敬得(太倉)',          lang: 'zh-CN', active: false },
+  { code: 'LH',   name: '陸合(台中)',          lang: 'zh-TW', active: false },
 ];
 
 let SITE_LIST = [];
@@ -7503,18 +7503,18 @@ function initDefaultData() {
     { code:'VN',   name:'Syncmold Vietnam', lang:'vi'    },
     { code:'TEST', name:'TEST',             lang:'zh-TW' },
     { code:'TH',   name:'Syncmold Thailand',lang:'th',    active:false },
-    { code:'SY',   name:'臺北信錦(零組件)',  lang:'zh-TW', active:false },
+    { code:'SY',   name:'台北總公司',        lang:'zh-TW', active:false },
     { code:'JS',   name:'中山富鴻齊',        lang:'zh-CN', active:false },
     { code:'SF',   name:'蘇州富鴻齊',        lang:'zh-CN', active:false },
     { code:'FF',   name:'福州富鴻齊',        lang:'zh-CN', active:false },
     { code:'CF',   name:'重慶富鴻齊',        lang:'zh-CN', active:false },
-    { code:'GH',   name:'福清冠華',          lang:'zh-CN', active:false },
+    { code:'GH',   name:'福建冠華',          lang:'zh-CN', active:false },
     { code:'FQ',   name:'福清富群',          lang:'zh-CN', active:false },
     { code:'KH',   name:'東莞冠皇',          lang:'zh-CN', active:false },
     { code:'KS',   name:'昆山鴻嘉駿',        lang:'zh-CN', active:false },
-    { code:'GT',   name:'敬得觀音',          lang:'zh-TW', active:false },
-    { code:'TC',   name:'敬得太倉',          lang:'zh-CN', active:false },
-    { code:'LH',   name:'陸合',             lang:'zh-TW', active:false },
+    { code:'GT',   name:'敬得(觀音)',        lang:'zh-TW', active:false },
+    { code:'TC',   name:'敬得(太倉)',        lang:'zh-CN', active:false },
+    { code:'LH',   name:'陸合(台中)',        lang:'zh-TW', active:false },
   ];
   let siteChanged = false;
   requiredSites.forEach(rs => {
@@ -10215,7 +10215,7 @@ async function doLogin() {
     const sso = ssoPre || await sbSsoTryLogin(email, password);
     ssoDown = sso.down === true;
     // ══ V179-2：SyncHub 初始密碼還沒改 ⇒ 擋下（261007 急件，OMS 對話轉來、使用者確認「三路發動」）══
-    //  事故：261007 實測有人用「別人的工號＋統一初始密碼 oms12345」經代驗登入成功；舊版只跳提醒、照樣放進系統。
+    //  事故：261007 實測有人用「別人的工號＋SyncHub 統一初始密碼」經代驗登入成功；舊版只跳提醒、照樣放進系統。
     //  ⇒ 不放行、也**不拿同一組密碼去試 QMS 本箱**（直接 return，不往下走 sbAuthLogin）。
     if (sso.mode === 'sso' && sso.must_change === true) {
       if (loginBtn) loginBtn.textContent = '登入 Login';

@@ -454,7 +454,7 @@ input.spec-inp[type=number] { -moz-appearance:textfield; appearance:textfield; }
 // 用途＝跟使用者溝通「你看到的畫面是不是最新版」，不是品質文件的表單版次
 //（表單版次 Rev 另有其用途、目前維持 V1.0 不動，日後各廠區若有自己的表單版次需求再談）
 // 顯示位置：① 瀏覽器分頁標題 ② 登入畫面副標下方 ③ 主畫面右上（列印時自動隱藏）
-const APP_VER = 'V183-1';   // ★★ 每出一版必須同步改這一行（比照 MHR 的做法），否則畫面版號會對不上檔案版號
+const APP_VER = 'V184';   // ★★ 每出一版必須同步改這一行（比照 MHR 的做法），否則畫面版號會對不上檔案版號
 
 const SUPABASE_URL = 'https://vwusebvvsqyjydddupit.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_Ju-c9cuXYJil7PEJ1-NspA_ASzfIzi5';
@@ -8277,6 +8277,26 @@ function importFromOmsIdx(i) {
   if (!g) return;
   importFromOms(g.emp_id, g.name, g.email, g.site);
 }
+// ══ V184：工號跟 OMS 不一樣 ⇒ 一鍵更新成 OMS 的工號（使用者 261015「工號自動跟 OMS 同步 可以做」）══
+//  起因：261013 OMS 把一位同仁的工號更正後，QMS 存的工號不會跟著變（建帳號時從 OMS 抄一次），當時只能跑 SQL 改。
+//  做法：人員管理頁打開時自動比對（見 renderUserMgrTable 的 empMismatch），有不一樣就提示；**更新要管理員按一下確認**，不在背景自己改。
+//  只改工號（admin-users 的 update，跟「連結工號」同一條路），不動密碼、權限、其他資料；登入本來就是即時問 OMS，不受影響。
+async function syncEmpFromOms() {
+  const list = (window._empMismatch || []).filter(m => !m.conflict);
+  if (!list.length) return;
+  const preview = list.slice(0, 8).map(p => `・${p.name}　${p.oldEmp}　→　${p.empId}`).join('\n');
+  if (!confirm(`把 ${list.length} 位帳號的工號更新成 OMS 的工號？\n\n${preview}${list.length > 8 ? '\n…' : ''}\n\n只改工號，不動密碼、權限、其他資料；登入不受影響。`)) return;
+  let ok = 0; const fail = [];
+  for (const p of list) {
+    try {
+      const r = await sbCallAdminFn('update', { email: p.email, emp_id: p.empId });
+      if (r && r.ok) ok++; else fail.push(p.name + '：' + ((r && r.msg) || '失敗'));
+    } catch (e) { fail.push(p.name + '：' + ((e && e.message) || e)); }
+  }
+  alert((fail.length ? '⚠ ' : '✅ ') + '工號更新：成功 ' + ok + ' 位' + (fail.length ? '，失敗 ' + fail.length + ' 位\n\n' + fail.join('\n') : '') + '。');
+  renderUserMgrTable();
+}
+
 // V142：把「email 已對上 OMS、但沒工號」的既有帳號一鍵補上工號（只補 emp_id，不動密碼/權限/其他資料）
 async function linkAllOmsEmp() {
   const list = window._linkable || [];
@@ -8511,6 +8531,26 @@ async function renderUserMgrTable(useCache) {
     });
   });
   window._linkable = linkable;
+  // ── V184：工號跟 OMS 不一樣（用 Email 對 OMS 名單；大小寫不同不算不一樣）──
+  //  只比 OMS 名單上有的人（OMS 已授權 QMS 的內部同仁）；供應商、管理員、TEST 不在 OMS 名單，不會被比到。
+  //  ⚠ OMS 的工號已經被另一個 QMS 帳號用了 ⇒ 標「有衝突」、不給一鍵更新（避免兩個帳號同一個工號）。
+  //  ⚠ OMS 名單讀不到就不比（不可以把「讀不到」當成「不一樣」）。
+  const empMismatch = [];
+  if (omsRosterOk) {
+    const empOwner = {};
+    Object.values(db).forEach(users => Object.values(users).forEach(u => {
+      if (u.emp_id) empOwner[String(u.emp_id).trim().toUpperCase()] = String(u.email || '').toLowerCase();
+    }));
+    Object.entries(db).forEach(([site, users]) => Object.entries(users).forEach(([key, u]) => {
+      const em = omsEmpByEmail[String(u.email || '').toLowerCase()];
+      if (!em || !u.emp_id) return;
+      if (String(u.emp_id).trim().toUpperCase() === String(em).trim().toUpperCase()) return;
+      const owner = empOwner[String(em).trim().toUpperCase()];
+      empMismatch.push({ email: u.email, name: u.name, site, oldEmp: u.emp_id, empId: em, conflict: !!owner && owner !== String(u.email || '').toLowerCase() });
+    }));
+  }
+  window._empMismatch = empMismatch;
+  const _mmByEmail = {}; empMismatch.forEach(m => { _mmByEmail[String(m.email || '').toLowerCase()] = m; });
 
   let activeRows   = [];     // V170-9：篩選後會重新指派，故由 const 改 let
   let inactiveRows = [];
@@ -8606,7 +8646,7 @@ async function renderUserMgrTable(useCache) {
     return `
     <tr style="background:${bg};border-bottom:1px solid #eee;${opacity}">
       <td style="padding:8px 6px;font-weight:700;color:${isInactive?'#999':'#1a4f8a'};vertical-align:middle;white-space:nowrap">${r.site}</td>
-      <td style="padding:8px 6px;vertical-align:middle;white-space:nowrap;font-weight:700;color:#1a4f8a;font-family:'Courier New',monospace">${r.emp_id || '—'}</td>
+      <td style="padding:8px 6px;vertical-align:middle;white-space:nowrap;font-weight:700;color:#1a4f8a;font-family:'Courier New',monospace">${r.emp_id || '—'}${(() => { const m = _mmByEmail[String(r.email || r.key || '').toLowerCase()]; return m ? `<br><span title="${m.conflict ? 'OMS 的工號已被另一個 QMS 帳號使用，請洽 DTO' : 'QMS 存的工號跟 OMS 不一樣，可按上方「更新成 OMS 工號」'}" style="font-size:10px;font-weight:700;color:${m.conflict ? '#c0392b' : '#8a5a00'};font-family:Arial,sans-serif">⚠ OMS：${String(m.empId).replace(/</g, '&lt;')}</span>` : ''; })()}</td>
       <td style="padding:6px 6px;vertical-align:middle;white-space:nowrap;line-height:1.3">👤 ${((r.omsName||r.name)||'').replace(/</g,'&lt;')}${(r.omsName && r.omsEng && r.omsEng!==r.omsName) ? `<br><span style="color:#888;font-weight:400;font-size:10px;margin-left:17px">${r.omsEng.replace(/</g,'&lt;')}</span>` : ''}</td>
       <td style="padding:8px 6px;vertical-align:middle;font-size:10.5px;color:#555;min-width:200px;white-space:nowrap">${emailDisplay}</td>
       <td style="padding:6px 6px;vertical-align:middle;min-width:300px">
@@ -8674,6 +8714,14 @@ async function renderUserMgrTable(useCache) {
   // V142：可連結工號提示（既有帳號 email 已對上 OMS、但還沒工號 → 一鍵補、免跑 SQL）
   if (linkable.length) {
     html += `<tr><td colspan="7" style="padding:8px 8px 6px;font-size:12px;font-weight:700;color:#0f6e56;background:#eefaf4;border-top:2px solid #9fd8bf">🔗 有 <b>${linkable.length}</b> 位帳號可從 OMS 連結工號（email 已對上、但還沒工號）<button onclick="linkAllOmsEmp()" style="height:24px;padding:0 12px;font-size:11px;font-weight:700;border:none;background:#0f6e56;color:#fff;border-radius:4px;cursor:pointer;margin-left:10px">🔗 一鍵連結全部</button></td></tr>`;
+  }
+  // V184：工號跟 OMS 不一樣的提示（例子只列第一位；衝突的另外講）
+  if (empMismatch.length) {
+    const _e = x => String(x == null ? '' : x).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+    const _okN = empMismatch.filter(m => !m.conflict).length, _cfN = empMismatch.length - _okN, _m0 = empMismatch[0];
+    html += `<tr><td colspan="7" style="padding:8px 8px 6px;font-size:12px;font-weight:700;color:#8a5a00;background:#fff8e6;border-top:2px solid #f0d080">🔁 有 <b>${empMismatch.length}</b> 位的工號跟 OMS 不一樣（例：${_e(_m0.name)}　QMS ${_e(_m0.oldEmp)} → OMS ${_e(_m0.empId)}）`
+      + (_okN ? `<button onclick="syncEmpFromOms()" style="height:24px;padding:0 12px;font-size:11px;font-weight:700;border:none;background:#BA7517;color:#fff;border-radius:4px;cursor:pointer;margin-left:10px">🔁 更新成 OMS 工號（${_okN} 位）</button>` : '')
+      + (_cfN ? `<span style="color:#c0392b;margin-left:10px">其中 ${_cfN} 位 OMS 的工號已被另一個帳號使用，請洽 DTO</span>` : '') + '</td></tr>';
   }
   // ══ V170-9：套用查找條件 ══
   //  ⚠ 先給每一列標上「它屬於哪一區」，篩選才有辦法對狀態下手；

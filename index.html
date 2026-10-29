@@ -454,7 +454,16 @@ input.spec-inp[type=number] { -moz-appearance:textfield; appearance:textfield; }
 // 用途＝跟使用者溝通「你看到的畫面是不是最新版」，不是品質文件的表單版次
 //（表單版次 Rev 另有其用途、目前維持 V1.0 不動，日後各廠區若有自己的表單版次需求再談）
 // 顯示位置：① 瀏覽器分頁標題 ② 登入畫面副標下方 ③ 主畫面右上（列印時自動隱藏）
-const APP_VER = 'V185';   // ★★ 每出一版必須同步改這一行（比照 MHR 的做法），否則畫面版號會對不上檔案版號
+const APP_VER = 'V186-1';   // ★★ 每出一版必須同步改這一行（比照 MHR 的做法），否則畫面版號會對不上檔案版號
+
+// ══ V186-1（261029 使用者「舊問題請先修改」）：①帶入記錄時簽核欄空的就清空 ②班別選項固定值、各語言文字對回 ③供應商停用／啟用先確認 ④覆蓋存 CPK 沿用原廠區 ══
+// ══ V186：放進畫面的文字一律先「中和」（使用者 261028 體檢後「可以，開始做 V186」）══
+//  起因：歷史查詢等畫面把使用者打的字（檢驗員、品名…）直接當網頁內容放進去，
+//    若有人在欄位裡打一段網頁程式，別人打開畫面時會被執行。
+//  qmsEsc(x)    ：放在標籤文字或「"…"」屬性值裡用（& < > " ' 都換成安全寫法）。
+//  qmsJsArg(x)  ：放在 onclick="fn(…)" 這類屬性裡當參數用，會自己帶引號——原本寫 '${x}' 的地方改成 ${qmsJsArg(x)}（外面的單引號要拿掉）。
+function qmsEsc(v) { return String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
+function qmsJsArg(v) { return qmsEsc(JSON.stringify(String(v == null ? '' : v))); }
 
 const SUPABASE_URL = 'https://vwusebvvsqyjydddupit.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_Ju-c9cuXYJil7PEJ1-NspA_ASzfIzi5';
@@ -1525,7 +1534,7 @@ async function sbInit() {
     <div class="info-cell field-ipqc" id="f-machine"><label>Machine 機台:</label><input id="h-machine" placeholder="機台/工位編號"></div>
     <div class="info-cell field-ipqc" id="f-shift"><label>Shift 班別:</label>
       <select id="h-shift" style="flex:1;border:none;border-bottom:1px solid #ddd;background:transparent;font-size:12px;padding:2px 4px;color:#222;outline:none;font-family:Arial,sans-serif">
-        <option>日班</option><option>中班</option><option>夜班</option>
+        <option value="日班">日班</option><option value="中班">中班</option><option value="夜班">夜班</option>
       </select>
     </div>
     <div class="info-cell field-ipqc" id="f-process-name"><label>製程 Process:</label><input id="h-process" list="proc-datalist" placeholder="選擇或輸入製程"></div>
@@ -3189,7 +3198,7 @@ function render() {
       return `<td class="s-col${oos?' oos':''}"><input
         id="${sid}"
         type="number" step="any"
-        value="${val??''}"
+        value="${qmsEsc(val??'')}"
         class="s-inp${oos?' oos-inp':''}"
         oninput="rows[${idx}].s[${i}]=this.value===''?null:+this.value;renderCalc(${idx})"
         onkeydown="sKeyNav(event,${idx},${i})"
@@ -3198,26 +3207,26 @@ function render() {
     }).join('');
 
     // Type 欄：一律顯示純文字標籤，不允許填表時更改（類型在料號管理設定）
-    const typeCell = `<td style="text-align:center"><span class="type-badge type-${r.type||'FAI'}">${r.type||'FAI'}</span></td>`;
+    const typeCell = `<td style="text-align:center"><span class="type-badge type-${qmsEsc(r.type||'FAI')}">${qmsEsc(r.type||'FAI')}</span></td>`;
 
     tr.innerHTML = `
-      <td style="text-align:center;font-weight:700;color:#1a4f8a">${(r.fai!==undefined && String(r.fai).trim()!=='') ? r.fai : (idx+1)}${adhocTag(r)}</td>
-      <td class="lbl"><input value="${r.moi||''}" placeholder="量測儀器" onchange="rows[${idx}].moi=this.value" style="font-size:10px"></td>
+      <td style="text-align:center;font-weight:700;color:#1a4f8a">${(r.fai!==undefined && String(r.fai).trim()!=='') ? qmsEsc(r.fai) : (idx+1)}${adhocTag(r)}</td>
+      <td class="lbl"><input value="${qmsEsc(r.moi||'')}" placeholder="量測儀器" onchange="rows[${idx}].moi=this.value" style="font-size:10px"></td>
       <td style="text-align:center;padding:0;cursor:pointer" onclick="cycleCharacteristic(${idx},this)" title="點擊切換：— / Key / Major / Minor">
-        <span style="display:inline-block;font-size:10px;font-family:Arial;font-weight:600;color:${r.characteristic==='Key'?'#c0392b':r.characteristic==='Major'?'#BA7517':r.characteristic==='Minor'?'#1a4f8a':'#999'};min-width:40px">${r.characteristic||'—'}</span>
+        <span style="display:inline-block;font-size:10px;font-family:Arial;font-weight:600;color:${r.characteristic==='Key'?'#c0392b':r.characteristic==='Major'?'#BA7517':r.characteristic==='Minor'?'#1a4f8a':'#999'};min-width:40px">${qmsEsc(r.characteristic||'—')}</span>
       </td>
       ${typeCell}
-      <td><input type="number" step="any" value="${r.nom??''}" placeholder="名目值" onchange="rows[${idx}].nom=this.value===''?null:+this.value;syncSpec(${idx});render()" class="spec-inp"></td>
-      <td><input type="number" step="any" value="${r.pt??''}" placeholder="+Tol" onchange="rows[${idx}].pt=this.value===''?null:+this.value;syncSpec(${idx});render()" class="spec-inp"></td>
-      <td><input type="number" step="any" value="${r.mt??''}" placeholder="-Tol" onchange="rows[${idx}].mt=this.value===''?null:+this.value;syncSpec(${idx});render()" class="spec-inp"></td>
-      <td style="background:#f0fff4;font-weight:600">${r.usl!==null?r.usl:''}</td>
-      <td style="background:#f0fff4;font-weight:600">${r.lsl!==null?r.lsl:''}</td>
+      <td><input type="number" step="any" value="${qmsEsc(r.nom??'')}" placeholder="名目值" onchange="rows[${idx}].nom=this.value===''?null:+this.value;syncSpec(${idx});render()" class="spec-inp"></td>
+      <td><input type="number" step="any" value="${qmsEsc(r.pt??'')}" placeholder="+Tol" onchange="rows[${idx}].pt=this.value===''?null:+this.value;syncSpec(${idx});render()" class="spec-inp"></td>
+      <td><input type="number" step="any" value="${qmsEsc(r.mt??'')}" placeholder="-Tol" onchange="rows[${idx}].mt=this.value===''?null:+this.value;syncSpec(${idx});render()" class="spec-inp"></td>
+      <td style="background:#f0fff4;font-weight:600">${r.usl!==null?qmsEsc(r.usl):''}</td>
+      <td style="background:#f0fff4;font-weight:600">${r.lsl!==null?qmsEsc(r.lsl):''}</td>
       ${sHtml}
       <td style="font-weight:700" id="mean_${idx}">${fmtMean(stats)}</td>
       <td id="sigma_${idx}">${fmtSigma(stats)}</td>
       <td id="pct_${idx}">${fmtPct(stats)}</td>
       <td><span class="badge ${judge.cls}" id="judge_${idx}">${judge.label}</span></td>
-      <td class="lbl"><input value="${r.comment||''}" onchange="rows[${idx}].comment=this.value" style="font-size:10px"></td>
+      <td class="lbl"><input value="${qmsEsc(r.comment||'')}" onchange="rows[${idx}].comment=this.value" style="font-size:10px"></td>
     `;
     tbody.appendChild(tr);
   });
@@ -3470,8 +3479,8 @@ function renderPhotoGrid() {
     const div = document.createElement('div');
     div.className = 'photo-thumb';
     div.innerHTML = `
-      <img src="${p.dataUrl}" alt="${p.name}" onclick="previewPhoto('${p.id}')">
-      <button class="photo-del" onclick="deletePhoto('${p.id}')" title="刪除">✕</button>
+      <img src="${qmsEsc(p.dataUrl)}" alt="${qmsEsc(p.name)}" onclick="previewPhoto(${qmsJsArg(p.id)})">
+      <button class="photo-del" onclick="deletePhoto(${qmsJsArg(p.id)})" title="刪除">✕</button>
     `;
     grid.insertBefore(div, addBtn);
   });
@@ -3487,7 +3496,7 @@ function previewPhoto(id) {
   if (!p) return;
   const win = window.open('', '_blank', 'width=800,height=600');
   win.document.write(`<html><body style="margin:0;background:#000;display:flex;align-items:center;justify-content:center;height:100vh">
-    <img src="${p.dataUrl}" style="max-width:100%;max-height:100%;object-fit:contain">
+    <img src="${qmsEsc(p.dataUrl)}" style="max-width:100%;max-height:100%;object-fit:contain">
     </body></html>`);
 }
 
@@ -3695,8 +3704,8 @@ function renderSPC() {
     <span><b>UCL</b>=${ucl.toFixed(4)}</span>
     <span><b>LCL</b>=${lcl.toFixed(4)}</span>
     ${cpk!==null?`<span><b>${_gdt?'Cpu':'Cpk'}</b>=${cpk.toFixed(3)}</span>`:''}
-    ${usl!=null?`<span style="color:#e67e22"><b>USL</b>=${usl}</span>`:''}
-    ${lsl!=null?`<span style="color:#e67e22"><b>LSL</b>=${lsl}</span>`:''}
+    ${usl!=null?`<span style="color:#e67e22"><b>USL</b>=${qmsEsc(usl)}</span>`:''}
+    ${lsl!=null?`<span style="color:#e67e22"><b>LSL</b>=${qmsEsc(lsl)}</span>`:''}
   `;
   warnEl.textContent = warnings.length ? '⚠ ' + warnings.join('、') : '';
 }
@@ -3724,10 +3733,10 @@ function openNCR() {
     const meas = (r.s||[]).filter(v=>v!==null&&v!==''&&!isNaN(v)).map(Number);
     const oosVals = meas.filter(v=>r.usl!==null&&r.lsl!==null&&(v>r.usl||v<r.lsl));
     tr.innerHTML = `
-      <td>${r.fai||''}</td>
-      <td style="text-align:left">${r.moi||''}</td>
-      <td>${r.usl??'—'}</td>
-      <td>${r.lsl??'—'}</td>
+      <td>${qmsEsc(r.fai||'')}</td>
+      <td style="text-align:left">${qmsEsc(r.moi||'')}</td>
+      <td>${qmsEsc(r.usl??'—')}</td>
+      <td>${qmsEsc(r.lsl??'—')}</td>
       <td style="color:#c0392b;font-weight:700">${oosVals.join(', ')||meas.join(', ')||'—'}</td>
       <td>${r.type==='CPK'&&st&&st.cpk!==null?((st.gdt?'<span style="font-size:9px;color:#7b3fa0;font-weight:700">Cpu </span>':'')+st.cpk.toFixed(3)):'—'}</td>
       <td style="color:#c0392b;font-weight:700">${jg.label}</td>
@@ -4180,7 +4189,7 @@ function setHeader(h) {
   setVal('h-dn',       h.dn);
   setVal('h-workorder',h.workorder);
   setVal('h-machine',  h.machine);
-  setVal('h-shift',    h.shift);
+  setShiftVal(h.shift);
   setVal('h-process',  h.process_name);
   setVal('h-finqty',   h.finqty);
   setVal('h-wo-fqc',   h.wo_fqc);
@@ -4188,10 +4197,35 @@ function setHeader(h) {
   setVal('h-so',       h.so);
   setVal('h-shipqty',  h.shipqty);
   setVal('h-destination', h.destination);
-  // 頁尾簽核（編輯記錄時還原）
-  if (h.prepared_by) setVal('footer-prepared-by', h.prepared_by);
-  if (h.reviewed_by) setVal('footer-reviewed-by', h.reviewed_by);
-  if (h.approved_by) setVal('footer-approved-by', h.approved_by);
+  // 頁尾簽核（編輯／列印記錄時還原）
+  // V186-1：記錄裡是空的就清空 —— 舊版空的會留著上一張（或登入者）的名字，存檔／列印就變成別人簽
+  setVal('footer-prepared-by', h.prepared_by);
+  setVal('footer-reviewed-by', h.reviewed_by);
+  setVal('footer-approved-by', h.approved_by);
+}
+
+// V186-1：班別帶入。舊版選項沒有固定值，越南文等介面存進去的是當地文字（例「Ca ngày」），
+//  中文介面帶回來對不到就變空白、再存就遺失。⇒ 各語言的班別文字（I18N 表）對回固定值；
+//  都對不到的舊值就臨時加一個選項顯示原字，不改它。
+function setShiftVal(v) {
+  const sel = document.getElementById('h-shift');
+  if (!sel) return;
+  sel.querySelectorAll('option[data-legacy]').forEach(o => o.remove());
+  const raw = String(v == null ? '' : v).trim();
+  if (!raw) { sel.value = ''; return; }
+  const canon = { 'shift-day': '日班', 'shift-mid': '中班', 'shift-night': '夜班' };
+  let hit = '';
+  Object.keys(canon).forEach(k => {
+    if (hit) return;
+    if (raw === canon[k]) { hit = canon[k]; return; }
+    Object.keys(I18N).forEach(lang => { if (!hit && I18N[lang] && I18N[lang][k] === raw) hit = canon[k]; });
+  });
+  if (!hit) {
+    const o = document.createElement('option');
+    o.value = raw; o.textContent = raw; o.setAttribute('data-legacy', '1');
+    sel.appendChild(o); hit = raw;
+  }
+  sel.value = hit;
 }
 
 function setStatus(msg, type) {
@@ -4300,7 +4334,7 @@ function showNoPermToast(msg) {
   const toast = document.createElement('div');
   toast.id = 'no-perm-toast';
   toast.style.cssText = 'position:fixed;top:60px;left:50%;transform:translateX(-50%);background:#c0392b;color:#fff;padding:10px 20px;border-radius:8px;font-size:13px;font-weight:700;z-index:99999;box-shadow:0 4px 16px rgba(0,0,0,0.3);display:flex;align-items:center;gap:8px;font-family:Arial,sans-serif';
-  toast.innerHTML = `🔒 ${msg}`;
+  toast.innerHTML = `🔒 ${qmsEsc(msg)}`;
   document.body.appendChild(toast);
   setTimeout(() => toast.remove(), 2500);
 }
@@ -4693,7 +4727,7 @@ function drawParetoChart(recs) {
     }
   });
   const items = Object.values(rejectMap).sort((a,b)=>b.n-a.n).slice(0,8);
-  if (legendEl) legendEl.innerHTML = items.map((it,i)=>`<span style="background:#e8eef5;border-radius:3px;padding:1px 6px;font-size:10px">${i+1}. ${it.label} (${it.n})</span>`).join('');
+  if (legendEl) legendEl.innerHTML = items.map((it,i)=>`<span style="background:#e8eef5;border-radius:3px;padding:1px 6px;font-size:10px">${i+1}. ${qmsEsc(it.label)} (${it.n})</span>`).join('');
   drawBar(canvas, items.map(it=>it.label.slice(0,8)), [{values:items.map(it=>it.n),color:'#c0392b'}], {showVal:true});
 }
 
@@ -5084,46 +5118,46 @@ function sortAndRenderHist() {
     const savedStr = rec.savedAt ? new Date(rec.savedAt).toLocaleString('zh-TW',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}) : '—';
     // 顯示存檔者：若有 updatedBy 表示曾被修改過
     const savedByStr = rec.updatedBy
-      ? `<span style="font-size:10px;color:#BA7517">✏ ${rec.updatedBy}</span>`
-      : (rec.savedBy ? `<span style="font-size:10px;color:#888">${rec.savedBy}</span>` : '');
+      ? `<span style="font-size:10px;color:#BA7517">✏ ${qmsEsc(rec.updatedBy)}</span>`
+      : (rec.savedBy ? `<span style="font-size:10px;color:#888">${qmsEsc(rec.savedBy)}</span>` : '');
     const cpkStr = rec.cpkTotal ? `${rec.cpkPass}/${rec.cpkTotal}` : '—';
     const formNoDisplay = rec.formNo
-      ? `<span style="font-size:10px;font-weight:700;color:#1a4f8a;font-family:'Courier New',monospace;background:#e8f0fb;padding:1px 6px;border-radius:3px;white-space:nowrap">${rec.formNo}</span>`
+      ? `<span style="font-size:10px;font-weight:700;color:#1a4f8a;font-family:'Courier New',monospace;background:#e8f0fb;padding:1px 6px;border-radius:3px;white-space:nowrap">${qmsEsc(rec.formNo)}</span>`
       : '<span style="font-size:10px;color:#bbb">—</span>';
 
     const siteName = SITE_LIST.find(s => s.code === rec.site)?.name || '';
     const siteBadge = rec.site
-      ? `<span style="font-size:10px;font-weight:700;background:#1a4f8a;color:#fff;border-radius:3px;padding:1px 6px">${rec.site}</span>`
+      ? `<span style="font-size:10px;font-weight:700;background:#1a4f8a;color:#fff;border-radius:3px;padding:1px 6px">${qmsEsc(rec.site)}</span>`
       : '<span style="font-size:10px;color:#bbb">—</span>';
 
     const tr = document.createElement('tr');
     tr.id = 'hr-'+rec.key.replace(/[^a-zA-Z0-9]/g,'_');
     tr.innerHTML = `
-      <td style="text-align:center;cursor:pointer;color:#1a4f8a;font-size:13px" onclick="toggleHistDetail('${rec.key}')">▶</td>
+      <td style="text-align:center;cursor:pointer;color:#1a4f8a;font-size:13px" onclick="toggleHistDetail(${qmsJsArg(rec.key)})">▶</td>
       <td style="text-align:left;white-space:nowrap">${formNoDisplay}</td>
-      <td title="${siteName}">${siteBadge}</td>
-      <td><span class="hist-result-badge" style="background:${cfg.badgeBg||'#eee'};color:${cfg.badgeColor||'#333'}">${cfg.badge||rec.process||'—'}</span></td>
-      <td style="font-size:11px;white-space:nowrap">${rec.procName||'—'}</td>
-      <td style="font-weight:700;color:#1a4f8a;white-space:nowrap">${rec.partno||'—'}</td>
-      <td style="font-size:11px">${rec.partname||'—'}</td>
-      <td>${rec.inspector||'—'}</td>
-      <td><span class="hist-result-badge ${resultCls}">${rec.overall||'—'}</span>${rec.unmeasured ? `<div style="font-size:10px;color:#BA7517;font-weight:700;white-space:nowrap;margin-top:2px" title="有項目沒有輸入數值；判定僅依已量測的項目計算">⚠ ${rec.unmeasured}/${rec.rowsTotal}<br>未測</div>` : ''}</td>
+      <td title="${qmsEsc(siteName)}">${siteBadge}</td>
+      <td><span class="hist-result-badge" style="background:${cfg.badgeBg||'#eee'};color:${cfg.badgeColor||'#333'}">${qmsEsc(cfg.badge||rec.process||'—')}</span></td>
+      <td style="font-size:11px;white-space:nowrap">${qmsEsc(rec.procName||'—')}</td>
+      <td style="font-weight:700;color:#1a4f8a;white-space:nowrap">${qmsEsc(rec.partno||'—')}</td>
+      <td style="font-size:11px">${qmsEsc(rec.partname||'—')}</td>
+      <td>${qmsEsc(rec.inspector||'—')}</td>
+      <td><span class="hist-result-badge ${resultCls}">${qmsEsc(rec.overall||'—')}</span>${rec.unmeasured ? `<div style="font-size:10px;color:#BA7517;font-weight:700;white-space:nowrap;margin-top:2px" title="有項目沒有輸入數值；判定僅依已量測的項目計算">⚠ ${rec.unmeasured}/${rec.rowsTotal}<br>未測</div>` : ''}</td>
       <td style="text-align:center">${cpkStr}${(rec.process === 'CPK' && rec.sampleN > 0 && rec.sampleN < 32)
         ? `<div style="font-size:10px;color:#BA7517;font-weight:700;white-space:nowrap;margin-top:2px" title="這筆只量了 ${rec.sampleN} 筆樣本，未達製程能力分析建議的 32 筆；Cpk 僅供參考，不宜當製程能力報告">⚠ n=${rec.sampleN}</div>`
         : ''}</td>
-      <td style="font-size:10px;white-space:nowrap">${rec.date||'—'}</td>
+      <td style="font-size:10px;white-space:nowrap">${qmsEsc(rec.date||'—')}</td>
       <td style="font-size:11px;color:#666;white-space:nowrap">
         <div>📁 ${savedStr}</div>
         ${savedByStr}
       </td>
       <td>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:3px;white-space:nowrap">
-        <button class="rec-act-btn" onclick="toggleHistDetail('${rec.key}')"
+        <button class="rec-act-btn" onclick="toggleHistDetail(${qmsJsArg(rec.key)})"
           style="border-color:#0f6e56;color:#0f6e56;margin:0">👁 查看</button>
-        <button class="rec-act-btn" onclick="printRecord('${rec.key}')"
+        <button class="rec-act-btn" onclick="printRecord(${qmsJsArg(rec.key)})"
           style="border-color:#555;color:#555;margin:0">🖨 列印</button>
-        <button class="rec-act-btn rec-load" onclick="editRecord('${rec.key}')" style="margin:0;${(()=>{const c=ROLE_CAPS[getCurrentUserRole()]||{};return (c.edit||c.submit)&&canTouchSite(rec.site)?'':'display:none'})()}">✏ 編輯</button>
-        <button class="rec-act-btn rec-del"  onclick="deleteRecord('${rec.key}')" style="margin:0;${(()=>{const c=ROLE_CAPS[getCurrentUserRole()]||{};return c.del&&canTouchSite(rec.site)?'':'display:none'})()}">✕ 刪除</button>
+        <button class="rec-act-btn rec-load" onclick="editRecord(${qmsJsArg(rec.key)})" style="margin:0;${(()=>{const c=ROLE_CAPS[getCurrentUserRole()]||{};return (c.edit||c.submit)&&canTouchSite(rec.site)?'':'display:none'})()}">✏ 編輯</button>
+        <button class="rec-act-btn rec-del"  onclick="deleteRecord(${qmsJsArg(rec.key)})" style="margin:0;${(()=>{const c=ROLE_CAPS[getCurrentUserRole()]||{};return c.del&&canTouchSite(rec.site)?'':'display:none'})()}">✕ 刪除</button>
         </div>
       </td>
     `;
@@ -5245,9 +5279,9 @@ function toggleHistDetail(key) {
       const resCls = pass ? 'hist-result-pass' : alert ? 'hist-result-alert' : fail ? 'hist-result-fail' : '';
       const resLbl = pass ? 'Pass' : alert ? 'Alert' : fail ? 'Reject' : '—';
       return `<tr>
-        <td>${p.faiNo ?? (idx+1)}</td>
-        <td style="text-align:left">${p.moi||'—'}</td>
-        <td>${p.nom??''}</td><td>${p.usl??''}</td><td>${p.lsl??''}</td>
+        <td>${qmsEsc(p.faiNo ?? (idx+1))}</td>
+        <td style="text-align:left">${qmsEsc(p.moi||'—')}</td>
+        <td>${qmsEsc(p.nom??'')}</td><td>${qmsEsc(p.usl??'')}</td><td>${qmsEsc(p.lsl??'')}</td>
         <td>${st ? st.n : '—'}</td>
         <td>${st ? st.mean.toFixed(3) : '—'}</td>
         <td>${st ? st.sigma.toFixed(4) : '—'}</td>
@@ -5260,7 +5294,7 @@ function toggleHistDetail(key) {
     const fno = recData.formNo || '—';
     const caps = ROLE_CAPS[getCurrentUserRole()] || ROLE_CAPS.query;
     const actionBtns = (caps.edit && canTouchSite(recData.site)) /* V143：跨廠記錄一律唯讀 */
-      ? `<button onclick="editRecord('${key}')" style="height:28px;padding:0 14px;background:#1a4f8a;color:#fff;border:none;border-radius:4px;font-size:11px;cursor:pointer;font-family:Arial,sans-serif">✏ 帶入編輯</button>`
+      ? `<button onclick="editRecord(${qmsJsArg(key)})" style="height:28px;padding:0 14px;background:#1a4f8a;color:#fff;border:none;border-radius:4px;font-size:11px;cursor:pointer;font-family:Arial,sans-serif">✏ 帶入編輯</button>`
       : `<span style="font-size:11px;color:#888;background:#f4f6f9;padding:3px 10px;border-radius:4px;border:1px solid #ddd">🔒 唯讀 Read-only</span>`;
 
     const cpkRow = document.createElement('tr');
@@ -5269,11 +5303,11 @@ function toggleHistDetail(key) {
     cpkRow.innerHTML = `<td colspan="13">
       <div class="hist-detail-inner">
         <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;flex-wrap:wrap">
-          <span style="font-size:13px;font-weight:700;color:#1a4f8a;font-family:'Courier New',monospace;background:#dce6f1;padding:3px 10px;border-radius:4px">📊 ${fno}</span>
-          <span style="font-size:11px;color:#666">料號：${recData.partno||'—'}</span>
-          <span style="font-size:11px;color:#666">品名：${recData.partname||'—'}</span>
-          <span style="font-size:11px;color:#666">樣本數：${recData.lotSize||'—'}</span>
-          ${recData.savedBy ? `<span style="font-size:11px;color:#888">存檔：${recData.savedBy}</span>` : ''}
+          <span style="font-size:13px;font-weight:700;color:#1a4f8a;font-family:'Courier New',monospace;background:#dce6f1;padding:3px 10px;border-radius:4px">📊 ${qmsEsc(fno)}</span>
+          <span style="font-size:11px;color:#666">料號：${qmsEsc(recData.partno||'—')}</span>
+          <span style="font-size:11px;color:#666">品名：${qmsEsc(recData.partname||'—')}</span>
+          <span style="font-size:11px;color:#666">樣本數：${qmsEsc(recData.lotSize||'—')}</span>
+          ${recData.savedBy ? `<span style="font-size:11px;color:#888">存檔：${qmsEsc(recData.savedBy)}</span>` : ''}
           <div style="margin-left:auto">${actionBtns}</div>
         </div>
         <table>
@@ -5297,13 +5331,13 @@ function toggleHistDetail(key) {
     const sVals = Array.from({length:sCount},(_,i)=>{
       const v=r.s?r.s[i]:null;
       const oos=v!==null&&!isNaN(v)&&r.usl!==null&&r.lsl!==null&&(+v>r.usl||+v<r.lsl);
-      return `<td style="${oos?'background:#fde8e8;color:#c0392b;font-weight:700':''}">${v??''}</td>`;
+      return `<td style="${oos?'background:#fde8e8;color:#c0392b;font-weight:700':''}">${qmsEsc(v??'')}</td>`;
     }).join('');
     // V156：這一列完全沒有數值＝未量測 → 淡黃底＋判定改標「未量測」（判定邏輯不變，只是顯示得明確）
     const _un = r.type && !(r.s||[]).filter(x => x!==null && x!=='' && !isNaN(x)).length;
     return `<tr${_un ? ' style="background:#fffbe6"' : ''}>
-      <td>${r.fai||''}${adhocTag(r)}</td><td style="text-align:left">${r.moi||''}</td><td>${r.type||''}</td>
-      <td>${r.nom??''}</td><td>${r.usl??''}</td><td>${r.lsl??''}</td>
+      <td>${qmsEsc(r.fai||'')}${adhocTag(r)}</td><td style="text-align:left">${qmsEsc(r.moi||'')}</td><td>${qmsEsc(r.type||'')}</td>
+      <td>${qmsEsc(r.nom??'')}</td><td>${qmsEsc(r.usl??'')}</td><td>${qmsEsc(r.lsl??'')}</td>
       ${sVals}
       <td>${st?st.mean.toFixed(3):'—'}</td>
       <td>${_un
@@ -5322,7 +5356,7 @@ function toggleHistDetail(key) {
     ? `<div style="margin-top:10px">
         <div style="font-size:11px;font-weight:700;color:#555;margin-bottom:6px">📷 附件照片 (${photos.length}張)</div>
         <div style="display:flex;flex-wrap:wrap;gap:6px">
-          ${photos.map(p=>`<img src="${p.dataUrl}" style="width:72px;height:72px;object-fit:cover;border:1px solid #ccc;border-radius:4px;cursor:pointer" onclick="window.open('','_blank','width=800,height=600').document.write('<img src=\\'${p.dataUrl}\\' style=\\'max-width:100%;max-height:100vh\\'>')">` ).join('')}
+          ${photos.map(p=>`<img src="${qmsEsc(p.dataUrl)}" style="width:72px;height:72px;object-fit:cover;border:1px solid #ccc;border-radius:4px;cursor:pointer" onclick="window.open('','_blank','width=800,height=600').document.write('<img src=\\'' + ${qmsJsArg(qmsEsc(p.dataUrl))} + '\\' style=\\'max-width:100%;max-height:100vh\\'>')">` ).join('')}
         </div>
       </div>`
     : '';
@@ -5330,7 +5364,7 @@ function toggleHistDetail(key) {
   // 依角色決定操作按鈕（動態讀取當前權限，不用快取）
   const caps = ROLE_CAPS[getCurrentUserRole()] || ROLE_CAPS.query;
   const actionBtns = (caps.edit && canTouchSite(recData.site)) // V143：跨廠記錄一律唯讀
-    ? `<button onclick="editRecord('${key}')"
+    ? `<button onclick="editRecord(${qmsJsArg(key)})"
         style="height:28px;padding:0 14px;background:#1a4f8a;color:#fff;border:none;border-radius:4px;font-size:11px;cursor:pointer;font-family:Arial,sans-serif">
         ✏ 帶入編輯
        </button>`
@@ -5341,12 +5375,12 @@ function toggleHistDetail(key) {
   detailRow.innerHTML = `<td colspan="13">
     <div class="hist-detail-inner">
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;flex-wrap:wrap">
-        <span style="font-size:13px;font-weight:700;color:#1a4f8a;font-family:'Courier New',monospace;background:#dce6f1;padding:3px 10px;border-radius:4px">📋 ${fno}</span>
-        <span style="font-size:11px;color:#666">供應商：${hdr.supplier||hdr.customer||'—'}</span>
-        <span style="font-size:11px;color:#666">版本：${hdr.rev||'—'}</span>
-        <span style="font-size:11px;color:#666">材料：${hdr.material||'—'}</span>
-        <span style="font-size:11px;color:#666">試作階段：${hdr.phase||'—'}</span>
-        ${recData.updatedBy ? `<span style="font-size:11px;color:#BA7517;font-weight:700">✏ 最後修改：${recData.updatedBy}</span>` : (recData.savedBy ? `<span style="font-size:11px;color:#888">存檔：${recData.savedBy}</span>` : '')}
+        <span style="font-size:13px;font-weight:700;color:#1a4f8a;font-family:'Courier New',monospace;background:#dce6f1;padding:3px 10px;border-radius:4px">📋 ${qmsEsc(fno)}</span>
+        <span style="font-size:11px;color:#666">供應商：${qmsEsc(hdr.supplier||hdr.customer||'—')}</span>
+        <span style="font-size:11px;color:#666">版本：${qmsEsc(hdr.rev||'—')}</span>
+        <span style="font-size:11px;color:#666">材料：${qmsEsc(hdr.material||'—')}</span>
+        <span style="font-size:11px;color:#666">試作階段：${qmsEsc(hdr.phase||'—')}</span>
+        ${recData.updatedBy ? `<span style="font-size:11px;color:#BA7517;font-weight:700">✏ 最後修改：${qmsEsc(recData.updatedBy)}</span>` : (recData.savedBy ? `<span style="font-size:11px;color:#888">存檔：${qmsEsc(recData.savedBy)}</span>` : '')}
         <div style="margin-left:auto">${actionBtns}</div>
       </div>
       <table>
@@ -5497,7 +5531,7 @@ function showCpkPrintOptionDialog(partno, callback) {
   box.style.cssText = 'background:#fff;border-radius:10px;padding:24px;max-width:360px;width:100%;box-shadow:0 8px 32px rgba(0,0,0,0.3);font-family:Arial,sans-serif';
   box.innerHTML = `
     <div style="font-size:15px;font-weight:700;color:#1a4f8a;margin-bottom:8px">🖨 CPK 列印選項</div>
-    <div style="font-size:12px;color:#555;margin-bottom:20px">料號：<b>${partno || '\u2014'}</b></div>
+    <div style="font-size:12px;color:#555;margin-bottom:20px">料號：<b>${qmsEsc(partno || '\u2014')}</b></div>
     <button id="cpo-chart" style="width:100%;height:46px;margin-bottom:10px;background:#1a4f8a;color:#fff;border:none;border-radius:6px;font-size:13px;font-weight:700;cursor:pointer;font-family:Arial,sans-serif">
       📊 含分布圖列印<div style="font-size:10px;font-weight:400;margin-top:2px">列印前現場計算，產生各量測點分布圖</div>
     </button>
@@ -5747,7 +5781,7 @@ function renderPnList() {
       const codes = Object.keys(cnt).sort((a, b) => (a === 'shared' ? -1 : b === 'shared' ? 1 : a.localeCompare(b)));
       const total = codes.reduce((s, c) => s + cnt[c], 0);
       ownerSel.innerHTML = `<option value="">— 全部歸屬（${total}）—</option>`
-        + codes.map(c => `<option value="${c === 'shared' ? '__shared__' : c}">${nameOf(c)}（${cnt[c]}）</option>`).join('');
+        + codes.map(c => `<option value="${qmsEsc(c === 'shared' ? '__shared__' : c)}">${qmsEsc(nameOf(c))}（${cnt[c]}）</option>`).join('');
       ownerSel.value = pnScopeFilter || '';
     }
   }
@@ -5796,7 +5830,7 @@ function specListRowHtml(r, opt) {
   const a = v => String(v == null ? '' : v).replace(/[\\'"]/g, '');   // 放進 onclick 參數：去掉引號與反斜線
   const stopped = !r.active;
   const isShared = r.scope === 'shared';
-  const args = `'${a(r.partno)}','${a(r.scope)}','${a(r.rev)}'`;
+  const args = `${qmsJsArg(r.partno)},${qmsJsArg(r.scope)},${qmsJsArg(r.rev)}`;
   //  版本欄很窄（約 60px）⇒ 這裡只標「停用」兩個字；停用日期與停用人放在品名欄第二行（nameCell）
   const revCell = `<span class="pn-badge">${h(r.rev) || '—'}</span>`
     + (stopped ? `<div style="font-size:10px;color:#BA7517;margin-top:3px;white-space:nowrap">⏸ 停用</div>` : '');
@@ -5977,9 +6011,9 @@ function renderScopeCheckboxes(pn, onlyScope, lockAll) {
   box.innerHTML = allScopes.map(sc => `
     <label style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer;
       background:#f5f7fa;border:0.5px solid #ddd;border-radius:4px;padding:4px 10px;white-space:nowrap">
-      <input type="checkbox" value="${sc.key}" ${currentScopes.has(sc.key)?'checked':''} ${lockAll ? 'disabled' : ''}
+      <input type="checkbox" value="${qmsEsc(sc.key)}" ${currentScopes.has(sc.key)?'checked':''} ${lockAll ? 'disabled' : ''}
         style="width:14px;height:14px;cursor:pointer">
-      ${sc.label}
+      ${qmsEsc(sc.label)}
     </label>
   `).join('')
     // V178：改版時只建立在原本那個歸屬，勾選鎖住；V178-3：編輯也鎖（lockAll 傳字串＝顯示那段說明）
@@ -6149,15 +6183,15 @@ function renderSpecRows() {
     tr.dataset.idx = i;   // V171：specSetBalloon 用來把「游標所在的格子」對回資料列
     tr.innerHTML = `
       <td style="color:#999;font-size:10px">${i+1}</td>
-      <td><input value="${r.fai??''}" placeholder="球標" onchange="specSetBalloon(${i},this.value)" onkeydown="if(event.key==='Enter'&&!event.isComposing)specSetBalloon(${i},this.value)" style="width:100%;text-align:center"></td>
-      <td><input value="${r.moi||''}" placeholder="Dial Caliper" onchange="specRows[${i}].moi=this.value"></td>
+      <td><input value="${qmsEsc(r.fai??'')}" placeholder="球標" onchange="specSetBalloon(${i},this.value)" onkeydown="if(event.key==='Enter'&&!event.isComposing)specSetBalloon(${i},this.value)" style="width:100%;text-align:center"></td>
+      <td><input value="${qmsEsc(r.moi||'')}" placeholder="Dial Caliper" onchange="specRows[${i}].moi=this.value"></td>
       <td><select onchange="specRows[${i}].type=this.value;renderSpecRows()" style="border:none;background:transparent;font-size:11px;font-family:Arial,sans-serif;font-weight:700;color:${r.type==='CPK'?'#7b3fa0':'#1a4f8a'}">
         <option ${r.type==='FAI'?'selected':''}>FAI</option>
         <option ${r.type==='CPK'?'selected':''}>CPK</option>
       </select></td>
-      <td><input type="number" step="any" value="${r.nom??''}" placeholder="例：10" onchange="specRows[${i}].nom=this.value;renderSpecRows()"></td>
-      <td><input type="number" step="any" value="${r.pt??''}"  placeholder="例：0.1" onchange="specRows[${i}].pt=this.value;renderSpecRows()"></td>
-      <td><input type="number" step="any" value="${r.mt??''}"  placeholder="例：0.1" onchange="specRows[${i}].mt=this.value;renderSpecRows()"></td>
+      <td><input type="number" step="any" value="${qmsEsc(r.nom??'')}" placeholder="例：10" onchange="specRows[${i}].nom=this.value;renderSpecRows()"></td>
+      <td><input type="number" step="any" value="${qmsEsc(r.pt??'')}"  placeholder="例：0.1" onchange="specRows[${i}].pt=this.value;renderSpecRows()"></td>
+      <td><input type="number" step="any" value="${qmsEsc(r.mt??'')}"  placeholder="例：0.1" onchange="specRows[${i}].mt=this.value;renderSpecRows()"></td>
       <td class="usl-col">${usl}</td>
       <td class="usl-col">${lsl}</td>
       <td><button onclick="specRows.splice(${i},1);renderSpecRows()" style="border:none;background:none;color:#c0392b;cursor:pointer;font-size:15px;font-weight:700">✕</button></td>
@@ -7776,7 +7810,7 @@ function showScanResult(data) {
   Object.entries(data).forEach(([k, v]) => {
     if (k.startsWith('_')) return;
     const label = displayMap[k] || k;
-    html += `<div><b>${label}：</b>${v}</div>`;
+    html += `<div><b>${qmsEsc(label)}：</b>${qmsEsc(v)}</div>`;
   });
   if (!html) html = '<div style="color:#c0392b">⚠ 無法解析條碼內容</div>';
   preview.innerHTML = html;
@@ -8229,7 +8263,7 @@ async function openScopeModal(email) {
   const buList = await loadOmsBuList();
   let buHtml = cb('bu', '*', '<b>★ 全集團</b>　<span style="color:#888;font-size:11px">（所有事業群，動態含未來新增）</span>', curBus.includes('*'));
   buList.forEach(g => {
-    buHtml += cb('bu', g.bu, `${esc(g.bu)}　<span style="color:#888;font-size:11px">（${g.codes.join('、')}）</span>`, curBus.includes(g.bu));
+    buHtml += cb('bu', g.bu, `${esc(g.bu)}　<span style="color:#888;font-size:11px">（${qmsEsc(g.codes.join('、'))}）</span>`, curBus.includes(g.bu));
   });
   if (!buList.length) buHtml += '<span style="color:#c0392b;font-size:11px">⚠ 讀不到 OMS 事業群清單，稍後再開（不影響既有設定）</span>';
   buBox.innerHTML = buHtml;
@@ -8373,8 +8407,8 @@ function umgrSyncSelect(id, allRows, opt, defLabel, labelOf, valueOf, colorOf, o
   el.innerHTML = '<option value="" style="color:#555">' + defLabel + '</option>'
     + avail.map(v => {
         const c = colorOf ? (colorOf(v) || '#333') : '#333';
-        return '<option value="' + v + '" style="color:' + c + ';font-weight:700"'
-             + (v === cur ? ' selected' : '') + '>' + labelOf(v) + '</option>';
+        return '<option value="' + qmsEsc(v) + '" style="color:' + c + ';font-weight:700"'
+             + (v === cur ? ' selected' : '') + '>' + qmsEsc(labelOf(v)) + '</option>';
       }).join('');
   el.value = cur;
   el.style.color      = cur && colorOf ? (colorOf(cur) || '#333') : '#333';
@@ -8438,7 +8472,7 @@ async function renderUserMgrTable(useCache) {
   try {
     const lr = (useCache && _umgrCache && _umgrCache.lr) ? _umgrCache.lr : await sbCallAdminFn('list');
     if (!lr.ok || !lr.data || !lr.data.profiles) {
-      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:14px;color:#c0392b;font-size:12px">載入帳號失敗：' + (lr.msg||'') + '</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:14px;color:#c0392b;font-size:12px">載入帳號失敗：' + qmsEsc(lr.msg||'') + '</td></tr>';
       return;
     }
     window._scopeByEmail = {}; // V143：email(小寫) → 跨廠查詢範圍（🌐 徽章與設定視窗用）
@@ -8609,14 +8643,14 @@ async function renderUserMgrTable(useCache) {
           <label style="display:inline-flex;align-items:center;gap:2px;cursor:pointer;white-space:nowrap;font-size:10px;color:${p.color};font-weight:600;margin-right:2px">
             <input type="checkbox" id="cb_${sid}_${p.key}"
               ${(bits & p.bit) ? 'checked' : ''}
-              onchange="onPermCheck('${r.site}','${r.key}','${p.key}',this.checked,'${sid}')"
+              onchange="onPermCheck(${qmsJsArg(r.site)},${qmsJsArg(r.key)},'${p.key}',this.checked,'${sid}')"
               style="accent-color:${p.color};width:12px;height:12px;cursor:pointer;flex-shrink:0">
             ${p.label}
           </label>`).join('');
     const actionBtns = isInactive
-      ? `<button onclick="enableSiteConfirm('${r.site}')"
+      ? `<button onclick="enableSiteConfirm(${qmsJsArg(r.site)})"
            style="height:26px;padding:0 8px;font-size:10px;border:1px solid #1D9E75;color:#1D9E75;background:#fff;border-radius:3px;cursor:pointer;font-family:Arial,sans-serif;white-space:nowrap;margin-right:3px">▶ 啟用廠區</button>
-         <button onclick="deleteUserConfirm('${r.site}','${r.key}','${r.name}')"
+         <button onclick="deleteUserConfirm(${qmsJsArg(r.site)},${qmsJsArg(r.key)},${qmsJsArg(r.name)})"
            style="height:26px;padding:0 8px;font-size:10px;border:1px solid #c0392b;color:#c0392b;background:#fff;border-radius:3px;cursor:pointer;font-family:Arial,sans-serif;white-space:nowrap">✕ 移除</button>`
       : `${(() => {
            /* ══ V170-11：🌐 只對「真正的 ADMIN 帳號」隱藏（使用者 260908）══
@@ -8632,27 +8666,27 @@ async function renderUserMgrTable(useCache) {
            return (() => {
            const sc = (window._scopeByEmail || {})[String(r.email || r.key).toLowerCase()] || {};
            const has = (sc.bus && sc.bus.length) || (sc.sups && sc.sups.length);
-           return `<button onclick="openScopeModal('${String(r.email || r.key).replace(/'/g, '')}')" title="🌐 跨廠區查詢範圍"
+           return `<button onclick="openScopeModal(${qmsJsArg(r.email || r.key)})" title="🌐 跨廠區查詢範圍"
              style="height:26px;padding:0 7px;font-size:10px;border:1px solid ${has ? '#0f6e56' : '#bbb'};color:${has ? '#fff' : '#777'};background:${has ? '#0f6e56' : '#fff'};border-radius:3px;cursor:pointer;font-family:Arial,sans-serif;white-space:nowrap;margin-right:3px">🌐${has ? '✓' : ''}</button>`; })();
          })()}${(r.acctType !== 'admin' && String(r.site).toUpperCase() !== 'TEST')
-           ? `<button onclick="resetInternalHint('${r.name}')" title="內部同仁的密碼由 SyncHub 統一管理，請到 OMS「系統資料授權」頁重設"
+           ? `<button onclick="resetInternalHint(${qmsJsArg(r.name)})" title="內部同仁的密碼由 SyncHub 統一管理，請到 OMS「系統資料授權」頁重設"
            style="height:26px;padding:0 7px;font-size:10px;border:1px solid #bbb;color:#777;background:#fff;border-radius:3px;cursor:pointer;font-family:Arial,sans-serif;white-space:nowrap;margin-right:3px">🔑 OMS</button>`
-           : `<button onclick="resetUserPassword('${r.site}','${r.key}','${r.name}')"
+           : `<button onclick="resetUserPassword(${qmsJsArg(r.site)},${qmsJsArg(r.key)},${qmsJsArg(r.name)})"
            style="height:26px;padding:0 8px;font-size:10px;border:1px solid #1a4f8a;color:#1a4f8a;background:#fff;border-radius:3px;cursor:pointer;font-family:Arial,sans-serif;white-space:nowrap;margin-right:3px">🔑 重設</button>`}
         <span id="sync_badge_${sid}" style="font-size:10px;color:#1d9e75;font-family:Arial"></span>
-         <button onclick="deleteUserConfirm('${r.site}','${r.key}','${r.name}')"
+         <button onclick="deleteUserConfirm(${qmsJsArg(r.site)},${qmsJsArg(r.key)},${qmsJsArg(r.name)})"
            style="height:26px;padding:0 8px;font-size:10px;border:1px solid #c0392b;color:#c0392b;background:#fff;border-radius:3px;cursor:pointer;font-family:Arial,sans-serif;white-space:nowrap">✕ 移除</button>`;
     const opacity = isInactive ? 'opacity:0.7;' : '';
     return `
     <tr style="background:${bg};border-bottom:1px solid #eee;${opacity}">
-      <td style="padding:8px 6px;font-weight:700;color:${isInactive?'#999':'#1a4f8a'};vertical-align:middle;white-space:nowrap">${r.site}</td>
-      <td style="padding:8px 6px;vertical-align:middle;white-space:nowrap;font-weight:700;color:#1a4f8a;font-family:'Courier New',monospace">${r.emp_id || '—'}${(() => { const m = _mmByEmail[String(r.email || r.key || '').toLowerCase()]; return m ? `<br><span title="${m.conflict ? 'OMS 的工號已被另一個 QMS 帳號使用，請洽 DTO' : 'QMS 存的工號跟 OMS 不一樣，可按上方「更新成 OMS 工號」'}" style="font-size:10px;font-weight:700;color:${m.conflict ? '#c0392b' : '#8a5a00'};font-family:Arial,sans-serif">⚠ OMS：${String(m.empId).replace(/</g, '&lt;')}</span>` : ''; })()}</td>
+      <td style="padding:8px 6px;font-weight:700;color:${isInactive?'#999':'#1a4f8a'};vertical-align:middle;white-space:nowrap">${qmsEsc(r.site)}</td>
+      <td style="padding:8px 6px;vertical-align:middle;white-space:nowrap;font-weight:700;color:#1a4f8a;font-family:'Courier New',monospace">${qmsEsc(r.emp_id) || '—'}${(() => { const m = _mmByEmail[String(r.email || r.key || '').toLowerCase()]; return m ? `<br><span title="${m.conflict ? 'OMS 的工號已被另一個 QMS 帳號使用，請洽 DTO' : 'QMS 存的工號跟 OMS 不一樣，可按上方「更新成 OMS 工號」'}" style="font-size:10px;font-weight:700;color:${m.conflict ? '#c0392b' : '#8a5a00'};font-family:Arial,sans-serif">⚠ OMS：${String(m.empId).replace(/</g, '&lt;')}</span>` : ''; })()}</td>
       <td style="padding:6px 6px;vertical-align:middle;white-space:nowrap;line-height:1.3">👤 ${((r.omsName||r.name)||'').replace(/</g,'&lt;')}${(r.omsName && r.omsEng && r.omsEng!==r.omsName) ? `<br><span style="color:#888;font-weight:400;font-size:10px;margin-left:17px">${r.omsEng.replace(/</g,'&lt;')}</span>` : ''}</td>
-      <td style="padding:8px 6px;vertical-align:middle;font-size:10.5px;color:#555;min-width:200px;white-space:nowrap">${emailDisplay}</td>
+      <td style="padding:8px 6px;vertical-align:middle;font-size:10.5px;color:#555;min-width:200px;white-space:nowrap">${qmsEsc(emailDisplay)}</td>
       <td style="padding:6px 6px;vertical-align:middle;min-width:300px">
         <div style="display:flex;gap:1px;align-items:center;flex-wrap:nowrap">${checks}</div>
       </td>
-      <td style="padding:6px 4px;font-size:10px;color:#888;vertical-align:middle;white-space:nowrap">${r.createdAt ? r.createdAt.slice(0,10) : '—'}</td>
+      <td style="padding:6px 4px;font-size:10px;color:#888;vertical-align:middle;white-space:nowrap">${r.createdAt ? qmsEsc(r.createdAt.slice(0,10)) : '—'}</td>
       <td style="padding:8px 6px;text-align:center;vertical-align:middle;white-space:nowrap">${actionBtns}</td>
     </tr>`;
   }
@@ -8685,9 +8719,9 @@ async function renderUserMgrTable(useCache) {
       <td style="padding:8px 6px;vertical-align:middle;white-space:nowrap">👤 ${esc(r.omsName || r.name)}</td>
       <td style="padding:8px 6px;vertical-align:middle;font-size:10.5px;color:#555;white-space:nowrap">${esc(r.email || r.key)}</td>
       <td style="padding:6px 6px;vertical-align:middle"><span style="display:inline-block;padding:2px 8px;border-radius:10px;background:#BA7517;color:#fff;font-size:11px;font-weight:700;white-space:nowrap">⚠ 權限已移除</span></td>
-      <td style="padding:6px 4px;font-size:10px;color:#888;vertical-align:middle">${r.createdAt ? r.createdAt.slice(0,10) : '—'}</td>
+      <td style="padding:6px 4px;font-size:10px;color:#888;vertical-align:middle">${r.createdAt ? qmsEsc(r.createdAt.slice(0,10)) : '—'}</td>
       <td style="padding:8px 6px;text-align:center;vertical-align:middle;white-space:nowrap">
-        <button onclick="reEnableQmsUser('${String(r.email||r.key).replace(/'/g,'')}','${String(r.name).replace(/'/g,'')}')"
+        <button onclick="reEnableQmsUser(${qmsJsArg(r.email||r.key)},${qmsJsArg(r.name)})"
           style="height:26px;padding:0 12px;font-size:11px;font-weight:700;border:none;background:#1D9E75;color:#fff;border-radius:4px;cursor:pointer;white-space:nowrap">＋ 重新開通</button>
       </td>
     </tr>`;
@@ -8702,9 +8736,9 @@ async function renderUserMgrTable(useCache) {
       <td style="padding:8px 6px;vertical-align:middle;white-space:nowrap;color:#666">👤 ${esc(r.omsName || r.name)}</td>
       <td style="padding:8px 6px;vertical-align:middle;font-size:10.5px;color:#888;white-space:nowrap">${esc(r.email || r.key)}</td>
       <td style="padding:6px 6px;vertical-align:middle"><span style="display:inline-block;padding:2px 8px;border-radius:10px;background:#777;color:#fff;font-size:11px;font-weight:700;white-space:nowrap">🚫 OMS 已撤銷</span></td>
-      <td style="padding:6px 4px;font-size:10px;color:#888;vertical-align:middle">${r.createdAt ? r.createdAt.slice(0,10) : '—'}</td>
+      <td style="padding:6px 4px;font-size:10px;color:#888;vertical-align:middle">${r.createdAt ? qmsEsc(r.createdAt.slice(0,10)) : '—'}</td>
       <td style="padding:8px 6px;text-align:center;vertical-align:middle;white-space:nowrap">
-        <button onclick="deleteUserConfirm('${r.site}','${r.key}','${String(r.name).replace(/'/g,'')}')"
+        <button onclick="deleteUserConfirm(${qmsJsArg(r.site)},${qmsJsArg(r.key)},${qmsJsArg(r.name)})"
           style="height:26px;padding:0 10px;font-size:11px;border:1px solid #c0392b;color:#c0392b;background:#fff;border-radius:4px;cursor:pointer;white-space:nowrap">✕ 清除設定</button>
       </td>
     </tr>`;
@@ -9045,15 +9079,15 @@ function renderSiteTable() {
     active.forEach((s, i) => {
       html += `
       <tr style="background:${i%2===0?'#fff':'#f8f9fa'};border-bottom:1px solid #eee">
-        <td style="padding:8px 12px;font-weight:700;color:#1a4f8a;font-family:'Courier New',monospace">${s.code}</td>
-        <td style="padding:8px 12px">${s.name}</td>
-        <td style="padding:8px 12px;font-size:11px;color:#666">${langNames[s.lang]||s.lang||'—'}</td>
+        <td style="padding:8px 12px;font-weight:700;color:#1a4f8a;font-family:'Courier New',monospace">${qmsEsc(s.code)}</td>
+        <td style="padding:8px 12px">${qmsEsc(s.name)}</td>
+        <td style="padding:8px 12px;font-size:11px;color:#666">${qmsEsc(langNames[s.lang]||s.lang||'—')}</td>
         <td style="padding:8px 12px;text-align:center">
           <span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700;background:#d4edda;color:#155724">● 啟用</span>
         </td>
         <td style="padding:8px 12px;text-align:center;white-space:nowrap">
-          <button onclick="editSite('${s.code}')" style="height:24px;padding:0 8px;font-size:10px;border:1px solid #1a4f8a;color:#1a4f8a;background:#fff;border-radius:3px;cursor:pointer;font-family:Arial,sans-serif;margin-right:3px;white-space:nowrap">✏ Edit</button>
-          <button onclick="disableSiteConfirm('${s.code}')" style="height:24px;padding:0 8px;font-size:10px;border:1px solid #BA7517;color:#BA7517;background:#fff;border-radius:3px;cursor:pointer;font-family:Arial,sans-serif;white-space:nowrap">⏸ 停用</button>
+          <button onclick="editSite(${qmsJsArg(s.code)})" style="height:24px;padding:0 8px;font-size:10px;border:1px solid #1a4f8a;color:#1a4f8a;background:#fff;border-radius:3px;cursor:pointer;font-family:Arial,sans-serif;margin-right:3px;white-space:nowrap">✏ Edit</button>
+          <button onclick="disableSiteConfirm(${qmsJsArg(s.code)})" style="height:24px;padding:0 8px;font-size:10px;border:1px solid #BA7517;color:#BA7517;background:#fff;border-radius:3px;cursor:pointer;font-family:Arial,sans-serif;white-space:nowrap">⏸ 停用</button>
         </td>
       </tr>`;
     });
@@ -9070,15 +9104,15 @@ function renderSiteTable() {
     inactive.forEach((s, i) => {
       html += `
       <tr style="background:#fdf6f0;border-bottom:1px solid #eee;opacity:0.85">
-        <td style="padding:8px 12px;font-weight:700;color:#888;font-family:'Courier New',monospace">${s.code}</td>
-        <td style="padding:8px 12px;color:#888">${s.name}</td>
-        <td style="padding:8px 12px;font-size:11px;color:#bbb">${langNames[s.lang]||s.lang||'—'}</td>
+        <td style="padding:8px 12px;font-weight:700;color:#888;font-family:'Courier New',monospace">${qmsEsc(s.code)}</td>
+        <td style="padding:8px 12px;color:#888">${qmsEsc(s.name)}</td>
+        <td style="padding:8px 12px;font-size:11px;color:#bbb">${qmsEsc(langNames[s.lang]||s.lang||'—')}</td>
         <td style="padding:8px 12px;text-align:center">
           <span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700;background:#f8d7da;color:#721c24">● 停用</span>
         </td>
         <td style="padding:8px 12px;text-align:center;white-space:nowrap">
-          <button onclick="enableSiteConfirm('${s.code}')" style="height:24px;padding:0 8px;font-size:10px;border:1px solid #1D9E75;color:#1D9E75;background:#fff;border-radius:3px;cursor:pointer;font-family:Arial,sans-serif;margin-right:3px;white-space:nowrap">▶ 重新啟用</button>
-          <button onclick="permanentDeleteSiteConfirm('${s.code}')" style="height:24px;padding:0 8px;font-size:10px;border:1px solid #c0392b;color:#c0392b;background:#fff;border-radius:3px;cursor:pointer;font-family:Arial,sans-serif;white-space:nowrap">✕ 永久刪除</button>
+          <button onclick="enableSiteConfirm(${qmsJsArg(s.code)})" style="height:24px;padding:0 8px;font-size:10px;border:1px solid #1D9E75;color:#1D9E75;background:#fff;border-radius:3px;cursor:pointer;font-family:Arial,sans-serif;margin-right:3px;white-space:nowrap">▶ 重新啟用</button>
+          <button onclick="permanentDeleteSiteConfirm(${qmsJsArg(s.code)})" style="height:24px;padding:0 8px;font-size:10px;border:1px solid #c0392b;color:#c0392b;background:#fff;border-radius:3px;cursor:pointer;font-family:Arial,sans-serif;white-space:nowrap">✕ 永久刪除</button>
         </td>
       </tr>`;
     });
@@ -9234,7 +9268,7 @@ function testBcFormat() {
     }
   } catch(e) { data = {partno: raw.trim()}; }
   const displayMap = {partno:'料號',lotno:'批號',qty:'數量',dn:'送貨單',workorder:'工單',date:'日期',supplier:'供應商',partname:'品名',material:'材料',rev:'版本'};
-  const html = Object.entries(data).map(([k,v]) => `<div><b>${displayMap[k]||k}：</b>${v}</div>`).join('') || '<div style="color:#c0392b">無法解析</div>';
+  const html = Object.entries(data).map(([k,v]) => `<div><b>${qmsEsc(displayMap[k]||k)}：</b>${qmsEsc(v)}</div>`).join('') || '<div style="color:#c0392b">無法解析</div>';
   const el = document.getElementById('sys-bc-test-result');
   el.innerHTML = '<div style="font-weight:700;color:#1d9e75;margin-bottom:4px">✅ 解析結果</div>' + html;
   el.style.display = '';
@@ -9282,13 +9316,13 @@ function renderSysInfo() {
   try { allKeys.forEach(k=>{ storageUsed += (localStorage.getItem(k)||'').length; }); } catch(e) {}
   const rows = [
     ['Version 版本', 'QMS v1.0'],
-    ['Current Org 當前組織', isAdmin() ? '— (全組織 All Orgs) —' : (getCurrentSite() || '— 未設定 —')],
+    ['Current Org 當前組織', isAdmin() ? '— (全組織 All Orgs) —' : qmsEsc(getCurrentSite() || '— 未設定 —')],
     ['Orgs Configured 組織數', SITE_LIST.length + ' 個'],
     ['Formal Records 正式記錄', recordCount + ' 筆　<span style="font-weight:400;color:#888">(FAI ' + faiCount + ' / CPK ' + cpkCount + ')</span>'],
     ['Drafts 草稿', draftCount + ' 筆'],
     ['Part Specs 料號規格', partCount + ' 筆'],
     ['Storage Used 儲存使用', Math.round(storageUsed/1024) + ' KB'],
-    ['Language 語言', {'zh-TW':'TW 繁體中文','zh-CN':'CN 简体中文','vi':'VN Tiếng Việt','th':'TH ภาษาไทย'}[currentLang] || currentLang],
+    ['Language 語言', {'zh-TW':'TW 繁體中文','zh-CN':'CN 简体中文','vi':'VN Tiếng Việt','th':'TH ภาษาไทย'}[currentLang] || qmsEsc(currentLang)],
   ];
   grid.innerHTML = rows.map(([k,v])=>`
     <div style="padding:6px 10px;background:#f8f9fa;border-radius:4px;font-size:11px">
@@ -11093,7 +11127,7 @@ function cpkRenderTable() {
   let th2 = '<tr style="background:#1a4f8a;color:#fff;font-size:10px">';
   th2 += `<th style="padding:5px 7px;border:1px solid #9ab;min-width:80px">Dim. Designator</th>`;
   cpkPoints.forEach(pt => {
-    th2 += `<th style="padding:5px 7px;border:1px solid #9ab;min-width:60px;text-align:center">${pt.faiNo}<br><span style="font-weight:400;font-size:9px">${pt.moi||''}</span></th>`;
+    th2 += `<th style="padding:5px 7px;border:1px solid #9ab;min-width:60px;text-align:center">${qmsEsc(pt.faiNo)}<br><span style="font-weight:400;font-size:9px">${qmsEsc(pt.moi||'')}</span></th>`;
   });
   th2 += '</tr>';
   thead.innerHTML = th2;
@@ -11115,7 +11149,7 @@ function cpkRenderTable() {
     tbodyHtml += `<td style="padding:5px 7px;border:1px solid #ddd;font-weight:700;font-size:10px;color:#555">${sr.label}</td>`;
     cpkPoints.forEach(pt => {
       const v = sr.fn(pt);
-      tbodyHtml += `<td style="padding:5px;border:1px solid #ddd;text-align:center;font-weight:600;font-size:11px">${v!=null?v:''}</td>`;
+      tbodyHtml += `<td style="padding:5px;border:1px solid #ddd;text-align:center;font-weight:600;font-size:11px">${v!=null?qmsEsc(v):''}</td>`;
     });
     tbodyHtml += '</tr>';
   });
@@ -11130,7 +11164,7 @@ function cpkRenderTable() {
       const isOOS = val !== '' && pt.usl != null && pt.lsl != null && (val > pt.usl || val < pt.lsl);
       const bg2 = isOOS ? '#ffe0e0' : '';
       tbodyHtml += `<td style="padding:2px;border:1px solid #ddd;${bg2?'background:'+bg2:''}">
-        <input type="number" step="any" value="${val}"
+        <input type="number" step="any" value="${qmsEsc(val)}"
           class="s-inp${isOOS?' oos-inp':''}"
           id="cpkv_${pi}_${si}"
           onchange="cpkSetValue(${pi},${si},this.value)"
@@ -11451,7 +11485,7 @@ function cpkCalculateAll() {
       // V170-19：幾何公差的徽章要標 CPU（品保同仁 260910 實測後提出）
       //  症狀：統計表已顯示「Cpu 2.180」、圖下統計列也顯示「Cpu=2.18」，
       //    但卡片右上角這個綠色徽章還印「CPK = 2.180」⇒ 同一張卡片上兩種標籤，明顯不一致。
-      titleBar.innerHTML = `<span>球標 ${pt.faiNo} ${pt.moi||''}</span><span style="color:${cpkColor}">${st.gdt?'CPU':'CPK'} = ${st.cpk!=null?st.cpk.toFixed(3):'—'}</span>`;
+      titleBar.innerHTML = `<span>球標 ${qmsEsc(pt.faiNo)} ${qmsEsc(pt.moi||'')}</span><span style="color:${cpkColor}">${st.gdt?'CPU':'CPK'} = ${st.cpk!=null?st.cpk.toFixed(3):'—'}</span>`;
       wrap.appendChild(titleBar);
       const canvasWrap = document.createElement('div');
       canvasWrap.style.padding = '8px';
@@ -11946,7 +11980,9 @@ async function _cpkDoSave(overwriteKey) {
     date:      document.getElementById('cpk-date').value,
     lotSize:   parseInt(document.getElementById('cpk-lotsize')?.value) || 32,
     toolno:    document.getElementById('cpk-toolno').value,
-    site:      getCurrentSite() || (s?.isSupplier ? s.supplierCode : '') || (s?.isAdmin ? 'ADMIN' : (s?.site || '')),
+    // V186-1：覆蓋原記錄沿用原廠區（舊版管理員沒選廠區時會把 SH／VN 蓋成 ADMIN）
+    site:      (overwriteKey && existing.site) ? existing.site
+             : (getCurrentSite() || (s?.isSupplier ? s.supplierCode : '') || (s?.isAdmin ? 'ADMIN' : (s?.site || ''))),
     points:    JSON.parse(JSON.stringify(cpkPoints)),
     overall:   cpkOverall(cpkPoints),  // 防呆判定：先看是否在規格內，再看 Cpk
     // 覆蓋 → 沿用原 formNo/savedAt/savedBy 並記錄修改者；另存 → 用新 formNo
@@ -12323,7 +12359,7 @@ function showEditChoiceDialog(partno, date, callback) {
   box.innerHTML = `
     <div style="font-size:15px;font-weight:700;color:#1a4f8a;margin-bottom:8px">⚠ 資料已修改</div>
     <div style="font-size:12px;color:#555;margin-bottom:20px">
-      料號：<b>${partno}</b>　日期：<b>${date}</b><br>請選擇存檔方式：
+      料號：<b>${qmsEsc(partno)}</b>　日期：<b>${qmsEsc(date)}</b><br>請選擇存檔方式：
     </div>
     <button id="ec-overwrite" style="width:100%;height:44px;margin-bottom:10px;background:#BA7517;color:#fff;border:none;border-radius:6px;font-size:13px;font-weight:700;cursor:pointer;font-family:Arial,sans-serif">
       ✏ 覆蓋原單據<div style="font-size:10px;font-weight:400;margin-top:2px">原記錄內容將被更新</div>
@@ -12584,25 +12620,25 @@ function renderSupplierTable() {
     const bg = isActive ? (i%2===0?'#fff':'#f8f9fa') : '#fdf6f0';
     return `
     <tr style="background:${bg};border-bottom:1px solid #eee;${isActive?'':'opacity:0.8'}">
-      <td style="padding:8px 12px;font-weight:700;color:#0f6e56;font-family:'Courier New',monospace">${s.code}</td>
-      <td style="padding:8px 12px">${s.name}</td>
+      <td style="padding:8px 12px;font-weight:700;color:#0f6e56;font-family:'Courier New',monospace">${qmsEsc(s.code)}</td>
+      <td style="padding:8px 12px">${qmsEsc(s.name)}</td>
       <td style="padding:8px 12px;text-align:center">
         <span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700;background:${isActive?'#d4edda':'#f8d7da'};color:${isActive?'#155724':'#721c24'}">
           ${isActive ? '● 啟用' : '● 停用'}
         </span>
       </td>
       <td style="padding:8px 12px;text-align:center">
-        <button onclick="showSupplierUsers('${s.code}')"
+        <button onclick="showSupplierUsers(${qmsJsArg(s.code)})"
           style="height:24px;padding:0 8px;font-size:10px;border:1px solid #0f6e56;color:#0f6e56;background:#fff;border-radius:3px;cursor:pointer;font-family:Arial,sans-serif;white-space:nowrap">
           👤 ${userCount} 人
         </button>
       </td>
       <td style="padding:8px 12px;text-align:center;white-space:nowrap">
-        <button onclick="editSupplier('${s.code}')" style="height:24px;padding:0 8px;font-size:10px;border:1px solid #1a4f8a;color:#1a4f8a;background:#fff;border-radius:3px;cursor:pointer;font-family:Arial,sans-serif;margin-right:3px">✏ Edit</button>
+        <button onclick="editSupplier(${qmsJsArg(s.code)})" style="height:24px;padding:0 8px;font-size:10px;border:1px solid #1a4f8a;color:#1a4f8a;background:#fff;border-radius:3px;cursor:pointer;font-family:Arial,sans-serif;margin-right:3px">✏ Edit</button>
         ${isActive
-          ? `<button onclick="toggleSupplierActive('${s.code}',false)" style="height:24px;padding:0 8px;font-size:10px;border:1px solid #BA7517;color:#BA7517;background:#fff;border-radius:3px;cursor:pointer;font-family:Arial,sans-serif">⏸ 停用</button>`
-          : `<button onclick="toggleSupplierActive('${s.code}',true)" style="height:24px;padding:0 8px;font-size:10px;border:1px solid #1D9E75;color:#1D9E75;background:#fff;border-radius:3px;cursor:pointer;font-family:Arial,sans-serif;margin-right:3px">▶ 啟用</button>
-             <button onclick="deleteSupplierConfirm('${s.code}')" style="height:24px;padding:0 8px;font-size:10px;border:1px solid #c0392b;color:#c0392b;background:#fff;border-radius:3px;cursor:pointer;font-family:Arial,sans-serif">✕ 刪除</button>`}
+          ? `<button onclick="toggleSupplierActive(${qmsJsArg(s.code)},false)" style="height:24px;padding:0 8px;font-size:10px;border:1px solid #BA7517;color:#BA7517;background:#fff;border-radius:3px;cursor:pointer;font-family:Arial,sans-serif">⏸ 停用</button>`
+          : `<button onclick="toggleSupplierActive(${qmsJsArg(s.code)},true)" style="height:24px;padding:0 8px;font-size:10px;border:1px solid #1D9E75;color:#1D9E75;background:#fff;border-radius:3px;cursor:pointer;font-family:Arial,sans-serif;margin-right:3px">▶ 啟用</button>
+             <button onclick="deleteSupplierConfirm(${qmsJsArg(s.code)})" style="height:24px;padding:0 8px;font-size:10px;border:1px solid #c0392b;color:#c0392b;background:#fff;border-radius:3px;cursor:pointer;font-family:Arial,sans-serif">✕ 刪除</button>`}
       </td>
     </tr>`;
   }).join('');
@@ -12661,6 +12697,12 @@ function saveSupplierForm() {
 function toggleSupplierActive(code, active) {
   const list = getSupplierList();
   const idx  = list.findIndex(x => x.code === code);
+  // V186-1：按下去先確認（舊版一按就直接存到雲端）
+  if (idx >= 0) {
+    const tag = list[idx].name ? `${code} — ${list[idx].name}` : code;
+    const msg = active ? `啟用供應商「${tag}」？` : `停用供應商「${tag}」？\n\n之後可以再按「▶ 啟用」恢復。`;
+    if (!confirm(msg)) return;
+  }
   if (idx >= 0) { list[idx].active = active; saveSupplierList(list); }
   renderSupplierTable();
   refreshSupplierLoginList();
@@ -12710,13 +12752,13 @@ async function renderSupplierUsersTable(code) {
   }
   tbody.innerHTML = entries.map(([key, u], i) => `
     <tr style="background:${i%2===0?'#fff':'#f8f9fa'};border-bottom:1px solid #eee">
-      <td style="padding:6px 10px">👤 ${u.name || key}</td>
-      <td style="padding:6px 10px;font-size:11px;color:#555">${u.email || key}</td>
+      <td style="padding:6px 10px">👤 ${qmsEsc(u.name || key)}</td>
+      <td style="padding:6px 10px;font-size:11px;color:#555">${qmsEsc(u.email || key)}</td>
       <td style="padding:6px 10px;text-align:center;font-size:11px">${u.role==='supervisor'?'🔴 刪除':u.role==='editor'?'🟠 修改':u.role==='query'?'🔍 查詢':'🔵 輸入'}</td>
       <td style="padding:6px 10px;text-align:center;white-space:nowrap">
-        <button onclick="resetSupplierUserPassword('${code}','${key}','${u.name||key}')"
+        <button onclick="resetSupplierUserPassword(${qmsJsArg(code)},${qmsJsArg(key)},${qmsJsArg(u.name||key)})"
           style="height:22px;padding:0 6px;font-size:10px;border:1px solid #1a4f8a;color:#1a4f8a;background:#fff;border-radius:3px;cursor:pointer;margin-right:3px">🔑 重設</button>
-        <button onclick="deleteSupplierUser('${code}','${key}','${u.name||key}')"
+        <button onclick="deleteSupplierUser(${qmsJsArg(code)},${qmsJsArg(key)},${qmsJsArg(u.name||key)})"
           style="height:22px;padding:0 6px;font-size:10px;border:1px solid #c0392b;color:#c0392b;background:#fff;border-radius:3px;cursor:pointer">✕ 移除</button>
       </td>
     </tr>`).join('');
@@ -12734,7 +12776,7 @@ function toggleAddSupplierUserForm() {
     const sel = document.getElementById('su-supplier');
     if (sel) {
       const list = activeSuppliers();   // V158:共用來源
-      sel.innerHTML = list.map(s => `<option value="${s.code}">${s.code} — ${s.name}</option>`).join('');
+      sel.innerHTML = list.map(s => `<option value="${qmsEsc(s.code)}">${qmsEsc(s.code)} — ${qmsEsc(s.name)}</option>`).join('');
       // 預選當前展開的供應商
       const panel = document.getElementById('supplier-users-panel');
       const currentCode = panel?.dataset.supplierCode || '';
@@ -13171,7 +13213,7 @@ async function bulkUploadToSupabase() {
     + (totalDup ? `\u3000<span style="color:#666">｜雲端已有、略過：FAI ${faiDup}\u3000CPK ${cpkDup}</span>` : '');
   const list = _fails.length
     ? '<div style="margin-top:6px;font-size:11px;color:#c0392b;text-align:left">'
-      + _fails.slice(0, 8).map(x => '\u30fb' + x).join('<br>')
+      + _fails.slice(0, 8).map(x => '\u30fb' + qmsEsc(x)).join('<br>')
       + (_fails.length > 8 ? `<br>…另有 ${_fails.length - 8} 筆，詳見 Console` : '')
       + '</div>'
     : '';

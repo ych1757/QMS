@@ -454,8 +454,13 @@ input.spec-inp[type=number] { -moz-appearance:textfield; appearance:textfield; }
 // 用途＝跟使用者溝通「你看到的畫面是不是最新版」，不是品質文件的表單版次
 //（表單版次 Rev 另有其用途、目前維持 V1.0 不動，日後各廠區若有自己的表單版次需求再談）
 // 顯示位置：① 瀏覽器分頁標題 ② 登入畫面副標下方 ③ 主畫面右上（列印時自動隱藏）
-const APP_VER = 'V187';   // ★★ 每出一版必須同步改這一行（比照 MHR 的做法），否則畫面版號會對不上檔案版號
+const APP_VER = 'V188';   // ★★ 每出一版必須同步改這一行（比照 MHR 的做法），否則畫面版號會對不上檔案版號
 
+// ══ V188（261111 使用者「先修V188 再刪舊版」「可以，4項都放進V188」）：供應商管理四項——
+//    ①供應商表「帳號 N 人」改數雲端帳號（原本讀 V170 起就沒人寫的本機舊資料＝永遠 0 人）＋標出停用幾個
+//    ②供應商帳號清單加「狀態」欄（正常／已停用／權限已移除），停用或移除的人改顯示「▶ 恢復」
+//    ③登入：供應商也檢查「權限已移除」與「所屬供應商已停用」（原本只檢查內部同仁 ⇒ 按了移除仍登得進）
+//    ④供應商「✕ 刪除」說明改正確：只刪供應商清單這一列，人員帳號不會刪 ══
 // ══ V187（261111 使用者「可以，新密碼分開設，照這個做法開始」）：初始密碼不再寫在網頁裡（舊值已在 GitHub 公開）。
 //    建帳號沒填密碼、重設密碼 ⇒ 送 use_default:true，由後端 admin-users 讀後台設定 QMS_DEFAULT_PWD；網頁不知道、也不顯示密碼。
 //    自帶密碼（內部亂碼、V180 作廢工具、供應商自填）一律加 pwd_mode:'explicit'；舊網頁不帶 ⇒ 後端擋（防舊分頁把帳號設回舊密碼）。
@@ -2403,6 +2408,7 @@ async function sbInit() {
                 <th style="padding:6px 10px;text-align:left;white-space:nowrap">Name 姓名</th>
                 <th style="padding:6px 10px;text-align:left;white-space:nowrap">Email 帳號</th>
                 <th style="padding:6px 10px;text-align:center;white-space:nowrap">Role 角色</th>
+                <th style="padding:6px 10px;text-align:center;white-space:nowrap">Status 狀態</th>
                 <th style="padding:6px 10px;text-align:center">Action</th>
               </tr>
             </thead>
@@ -9754,6 +9760,20 @@ async function sbAuthAfterToken(token, refresh, uid, mustChange) {
     const profile = (pData && pData[0]) || null;
     if (!profile) return { ok: false, msg: '帳號資料不完整，請聯絡管理員' };
     if (profile.active === false) return { ok: false, msg: '此帳號已停用，請聯絡管理員' };
+    // ══ V188：供應商帳號也要擋「權限已移除」與「所屬供應商已停用」══
+    //  原本下面的權限門只套內部同仁（供應商不在 OMS 名單），供應商按了「✕ 移除」、或整家供應商停用，仍登得進。
+    //  供應商狀態讀不到 ⇒ 不放行（fail-closed：寧可請他稍後再試，也不讓停用的供應商進來）。
+    if (profile.account_type === 'supplier') {
+      if (profile.can_access_qms === false) return { ok: false, msg: '此供應商帳號的 QMS 權限已移除，請聯絡管理員' };
+      try {
+        const sr = await fetch(SUPABASE_URL + '/rest/v1/qms_supplier_list?code=eq.' + encodeURIComponent(profile.supplier_code || '') + '&select=code,active&limit=1',
+          { headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + token } });
+        if (!sr.ok) return { ok: false, msg: '暫時無法確認供應商狀態，請稍後再試' };
+        const srow = ((await sr.json().catch(() => [])) || [])[0];
+        if (!srow) return { ok: false, msg: '找不到所屬供應商，請聯絡管理員' };
+        if (srow.active === false) return { ok: false, msg: '所屬供應商已停用，請聯絡管理員' };
+      } catch (e) { return { ok: false, msg: '暫時無法確認供應商狀態，請稍後再試' }; }
+    }
     // ══ V163 門③：授權門禁（平台鐵則 260901「以後所有開發系統都要防止」）══
     //  設計意圖＝OMS 是唯一授權主檔、控管各系統能不能進入。
     //  舊版只有「有沒有 profiles 列 + active」兩道門 ⇒ 在 OMS 取消 QMS 勾選**不會生效**
@@ -9860,6 +9880,7 @@ async function sbCallAdminFn(action, payload) {
       body: JSON.stringify(Object.assign({ action }, payload))
     });
     const data = await res.json().catch(() => ({}));
+    if (action !== 'list') window._supAcctAt = 0;   // V188：帳號有變動 ⇒ 供應商人數下次重讀
     if (!res.ok || data.error) return { ok: false, msg: data.error || ('HTTP ' + res.status) };
     return { ok: true, data };
   } catch (e) { return { ok: false, msg: '網路錯誤，請稍後再試' }; }
@@ -12617,17 +12638,41 @@ async function doSupplierLogin() {
 }
 
 // ── 供應商管理 UI ──
+// V188：供應商帳號數（讀雲端 profiles；10 秒內重畫不重讀；建／改帳號後 sbCallAdminFn 會把它清掉）
+function refreshSupplierAcctCounts(force) {
+  const fresh = window._supAcctAt && (Date.now() - window._supAcctAt < 10000);
+  if (window._supAcctLoading || (fresh && !force)) return;
+  window._supAcctLoading = true;
+  sbCallAdminFn('list').then(lr => {
+    window._supAcctLoading = false;
+    if (!lr.ok || !lr.data || !lr.data.profiles) return;   // 讀不到就維持「…」，不當成 0 人
+    const m = {};
+    lr.data.profiles.forEach(p => {
+      if (p.account_type !== 'supplier') return;
+      const k = p.supplier_code || '';
+      m[k] = m[k] || { n: 0, off: 0 };
+      m[k].n++;
+      if (p.active === false || p.can_access_qms === false) m[k].off++;
+    });
+    window._supAcct = m; window._supAcctAt = Date.now();
+    renderSupplierTable();
+  }).catch(() => { window._supAcctLoading = false; });
+}
+
 function renderSupplierTable() {
   const tbody = document.getElementById('supplier-list-tbody');
   if (!tbody) return;
   const list = getSupplierList();
-  const db   = getSupplierUsers();
+  // V188：人數改數雲端帳號（profiles）。原本讀本機舊資料 qms_supplier_users，V170 起沒人寫 ⇒ 永遠 0 人
+  refreshSupplierAcctCounts();
+  const cnt = window._supAcct || null;   // 還沒讀到＝顯示「…」，讀到後會自動重畫
   if (!list.length) {
     tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:16px;color:#bbb;font-size:12px">尚無供應商。點右上角「＋ 新增供應商」新增。</td></tr>';
     return;
   }
   tbody.innerHTML = list.map((s, i) => {
-    const userCount = Object.keys(db[s.code] || {}).length;
+    const c = cnt ? (cnt[s.code] || { n: 0, off: 0 }) : null;
+    const userCount = c ? (c.n + ' 人' + (c.off ? `（停用 ${c.off}）` : '')) : '… 人';
     const isActive  = s.active !== false;
     const bg = isActive ? (i%2===0?'#fff':'#f8f9fa') : '#fdf6f0';
     return `
@@ -12642,7 +12687,7 @@ function renderSupplierTable() {
       <td style="padding:8px 12px;text-align:center">
         <button onclick="showSupplierUsers(${qmsJsArg(s.code)})"
           style="height:24px;padding:0 8px;font-size:10px;border:1px solid #0f6e56;color:#0f6e56;background:#fff;border-radius:3px;cursor:pointer;font-family:Arial,sans-serif;white-space:nowrap">
-          👤 ${userCount} 人
+          👤 ${userCount}
         </button>
       </td>
       <td style="padding:8px 12px;text-align:center;white-space:nowrap">
@@ -12721,7 +12766,7 @@ function toggleSupplierActive(code, active) {
 }
 
 function deleteSupplierConfirm(code) {
-  if (!confirm(`永久刪除供應商「${code}」及其所有帳號？此操作不可復原！`)) return;
+  if (!confirm(`從供應商清單刪除「${code}」？\n\n・只刪供應商清單這一列，不可復原\n・這家底下的人員帳號不會刪（仍在人員名單、仍可依帳號狀態登入）\n・要讓人員不能登入，請在帳號清單按「✕ 移除」，或先把供應商停用`)) return;   // V188：說明改正確（原本寫「及其所有帳號」，實際不會刪帳號）
   const list = getSupplierList().filter(x => x.code !== code);
   saveSupplierList(list);
   const db = getSupplierUsers();
@@ -12753,13 +12798,14 @@ async function renderSupplierUsersTable(code) {
     if (lr.ok && lr.data && lr.data.profiles) {
       lr.data.profiles.forEach(p => {
         if (p.account_type === 'supplier' && p.supplier_code === code)
-          users[p.email] = { name: p.name || p.email, email: p.email, role: p.qms_role || 'inspector' };
+          users[p.email] = { name: p.name || p.email, email: p.email, role: p.qms_role || 'inspector',
+                             st: p.active === false ? 'off' : (p.can_access_qms === false ? 'removed' : 'ok') };   // V188
       });
     }
   } catch(e) {}
   const entries = Object.entries(users);
   if (!entries.length) {
-    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:12px;color:#bbb;font-size:12px">尚無帳號</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:12px;color:#bbb;font-size:12px">尚無帳號</td></tr>';
     return;
   }
   tbody.innerHTML = entries.map(([key, u], i) => `
@@ -12767,11 +12813,17 @@ async function renderSupplierUsersTable(code) {
       <td style="padding:6px 10px">👤 ${qmsEsc(u.name || key)}</td>
       <td style="padding:6px 10px;font-size:11px;color:#555">${qmsEsc(u.email || key)}</td>
       <td style="padding:6px 10px;text-align:center;font-size:11px">${u.role==='supervisor'?'🔴 刪除':u.role==='editor'?'🟠 修改':u.role==='query'?'🔍 查詢':'🔵 輸入'}</td>
+      <td style="padding:6px 10px;text-align:center;font-size:10px;white-space:nowrap">${u.st==='ok'
+        ? '<span style="padding:2px 8px;border-radius:10px;background:#d4edda;color:#155724;font-weight:700">● 正常</span>'
+        : `<span style="padding:2px 8px;border-radius:10px;background:#f8d7da;color:#721c24;font-weight:700">● ${u.st==='off'?'已停用':'權限已移除'}</span>`}</td>
       <td style="padding:6px 10px;text-align:center;white-space:nowrap">
         <button onclick="resetSupplierUserPassword(${qmsJsArg(code)},${qmsJsArg(key)},${qmsJsArg(u.name||key)})"
           style="height:22px;padding:0 6px;font-size:10px;border:1px solid #1a4f8a;color:#1a4f8a;background:#fff;border-radius:3px;cursor:pointer;margin-right:3px">🔑 重設</button>
-        <button onclick="deleteSupplierUser(${qmsJsArg(code)},${qmsJsArg(key)},${qmsJsArg(u.name||key)})"
-          style="height:22px;padding:0 6px;font-size:10px;border:1px solid #c0392b;color:#c0392b;background:#fff;border-radius:3px;cursor:pointer">✕ 移除</button>
+        ${u.st==='ok'
+          ? `<button onclick="deleteSupplierUser(${qmsJsArg(code)},${qmsJsArg(key)},${qmsJsArg(u.name||key)})"
+          style="height:22px;padding:0 6px;font-size:10px;border:1px solid #c0392b;color:#c0392b;background:#fff;border-radius:3px;cursor:pointer">✕ 移除</button>`
+          : `<button onclick="restoreSupplierUser(${qmsJsArg(code)},${qmsJsArg(key)},${qmsJsArg(u.name||key)})"
+          style="height:22px;padding:0 6px;font-size:10px;border:1px solid #1D9E75;color:#1D9E75;background:#fff;border-radius:3px;cursor:pointer">▶ 恢復</button>`}
       </td>
     </tr>`).join('');
 }
@@ -12836,6 +12888,18 @@ async function resetSupplierUserPassword(code, key, name) {
   toast.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:' + (r.ok ? '#1D9E75' : '#c0392b') + ';color:#fff;padding:10px 20px;border-radius:8px;font-size:13px;font-weight:700;z-index:99999;box-shadow:0 4px 12px rgba(0,0,0,0.2)';
   document.body.appendChild(toast);
   setTimeout(() => toast.remove(), 2500);
+}
+
+// V188：恢復供應商帳號（停用或權限已移除 ⇒ 兩個旗標都打開）；所屬供應商若停用，仍登不進去
+async function restoreSupplierUser(code, key, name) {
+  const sup = (getSupplierList() || []).find(x => x.code === code);
+  const supOff = sup && sup.active === false;
+  if (!confirm(`恢復供應商帳號「${name}」？\n\n・恢復後他可以再登入 QMS（密碼不變）`
+      + (supOff ? `\n・⚠ 所屬供應商「${code}」目前是停用，要先把供應商啟用，他才登得進去` : ''))) return;
+  const r = await sbCallAdminFn('update', { email: key, active: true, can_access_qms: true });
+  if (!r.ok) { alert('恢復失敗：' + (r.msg||'')); return; }
+  renderSupplierUsersTable(code);
+  renderSupplierTable();
 }
 
 async function deleteSupplierUser(code, key, name) {

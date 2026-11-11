@@ -454,8 +454,12 @@ input.spec-inp[type=number] { -moz-appearance:textfield; appearance:textfield; }
 // 用途＝跟使用者溝通「你看到的畫面是不是最新版」，不是品質文件的表單版次
 //（表單版次 Rev 另有其用途、目前維持 V1.0 不動，日後各廠區若有自己的表單版次需求再談）
 // 顯示位置：① 瀏覽器分頁標題 ② 登入畫面副標下方 ③ 主畫面右上（列印時自動隱藏）
-const APP_VER = 'V186-1';   // ★★ 每出一版必須同步改這一行（比照 MHR 的做法），否則畫面版號會對不上檔案版號
+const APP_VER = 'V187';   // ★★ 每出一版必須同步改這一行（比照 MHR 的做法），否則畫面版號會對不上檔案版號
 
+// ══ V187（261111 使用者「可以，新密碼分開設，照這個做法開始」）：初始密碼不再寫在網頁裡（舊值已在 GitHub 公開）。
+//    建帳號沒填密碼、重設密碼 ⇒ 送 use_default:true，由後端 admin-users 讀後台設定 QMS_DEFAULT_PWD；網頁不知道、也不顯示密碼。
+//    自帶密碼（內部亂碼、V180 作廢工具、供應商自填）一律加 pwd_mode:'explicit'；舊網頁不帶 ⇒ 後端擋（防舊分頁把帳號設回舊密碼）。
+//    首次改密碼「不能沿用目前密碼」改由 Supabase 判斷（same_password）。══
 // ══ V186-1（261029 使用者「舊問題請先修改」）：①帶入記錄時簽核欄空的就清空 ②班別選項固定值、各語言文字對回 ③供應商停用／啟用先確認 ④覆蓋存 CPK 沿用原廠區 ══
 // ══ V186：放進畫面的文字一律先「中和」（使用者 261028 體檢後「可以，開始做 V186」）══
 //  起因：歷史查詢等畫面把使用者打的字（檢驗員、品名…）直接當網頁內容放進去，
@@ -2416,7 +2420,7 @@ async function sbInit() {
             <div class="ef"><label>Email 帳號 *</label>
               <input id="su-email" type="email" style="height:28px;border:1px solid #bbb;border-radius:4px;padding:0 8px;font-size:12px;font-family:Arial,sans-serif"></div>
             <div class="ef"><label>Password 密碼 *</label>
-              <input id="su-password" type="password" placeholder="留空＝預設qms12345；自訂須8碼含字母與數字" style="height:28px;border:1px solid #bbb;border-radius:4px;padding:0 8px;font-size:12px;font-family:Arial,sans-serif"></div>
+              <input id="su-password" type="password" placeholder="留空＝系統預設密碼（請洽管理員）；自訂須8碼含字母與數字" style="height:28px;border:1px solid #bbb;border-radius:4px;padding:0 8px;font-size:12px;font-family:Arial,sans-serif"></div>
             <div class="ef"><label>Role 角色</label>
               <select id="su-role" style="height:28px;border:1px solid #bbb;border-radius:4px;padding:0 8px;font-size:12px;font-family:Arial,sans-serif">
                 <option value="inspector">🔵 輸入（可填表）</option>
@@ -8296,9 +8300,10 @@ function clearScopeModal() {
 // 從 OMS 帶入一位 → 在 QMS 建立帳號（含 emp_id），之後可設權限
 async function importFromOms(empId, name, email, factory) {
   if (!email || !email.includes('@')) { alert('此人在 OMS 沒有有效 Email，無法建立 QMS 帳號'); return; }
-  //  V180：帶入的都是內部同仁 ⇒ 不再給 qms12345，本箱密碼設成沒人知道的亂碼；登入一律用 SyncHub 密碼
+  //  V180：帶入的都是內部同仁 ⇒ 不再給舊預設密碼，本箱密碼設成沒人知道的亂碼；登入一律用 SyncHub 密碼
   if (!confirm(`帶入「${name}」(${empId || '無工號'}) 到 QMS？\n\n將建立 QMS 帳號：\n・Email：${email}\n・登入方式：工號＋SyncHub 密碼（與 OMS 同一組；QMS 不另設密碼）\n・預設權限：查詢＋輸入（帶入後可再調整）\n\n供應商不受影響。`)) return;
   const r = await sbCallAdminFn('create', {
+    pwd_mode: 'explicit',   // V187：自帶密碼要標明（舊網頁不帶 ⇒ 後端擋）
     email: String(email).toLowerCase(), password: randomBoxPassword(), name: name || email,
     account_type: 'site', qms_role: 'inspector',
     site_code: factory || null, must_change: false, emp_id: empId || null
@@ -8908,28 +8913,29 @@ function addUserAccount() {
   if (!site)     { if (st) st.textContent = '請選擇組織'; return; }
   if (!name)     { if (st) st.textContent = '請輸入姓名'; return; }
   if (!email || !email.includes('@')) { if (st) st.textContent = '請輸入有效 Email'; return; }
-  // 密碼可留空 → 用預設密碼 DEFAULT_PWD，並要求該員工首次登入修改
+  // 密碼可留空 → 用系統預設密碼（V187：由後端讀後台設定），並要求首次登入修改
   let mustChange = false;
   //  V180：除了 TEST 示範廠區，這張表單建的都是內部同仁 ⇒ 不管密碼欄填什麼，本箱一律給亂碼（登入用 SyncHub 密碼）
   const _isInternalNew = String(site).toUpperCase() !== 'TEST';
   if (_isInternalNew) { password = randomBoxPassword(); }
-  else if (!password) { password = DEFAULT_PWD; mustChange = true; }
+  else if (!password) { password = null; mustChange = true; }   // V187：交給後端用預設密碼
   else if (!pwdValid(password)) { if (st) { st.style.color='#c0392b'; st.textContent = '密碼至少 8 碼，需含字母與數字（或留空用預設）'; } return; }
 
   if (st) { st.style.color='#888'; st.textContent = '⏳ 建立中...'; }
   // 🔐 _2CODE：透過 Edge Function 在 Auth + profiles 建立帳號（新帳號才能用 Auth 登入）
-  sbCallAdminFn('create', { email, password, name, account_type:'site', qms_role:role, site_code:site, must_change:mustChange }).then(r => {
+  sbCallAdminFn('create', Object.assign({ email, name, account_type:'site', qms_role:role, site_code:site, must_change:mustChange },
+                                        password ? { password, pwd_mode: 'explicit' } : { use_default: true })).then(r => {
     if (!r.ok) { if (st) { st.style.color='#c0392b'; st.textContent = '❌ ' + (r.msg||'建立失敗'); } return; }
     renderUserMgrTable();
     ['au-name','au-email','au-password'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
     const roleEl = document.getElementById('au-role'); if (roleEl) roleEl.value = 'inspector';
     if (st) { st.style.color='#1d9e75'; st.textContent = _isInternalNew ? `✅ 已新增 ${name}（登入請用工號＋SyncHub 密碼；QMS 不另設密碼）`
-      : (mustChange ? `✅ 已新增 ${name}，預設密碼 ${DEFAULT_PWD}（首次登入須改）` : `✅ 已新增 ${name} (${email})`); }
+      : (mustChange ? `✅ 已新增 ${name}，密碼為系統預設密碼（請洽管理員；首次登入須改）` : `✅ 已新增 ${name} (${email})`); }
   });
 }
 
 // ══ V180 ④：作廢內部同仁的 QMS 本箱密碼（真正把後門關上；由管理員決定何時按）══
-//  只改畫面不算關：本箱密碼還在的話，繞過畫面直接跟後端驗 qms12345 仍拿得到通行證。
+//  只改畫面不算關：本箱密碼還在的話，繞過畫面直接跟後端驗舊預設密碼仍拿得到通行證。
 //  ⇒ 把內部同仁的本箱密碼換成沒人知道的亂碼（不顯示、不儲存）。之後他們只剩 SyncHub 密碼這一條路。
 //  安全閥：
 //   ・只動「內部同仁」（isInternalProfile）且目前能進 QMS 的帳號；供應商、admin@id、TEST 不動。
@@ -9025,7 +9031,7 @@ async function voidInternalBoxPasswords() {
   let done = 0; const failed = [];
   for (let i = 0; i < ready.length; i++) {
     say(`⏳ 作廢中 ${i + 1}／${ready.length}…（請不要關閉頁面）`);
-    const r = await sbCallAdminFn('resetPassword', { email: ready[i].email, password: randomBoxPassword() });
+    const r = await sbCallAdminFn('resetPassword', { email: ready[i].email, password: randomBoxPassword(), pwd_mode: 'explicit' });
     if (r.ok) done++; else failed.push(label(ready[i]) + '：' + (r.msg || '失敗'));
   }
   const summary = `已作廢 ${done} 位` + (skipped.length ? `；跳過 ${skipped.length} 位（沒有 SyncHub 帳號）` : '') + (failed.length ? `；失敗 ${failed.length} 位` : '');
@@ -9050,11 +9056,11 @@ async function resetUserPassword(site, key, name) {
   const _pf = ((_umgrCache && _umgrCache.lr && _umgrCache.lr.data && _umgrCache.lr.data.profiles) || [])
     .find(x => String(x.email || '').toLowerCase() === String(key || '').toLowerCase());
   if (!_pf || isInternalProfile(_pf)) { resetInternalHint(name); return; }
-  if (!confirm(`確定要重設「${name}」（${site}）的密碼為預設值（${DEFAULT_PWD}）？\n\n重設後，該使用者下次登入需重新設定密碼。`)) return;
+  if (!confirm(`確定要重設「${name}」（${site}）的密碼為系統預設密碼？\n\n・預設密碼請洽管理員（網頁上不顯示）\n・重設後，該使用者下次登入需重新設定密碼。`)) return;
   // 🔐 _2CODE：透過 Edge Function 重設 Auth 密碼（並標記下次須改）
-  const r = await sbCallAdminFn('resetPassword', { email: key, password: DEFAULT_PWD });
+  const r = await sbCallAdminFn('resetPassword', { email: key, use_default: true });
   const toast = document.createElement('div');
-  toast.textContent = r.ok ? `✅ 已重設 ${name} 的密碼為 ${DEFAULT_PWD}` : `❌ 重設失敗：${r.msg||''}`;
+  toast.textContent = r.ok ? `✅ 已重設 ${name} 的密碼為系統預設密碼` : `❌ 重設失敗：${r.msg||''}`;
   toast.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:' + (r.ok ? '#1D9E75' : '#c0392b') + ';color:#fff;padding:10px 20px;border-radius:8px;font-size:13px;font-weight:700;z-index:99999;box-shadow:0 4px 12px rgba(0,0,0,0.2)';
   document.body.appendChild(toast);
   setTimeout(() => toast.remove(), 2500);
@@ -9569,7 +9575,7 @@ function importUserPermissionsXlsx(input) {
             if (pwd) supDB[siteOrSup][key].password = pwd;
             supUpdated++;
           } else {
-            supDB[siteOrSup][key] = { name, email, password: pwd || DEFAULT_PWD, role, createdAt: new Date().toISOString() };
+            supDB[siteOrSup][key] = { name, email, password: pwd || '', role, createdAt: new Date().toISOString() };
             supAdded++;
           }
         } else {
@@ -9582,7 +9588,7 @@ function importUserPermissionsXlsx(input) {
             if (pwd) db[siteOrSup][key].password = pwd;
             updated++;
           } else {
-            db[siteOrSup][key] = { name, email, password: pwd || DEFAULT_PWD, role, createdAt: new Date().toISOString() };
+            db[siteOrSup][key] = { name, email, password: pwd || '', role, createdAt: new Date().toISOString() };
             added++;
           }
         }
@@ -9831,7 +9837,13 @@ async function sbAuthChangePassword(email, oldPwd, newPwd) {
       headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + v.token, 'Content-Type': 'application/json' },
       body: JSON.stringify({ password: newPwd, data: { must_change: false } })
     });
-    if (!res.ok) { console.warn('改密碼失敗:', await res.text()); return { ok: false, msg: '密碼更新失敗，請稍後再試' }; }
+    if (!res.ok) {
+      const t = await res.text(); console.warn('改密碼失敗:', t);
+      // V187：Supabase 擋「新密碼跟目前一樣」(same_password) ⇒ 預設密碼不能沿用就靠這一道
+      if (/same_password|different from the old password/i.test(t)) return { ok: false, msg: '新密碼不能與目前的密碼（含預設密碼）相同' };
+      if (/weak_password/i.test(t)) return { ok: false, msg: '新密碼強度不足：至少 8 碼，需含字母與數字' };
+      return { ok: false, msg: '密碼更新失敗，請稍後再試' };
+    }
     return { ok: true };
   } catch (e) { return { ok: false, msg: '網路錯誤，請稍後再試' }; }
 }
@@ -10483,7 +10495,7 @@ function removeUser(site, userKey) {
 // ══════════════════════════════════════════════
 // 🔑 修改密碼
 // ══════════════════════════════════════════════
-const DEFAULT_PWD = 'qms12345'; // _2CODE：預設臨時密碼（含字母+數字，符合 Supabase「Letters and digits」；admin API 設密碼也會檢查此規則。使用者首次登入須改成自己的新密碼）
+// V187：初始密碼不再放網頁（原本的 DEFAULT_PWD 已拿掉）；由後端讀後台設定 QMS_DEFAULT_PWD
 let _forceChangePwd = false;
 // 密碼規則：至少 8 碼，且需同時含「字母」與「數字」（與 Supabase Auth 的 Letters and digits 一致）
 function pwdValid(p){ return typeof p === 'string' && p.length >= 8 && /[A-Za-z]/.test(p) && /[0-9]/.test(p); }
@@ -10529,7 +10541,7 @@ async function doChangePassword() {
 
   if (!oldPwd) { st.textContent = '❌ 請輸入舊密碼'; st.style.color = '#c0392b'; return; }
   if (!pwdValid(newPwd)) { st.textContent = '❌ 新密碼至少 8 碼，需含字母與數字'; st.style.color = '#c0392b'; return; }
-  if (newPwd === DEFAULT_PWD) { st.textContent = '❌ 新密碼不能與預設密碼相同'; st.style.color = '#c0392b'; return; }
+  // V187：「不能沿用目前的密碼（含預設密碼）」改由 Supabase 判斷，見 sbAuthChangePassword
   if (newPwd !== confirmPwd) { st.textContent = '❌ 兩次輸入的新密碼不一致'; st.style.color = '#c0392b'; return; }
 
   const s = getSession();
@@ -10640,12 +10652,12 @@ const SSO_MUST_CHANGE_MSG = '您的 SyncHub 密碼還是初始密碼。請先按
 // ══════════════════════════════════════════════════════════════════════
 // V180：內部同仁只收 SyncHub 密碼（261007 急件②·密碼單軌化；使用者 261011「按你建議」）
 // ══════════════════════════════════════════════════════════════════════
-//  原本內部同仁有兩條路：SyncHub 密碼（代驗）／QMS 本箱密碼（預設 qms12345）。
+//  原本內部同仁有兩條路：SyncHub 密碼（代驗）／QMS 本箱密碼（舊預設密碼）。
 //  使用者 261010 實測：管理員把某位同仁的本箱密碼重設成預設密碼後，用他的工號＋預設密碼進得去 ⇒ 本箱是後門。
 //  本版（前端這一段）：
 //   ① 登入：認得出是內部同仁（OMS 員工名單上有）⇒ 代驗沒過就不再試本箱，訊息分清楚原因
 //   ② 保險：就算本箱密碼驗過了，身分是內部同仁也不放行（OMS 一時查不到時靠這條）
-//   ③ 人員管理：內部同仁的「重設」改成指向 OMS「系統資料授權」頁；新增／帶入不再給 qms12345，改給沒人知道的亂碼
+//   ③ 人員管理：內部同仁的「重設」改成指向 OMS「系統資料授權」頁；新增／帶入不再給舊預設密碼，改給沒人知道的亂碼
 //   ④ 管理員工具「作廢內部同仁的本箱密碼」：把既有的本箱密碼換成亂碼（真正關門；由管理員決定何時按）
 //  不受影響：供應商（Email 登入）、admin@id 虛擬管理員、TEST 示範帳號——仍用 QMS 本箱密碼。
 //  ⚠ QMS 與 MHR 共用同一箱 Auth ⇒ ④ 會讓同一批人的 MHR 本箱密碼一起失效（MHR 也有代驗，仍可用 SyncHub 密碼登入）。
@@ -10764,7 +10776,7 @@ function checkForceChangePwd() {
     mustChange  = db[siteKey]?.[s.userKey]?.mustChange || false;
   }
   // 只有密碼仍是預設值才強制修改
-  if (currentPwd === DEFAULT_PWD || mustChange) {
+  if (mustChange) {
     setTimeout(() => showChangePwdModal(true), 300);
   }
 }
@@ -12796,30 +12808,31 @@ function addSupplierUser() {
   if (!code)  { st.textContent = '請選擇供應商'; return; }
   if (!name)  { st.textContent = '請輸入姓名'; return; }
   if (!email || !email.includes('@')) { st.textContent = '請輸入有效 Email'; return; }
-  // 密碼可留空 → 用預設密碼 DEFAULT_PWD，並要求首次登入修改
+  // 密碼可留空 → 用系統預設密碼（V187：由後端讀後台設定），並要求首次登入修改
   let mustChange = false;
-  if (!pwd) { pwd = DEFAULT_PWD; mustChange = true; }
+  if (!pwd) { pwd = null; mustChange = true; }
   else if (!pwdValid(pwd)) { st.style.color='#c0392b'; st.textContent = '密碼至少 8 碼，需含字母與數字（或留空用預設）'; return; }
   st.style.color = '#888'; st.textContent = '⏳ 建立中...';
   // 🔐 _2CODE：透過 Edge Function 在 Auth + profiles 建立供應商帳號
-  sbCallAdminFn('create', { email, password: pwd, name, account_type:'supplier', qms_role:role, supplier_code:code, must_change:mustChange }).then(r => {
+  sbCallAdminFn('create', Object.assign({ email, name, account_type:'supplier', qms_role:role, supplier_code:code, must_change:mustChange },
+                                        pwd ? { password: pwd, pwd_mode: 'explicit' } : { use_default: true })).then(r => {
     if (!r.ok) { st.style.color='#c0392b'; st.textContent = '❌ ' + (r.msg||'建立失敗'); return; }
     const panel = document.getElementById('supplier-users-panel');
     if (panel?.dataset.supplierCode === code) renderSupplierUsersTable(code);
     renderSupplierTable();
     toggleAddSupplierUserForm();
     st.style.color = '#1d9e75';
-    st.textContent = mustChange ? `✅ 已新增 ${name} → ${code}，預設密碼 ${DEFAULT_PWD}（首次登入須改）` : `✅ 已新增 ${name} → ${code}`;
+    st.textContent = mustChange ? `✅ 已新增 ${name} → ${code}，密碼為系統預設密碼（請洽管理員；首次登入須改）` : `✅ 已新增 ${name} → ${code}`;
     setTimeout(() => { st.textContent = ''; }, 4000);
   });
 }
 
 async function resetSupplierUserPassword(code, key, name) {
-  if (!confirm(`確定要重設「${name}」（${code}）的密碼為預設值（${DEFAULT_PWD}）？\n\n重設後，該使用者下次登入需重新設定密碼。`)) return;
+  if (!confirm(`確定要重設「${name}」（${code}）的密碼為系統預設密碼？\n\n・預設密碼請洽管理員（網頁上不顯示）\n・重設後，該使用者下次登入需重新設定密碼。`)) return;
   // 🔐 _2CODE：透過 Edge Function 重設 Auth 密碼
-  const r = await sbCallAdminFn('resetPassword', { email: key, password: DEFAULT_PWD });
+  const r = await sbCallAdminFn('resetPassword', { email: key, use_default: true });
   const toast = document.createElement('div');
-  toast.textContent = r.ok ? `✅ 已重設 ${name} 的密碼為 ${DEFAULT_PWD}` : `❌ 重設失敗：${r.msg||''}`;
+  toast.textContent = r.ok ? `✅ 已重設 ${name} 的密碼為系統預設密碼` : `❌ 重設失敗：${r.msg||''}`;
   toast.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:' + (r.ok ? '#1D9E75' : '#c0392b') + ';color:#fff;padding:10px 20px;border-radius:8px;font-size:13px;font-weight:700;z-index:99999;box-shadow:0 4px 12px rgba(0,0,0,0.2)';
   document.body.appendChild(toast);
   setTimeout(() => toast.remove(), 2500);

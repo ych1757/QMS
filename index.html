@@ -454,8 +454,15 @@ input.spec-inp[type=number] { -moz-appearance:textfield; appearance:textfield; }
 // 用途＝跟使用者溝通「你看到的畫面是不是最新版」，不是品質文件的表單版次
 //（表單版次 Rev 另有其用途、目前維持 V1.0 不動，日後各廠區若有自己的表單版次需求再談）
 // 顯示位置：① 瀏覽器分頁標題 ② 登入畫面副標下方 ③ 主畫面右上（列印時自動隱藏）
-const APP_VER = 'V188';   // ★★ 每出一版必須同步改這一行（比照 MHR 的做法），否則畫面版號會對不上檔案版號
+const APP_VER = 'V189';   // ★★ 每出一版必須同步改這一行（比照 MHR 的做法），否則畫面版號會對不上檔案版號
 
+// ══ V189（261112 四系統清查「資料有沒有存在程式裡」→ 使用者「OK」、NCR 選「改存資料庫」）——
+//    ①NCR 不合格報告改存資料庫 qms_ncr_records（SQL 191）；原本只存那台電腦的瀏覽器、也不在匯出備份裡。
+//      存檔失敗就顯示紅字、不再假裝存好；這台電腦以前存在瀏覽器的舊 NCR，登入後問要不要上傳。
+//    ②拿掉寫死在網頁裡的檢驗資料：2 筆示範 FAI（料號／品名／檢驗員／量測值）、示範 CPK 按鈕與資料、沒人呼叫的重新匯入函式。
+//    ③拿掉寫死的舊管理員預設密碼（V177 起已沒用）與改密碼函式裡 return 之後的舊邏輯。
+//    ④開頁清掉舊版留在瀏覽器的帳號密碼副本：qms_admin_config 整個刪；qms_users／qms_supplier_users 只拿掉 password 欄位
+//      （TEST 組織的 test@test.com 照使用者「TEST 都不動」保留）。══
 // ══ V188（261111 使用者「先修V188 再刪舊版」「可以，4項都放進V188」）：供應商管理四項——
 //    ①供應商表「帳號 N 人」改數雲端帳號（原本讀 V170 起就沒人寫的本機舊資料＝永遠 0 人）＋標出停用幾個
 //    ②供應商帳號清單加「狀態」欄（正常／已停用／權限已移除），停用或移除的人改顯示「▶ 恢復」
@@ -878,8 +885,7 @@ async function sbPullPartSpecs() {
 //  只在 sbFetchAllRows 成功（總數核對過）之後呼叫——雲端讀失敗時不清，寧可多留不可錯刪。
 function purgeInjectedDemoSpecs(byScope) {
   let n = 0;
-  const demo = {};
-  Object.keys(DEFAULT_SPECS).forEach(pn => { demo[pn] = JSON.stringify(DEFAULT_SPECS[pn]); });
+  const demo = DEMO_SPEC_FINGERPRINT;   // V189：改比指紋（長度＋雜湊），不再帶示範料號內容
   Object.keys(localStorage)
     .filter(k => k === SPEC_DB_KEY || k.startsWith(SPEC_DB_KEY + '_'))
     .forEach(k => {
@@ -888,7 +894,8 @@ function purgeInjectedDemoSpecs(byScope) {
       try { db = JSON.parse(localStorage.getItem(k) || '{}') || {}; } catch(e) { return; }
       let changed = false;
       Object.keys(demo).forEach(pn => {
-        if (db[pn] && JSON.stringify(db[pn]) === demo[pn] && !(byScope[scope] && byScope[scope][pn])) {
+        const js = db[pn] ? JSON.stringify(db[pn]) : '';
+        if (js && js.length === demo[pn][0] && demoSpecHash(js) === demo[pn][1] && !(byScope[scope] && byScope[scope][pn])) {
           delete db[pn]; changed = true; n++;
         }
       });
@@ -2552,7 +2559,6 @@ async function sbInit() {
         <button onclick="cpkSaveRecord()" style="height:32px;padding:0 14px;background:#0f6e56;color:#fff;border:none;border-radius:5px;font-size:12px;font-weight:700;cursor:pointer;font-family:Arial,sans-serif">✅ 儲存</button>
         <button onclick="printAsPDF()" style="height:32px;padding:0 14px;background:#555;color:#fff;border:none;border-radius:5px;font-size:12px;cursor:pointer;font-family:Arial,sans-serif">🖨 列印 / 存成 PDF</button>
         <button onclick="cpkClearAll()" style="height:32px;padding:0 14px;background:#fff;color:#888;border:1px solid #bbb;border-radius:5px;font-size:12px;cursor:pointer;font-family:Arial,sans-serif">↺ 清空</button>
-        <button onclick="importDemoCpkRecord()" style="height:32px;padding:0 14px;background:#fff;color:#0f6e56;border:1px solid #0f6e56;border-radius:5px;font-size:12px;cursor:pointer;font-family:Arial,sans-serif">📊 載入示範數據</button>
         <span id="cpk-status" style="font-size:11px;color:#1d9e75"></span>
       </div>
     </div>
@@ -2582,54 +2588,11 @@ document.getElementById('print-date').textContent = 'Printed: ' + new Date().toL
 // ── 料號規格資料庫（從 localStorage 動態載入）──
 const SPEC_DB_KEY = 'fai_part_specs';
 
-// 內建預設料號（首次使用自動載入）
-const DEFAULT_SPECS = {
-  '05360000-003': {
-    partname: 'KICKSTAND BRACKET, MINI 2 USER TERMINAL',
-    material: 'PC, 10% GLASS FILL', rev: 'A', supplier: 'SYNX',
-    specs: [
-      {moi:'Optical Comparator', type:'FAI', nom:0,     pt:0.2,  mt:0    },
-      {moi:'Optical Comparator', type:'CPK', nom:65.69, pt:0.15, mt:0.15 },
-      {moi:'Dial Caliper',       type:'FAI', nom:6.83,  pt:0.15, mt:0.15 },
-      {moi:'Optical Comparator', type:'FAI', nom:3.28,  pt:0.1,  mt:0.1  },
-      {moi:'Optical Comparator', type:'CPK', nom:3.02,  pt:0.08, mt:0.08 },
-      {moi:'Optical Comparator', type:'FAI', nom:0,     pt:0.3,  mt:0    },
-      {moi:'Optical Comparator', type:'FAI', nom:0,     pt:0.3,  mt:0    },
-      {moi:'Optical Comparator', type:'CPK', nom:49.63, pt:0.15, mt:0.15 },
-      {moi:'Optical Comparator', type:'FAI', nom:0,     pt:0.3,  mt:0    },
-      {moi:'Optical Comparator', type:'FAI', nom:0,     pt:0.3,  mt:0    },
-      {moi:'Optical Comparator', type:'FAI', nom:0,     pt:0.3,  mt:0    },
-      {moi:'Dial Caliper',       type:'FAI', nom:78.83, pt:0.2,  mt:0.2  },
-      {moi:'Optical Comparator', type:'FAI', nom:0,     pt:0.5,  mt:0    },
-      {moi:'Dial Caliper',       type:'FAI', nom:7.61,  pt:0.1,  mt:0.1  },
-      {moi:'Optical Comparator', type:'FAI', nom:0,     pt:0.3,  mt:0    },
-      {moi:'Optical Comparator', type:'FAI', nom:0,     pt:0.2,  mt:0    },
-      {moi:'Optical Comparator', type:'FAI', nom:2.26,  pt:0.1,  mt:0.1  },
-      {moi:'Dial Caliper',       type:'FAI', nom:1.5,   pt:0.1,  mt:0.1  },
-      {moi:'Dial Caliper',       type:'FAI', nom:1.95,  pt:0.05, mt:0.05 },
-    ]
-  },
-  '05360000-004': {
-    partname: 'KICKSTAND LEG, MINI 2 USER TERMINAL',
-    material: 'ZAMAK 3', rev: 'A', supplier: 'SYNX',
-    specs: [
-      {moi:'Optical Comparator', type:'FAI', nom:0,     pt:0.2,  mt:0    },
-      {moi:'Optical Comparator', type:'FAI', nom:0,     pt:0.2,  mt:0    },
-      {moi:'Dial Caliper',       type:'FAI', nom:6.49,  pt:0.2,  mt:0.2  },
-      {moi:'Dial Caliper',       type:'FAI', nom:6.68,  pt:0.2,  mt:0.2  },
-      {moi:'Optical Comparator', type:'FAI', nom:50.54, pt:0.2,  mt:0.2  },
-      {moi:'Dial Caliper',       type:'FAI', nom:3.32,  pt:0.1,  mt:0.1  },
-      {moi:'Dial Caliper',       type:'FAI', nom:3.31,  pt:0.2,  mt:0.2  },
-      {moi:'Dial Caliper',       type:'CPK', nom:2.77,  pt:0.08, mt:0.08 },
-      {moi:'Dial Caliper',       type:'CPK', nom:2.77,  pt:0.08, mt:0.08 },
-      {moi:'Optical Comparator', type:'FAI', nom:0,     pt:0.4,  mt:0    },
-      {moi:'Optical Comparator', type:'FAI', nom:0,     pt:0.5,  mt:0    },
-      {moi:'Optical Comparator', type:'FAI', nom:0,     pt:0.3,  mt:0    },
-      {moi:'Dial Caliper',       type:'CPK', nom:49,    pt:0.2,  mt:0.2  },
-      {moi:'Dial Caliper',       type:'CPK', nom:52,    pt:0.3,  mt:0.3  },
-    ]
-  }
-};
+// V189：原本這裡寫死 2 筆示範料號的完整規格（料號、品名、材質、供應商、量測項目）。V177 起已不再寫進任何地方，
+//  只剩 purgeInjectedDemoSpecs 拿來辨認「舊版塞進各台電腦、內容一字不差的示範複本」⇒ 改成只留指紋（JSON 長度＋雜湊），
+//  辨認結果跟原本相同，網頁裡不再有料號內容。指紋由 V188 的 DEFAULT_SPECS 用 JSON.stringify 算出（261112）。
+const DEMO_SPEC_FINGERPRINT = { '05360000-003': [1410, 2028121381], '05360000-004': [1031, 2195220469] };
+function demoSpecHash(str) { let x = 5381; for (let i = 0; i < str.length; i++) x = ((x * 33) ^ str.charCodeAt(i)) >>> 0; return x; }
 
 // ── 取得當前使用者的料號庫 key ──
 function getSpecDBKey() {
@@ -3729,6 +3692,8 @@ function openNCR() {
   const pad = n => String(n).padStart(2,'0');
   const ncrNo = `NCR-${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}`;
   document.getElementById('ncr-no').value = ncrNo;
+  _ncrSavedId = null;   // V189：新開一張 ⇒ 下次儲存是新增，不是修改上一張
+  const _st = document.getElementById('ncr-status'); if (_st) _st.textContent = '';
 
   // 自動帶入不合格量測項目
   const tbody = document.getElementById('ncr-items-tbody');
@@ -3767,29 +3732,109 @@ function toggleNCR() {
   document.getElementById('ncr-section').classList.toggle('show');
 }
 
-function saveNCR() {
-  const ncr = {
-    no:       document.getElementById('ncr-no').value,
-    type:     document.getElementById('ncr-type').value,
-    qty:      document.getElementById('ncr-qty').value,
-    severity: document.getElementById('ncr-severity').value,
-    desc:     document.getElementById('ncr-desc').value,
-    cause:    document.getElementById('ncr-cause').value,
-    disp:     document.getElementById('ncr-disp').value,
-    action:   document.getElementById('ncr-action').value,
-    partno:   document.getElementById('h-partno').value,
-    process:  currentProcess,
-    savedAt:  new Date().toISOString(),
+// ══ V189：NCR 改存資料庫 qms_ncr_records（SQL 191）══
+//  原本只寫 localStorage（fai_ncr_*）⇒ 換電腦／清瀏覽器就不見、別人看不到、匯出備份也沒帶。
+//  現在：只存資料庫；存不進去就紅字，不再退回本機假裝存好。
+//  同一張 NCR 再按一次儲存 ＝ 修改同一列（_ncrSavedId）；開新的一張（openNCR）才是新增。
+//  廠區取法跟 FAI 存檔（_doSaveNewRecord）同一套，權限由資料庫規則把關（同 fai_records）。
+let _ncrSavedId = null;
+
+function ncrScopeSite() {
+  const s = getSession();
+  return getCurrentSite() || (s?.isSupplier ? s.supplierCode : '') || (s?.isAdmin ? 'ADMIN' : (s?.site || ''));
+}
+
+function ncrCollectItems() {
+  const items = [];
+  document.querySelectorAll('#ncr-items-tbody tr').forEach(tr => {
+    const td = tr.querySelectorAll('td');
+    if (td.length < 7) return;   // 「目前無不合格項目」那一列
+    const t = i => (td[i].textContent || '').trim();
+    items.push({ fai: t(0), item: t(1), usl: t(2), lsl: t(3), values: t(4), cpk: t(5), judge: t(6) });
+  });
+  return items;
+}
+
+async function saveNCR() {
+  const st  = document.getElementById('ncr-status');
+  const say = (msg, ok) => { if (st) { st.textContent = msg; st.style.color = ok ? '#1D9E75' : '#c0392b'; } };
+  const v   = id => (document.getElementById(id) || {}).value || '';
+  const s   = getSession();
+  if (!s) { say('✘ 尚未登入，無法儲存'); return; }
+  if (!_sbReady) { try { _sbReady = await sbTestConnection(); } catch(e) {} }
+  if (!_sbReady) { say('✘ 連不到資料庫，NCR 沒有存。請確認網路後再按一次'); return; }
+  const site = ncrScopeSite();
+  if (!site) { say('✘ 找不到所屬廠區，NCR 沒有存'); return; }
+  const qty = v('ncr-qty');
+  const payload = {
+    ncr_no: v('ncr-no'), site_code: site, process: currentProcess || null,
+    partno: v('h-partno') || null, partname: v('h-partname') || null,
+    nc_type: v('ncr-type') || null, nc_qty: qty === '' ? null : Number(qty), severity: v('ncr-severity') || null,
+    description: v('ncr-desc') || null, cause: v('ncr-cause') || null,
+    disposition: v('ncr-disp') || null, corrective_action: v('ncr-action') || null,
+    items: ncrCollectItems(),
   };
-  const key = 'fai_ncr_' + ncr.no.replace(/[^a-zA-Z0-9]/g,'-');
+  if (!payload.ncr_no) { say('✘ 沒有 NCR 編號，請重新開立'); return; }
+  say('⏳ 儲存中…', true);
+  const hdr = { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer(),
+                'Content-Type': 'application/json', 'Prefer': 'return=representation' };
   try {
-    localStorage.setItem(key, JSON.stringify(ncr));
-    document.getElementById('ncr-status').textContent = `✔ NCR ${ncr.no} 已儲存`;
-    document.getElementById('ncr-status').style.color = '#1D9E75';
+    let res;
+    if (_ncrSavedId) {
+      payload.updated_by = s.userName || '—'; payload.updated_at = new Date().toISOString();
+      res = await fetch(SUPABASE_URL + '/rest/v1/qms_ncr_records?id=eq.' + encodeURIComponent(_ncrSavedId),
+                        { method: 'PATCH', headers: hdr, body: JSON.stringify(payload) });
+    } else {
+      payload.created_by = s.userName || '—';
+      res = await fetch(SUPABASE_URL + '/rest/v1/qms_ncr_records',
+                        { method: 'POST', headers: hdr, body: JSON.stringify(payload) });
+    }
+    if (res.status === 409) { say('✘ 這個 NCR 編號在本廠區已經有了（同一分鐘開立的另一張）。請關閉後重新開立'); return; }
+    if (!res.ok) {
+      const t = await res.text().catch(() => '');
+      console.warn('NCR 存檔失敗', res.status, t);
+      say('✘ NCR 沒有存（資料庫回應 ' + res.status + '）。' + (res.status === 401 || res.status === 403 ? '可能是登入已過期或沒有權限，請重新登入' : '請稍後再試'));
+      return;
+    }
+    const rows = await res.json().catch(() => []);
+    if (!rows || !rows.length) { say('✘ NCR 沒有存（資料庫沒有回傳資料，可能沒有這個廠區的權限）'); return; }
+    _ncrSavedId = rows[0].id;
+    say(`✔ NCR ${payload.ncr_no} 已存到資料庫` + (payload.updated_at ? '（已更新）' : ''), true);
   } catch(e) {
-    document.getElementById('ncr-status').textContent = '✘ 儲存失敗';
-    document.getElementById('ncr-status').style.color = '#c0392b';
+    console.warn('NCR 存檔例外', e);
+    say('✘ 網路錯誤，NCR 沒有存。請確認網路後再按一次');
   }
+}
+
+// ══ V189：這台電腦以前存在瀏覽器的舊 NCR（fai_ncr_*）──登入後問要不要上傳 ══
+//  舊 NCR 沒記廠區 ⇒ 上傳時歸到「現在登入的廠區」，所以先問、並把廠區名寫在問句裡；按取消就不動，下次登入再問。
+//  上傳成功的才從瀏覽器刪；編號在該廠區已存在（409）也視為已在資料庫、一起刪本機。
+async function ncrOfferLocalUpload() {
+  try {
+    const keys = Object.keys(localStorage).filter(k => k.startsWith('fai_ncr_'));
+    if (!keys.length || !_sbReady) return;
+    const s = getSession(); if (!s) return;
+    const site = ncrScopeSite(); if (!site) return;
+    const siteName = site === 'ADMIN' ? 'ADMIN（管理員）' : site;
+    if (!confirm(`這台電腦的瀏覽器裡有 ${keys.length} 張舊的 NCR 不合格報告，只存在本機、沒有進資料庫。\n\n要上傳到資料庫嗎？\n・會歸到目前登入的「${siteName}」\n・上傳成功的會從這台電腦刪掉\n・按「取消」就不動，下次登入再問`)) return;
+    let ok = 0, bad = 0;
+    for (const k of keys) {
+      let r; try { r = JSON.parse(localStorage.getItem(k) || 'null'); } catch(e) { r = null; }
+      if (!r || !r.no) { bad++; continue; }
+      const qty = (r.qty === '' || r.qty == null) ? null : Number(r.qty);
+      const body = { ncr_no: r.no, site_code: site, process: r.process || null, partno: r.partno || null,
+        nc_type: r.type || null, nc_qty: isNaN(qty) ? null : qty, severity: r.severity || null,
+        description: r.desc || null, cause: r.cause || null, disposition: r.disp || null, corrective_action: r.action || null,
+        items: [], created_by: s.userName || '—', source: 'local_upload', local_saved_at: r.savedAt || null };
+      try {
+        const res = await fetch(SUPABASE_URL + '/rest/v1/qms_ncr_records', { method: 'POST',
+          headers: { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer(), 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+          body: JSON.stringify(body) });
+        if (res.ok || res.status === 409) { localStorage.removeItem(k); ok++; } else { bad++; console.warn('舊 NCR 上傳失敗', k, res.status); }
+      } catch(e) { bad++; console.warn('舊 NCR 上傳例外', k, e); }
+    }
+    try { showSyncToast(bad ? `⚠ 舊 NCR：上傳 ${ok} 張，${bad} 張沒成功（仍留在這台電腦，下次登入再問）` : `✅ 舊 NCR ${ok} 張已上傳到資料庫`, !!bad); } catch(e) {}
+  } catch(e) { console.warn('ncrOfferLocalUpload', e); }
 }
 
 function printNCR() {
@@ -7428,20 +7473,13 @@ function updateProcessConfig() {
   });
 }
 
-// ── 預載入歷史記錄（來自 Excel FAI 報告）──
-(function() {
-  const RECORDS = {
-    'fai_record_IQC_05360000-003_2026-03-05T08-00-00-000Z': {"header":{"process":"IQC","partno":"05360000-003","partname":"KICKSTAND BRACKET, MINI 2 USER TERMINAL","supplier":"SYNX","inspector":"Nick","rev":"A","date":"2026-03-05","material":"PC,10% GLASS FILL","phase":"T1","toolno":"/","lotno":"","poqty":"","dn":"","workorder":"","machine":"","shift":"","process_name":"","finqty":"","wo_fqc":"","customer":"","so":"","shipqty":"","destination":""},"rows":[{"fai":1,"moi":"Optical Comparator","type":"FAI","nom":0,"pt":0.2,"mt":0,"usl":0.2,"lsl":0,"s":[0.167,0.143,0.133],"comment":"VL-800/VR-6000"},{"fai":2,"moi":"Optical Comparator","type":"CPK","nom":65.69,"pt":0.15,"mt":0.15,"usl":65.84,"lsl":65.54,"s":[65.71,65.77,65.71],"comment":"VL-800/VR-6000"},{"fai":3,"moi":"Dial Caliper","type":"FAI","nom":6.83,"pt":0.15,"mt":0.15,"usl":6.98,"lsl":6.68,"s":[6.79,6.79,6.79],"comment":""},{"fai":4,"moi":"Optical Comparator","type":"FAI","nom":3.28,"pt":0.1,"mt":0.1,"usl":3.38,"lsl":3.18,"s":[3.36,3.32,3.35],"comment":"VL-800/VR-6000"},{"fai":5,"moi":"Optical Comparator","type":"CPK","nom":3.02,"pt":0.08,"mt":0.08,"usl":3.1,"lsl":2.94,"s":[3.05,3.05,3.08],"comment":"VL-800/VR-6000"},{"fai":6,"moi":"Optical Comparator","type":"FAI","nom":0,"pt":0.3,"mt":0,"usl":0.3,"lsl":0,"s":[0.287,0.265,0.255],"comment":"VL-800/VR-6000"},{"fai":7,"moi":"Optical Comparator","type":"FAI","nom":0,"pt":0.3,"mt":0,"usl":0.3,"lsl":0,"s":[0.163,0.224,0.286],"comment":"VL-800/VR-6000"},{"fai":8,"moi":"Optical Comparator","type":"CPK","nom":49.63,"pt":0.15,"mt":0.15,"usl":49.78,"lsl":49.48,"s":[49.76,49.75,49.75],"comment":"VL-800/VR-6000"},{"fai":9,"moi":"Optical Comparator","type":"FAI","nom":0,"pt":0.3,"mt":0,"usl":0.3,"lsl":0,"s":[0.122,0.166,0.165],"comment":"VL-800/VR-6000"},{"fai":10,"moi":"Optical Comparator","type":"FAI","nom":0,"pt":0.3,"mt":0,"usl":0.3,"lsl":0,"s":[0.122,0.092,0.094],"comment":"VL-800/VR-6000"},{"fai":11,"moi":"Optical Comparator","type":"FAI","nom":0,"pt":0.3,"mt":0,"usl":0.3,"lsl":0,"s":[0.104,0.109,0.088],"comment":"VL-800/VR-6000"},{"fai":12,"moi":"Dial Caliper","type":"FAI","nom":78.83,"pt":0.2,"mt":0.2,"usl":79.03,"lsl":78.63,"s":[78.87,78.86,78.86],"comment":""},{"fai":13,"moi":"Optical Comparator","type":"FAI","nom":0,"pt":0.5,"mt":0,"usl":0.5,"lsl":0,"s":[0.227,0.221,0.209],"comment":"VL-800/VR-6000"},{"fai":14,"moi":"Dial Caliper","type":"FAI","nom":7.61,"pt":0.1,"mt":0.1,"usl":7.71,"lsl":7.51,"s":[7.62,7.62,7.62],"comment":""},{"fai":15,"moi":"Optical Comparator","type":"FAI","nom":0,"pt":0.3,"mt":0,"usl":0.3,"lsl":0,"s":[0.291,0.287,0.257],"comment":"VL-800/VR-6000"},{"fai":16,"moi":"Optical Comparator","type":"FAI","nom":0,"pt":0.2,"mt":0,"usl":0.2,"lsl":0,"s":[0.076,0.049,0.088],"comment":"VL-800/VR-6000"},{"fai":17,"moi":"Optical Comparator","type":"FAI","nom":2.26,"pt":0.1,"mt":0.1,"usl":2.36,"lsl":2.16,"s":[2.3,2.26,2.27],"comment":"VL-800/VR-6000"},{"fai":18,"moi":"Dial Caliper","type":"FAI","nom":1.5,"pt":0.1,"mt":0.1,"usl":1.6,"lsl":1.4,"s":[1.48,1.48,1.48],"comment":""},{"fai":19,"moi":"Dial Caliper","type":"FAI","nom":1.95,"pt":0.05,"mt":0.05,"usl":2.0,"lsl":1.9,"s":[1.95,1.94,1.94],"comment":""}],"savedAt":"2026-03-05T08:00:00.000Z","overall":"PASS","formNo":"IQC-20260305-0001","isRecord":true,"photos":[]},
-    'fai_record_IQC_05360000-004_2026-03-30T08-00-00-000Z': {"header":{"process":"IQC","partno":"05360000-004","partname":"KICKSTAND LEG, MINI 2 USER TERMINAL","supplier":"SYNX","inspector":"Nick","rev":"A","date":"2026-03-30","material":"ZAMAK 3","phase":"Cast part T2","toolno":"/","lotno":"","poqty":"","dn":"","workorder":"","machine":"","shift":"","process_name":"","finqty":"","wo_fqc":"","customer":"","so":"","shipqty":"","destination":""},"rows":[{"fai":1,"moi":"Optical Comparator","type":"FAI","nom":0,"pt":0.2,"mt":0,"usl":0.2,"lsl":0,"s":[0.119,0.116,0.128],"comment":"VL-800/VR-6000"},{"fai":2,"moi":"Optical Comparator","type":"FAI","nom":0,"pt":0.2,"mt":0,"usl":0.2,"lsl":0,"s":[0.089,0.101,0.083],"comment":"VL-800/VR-6000"},{"fai":3,"moi":"Dial Caliper","type":"FAI","nom":6.49,"pt":0.2,"mt":0.2,"usl":6.69,"lsl":6.29,"s":[6.44,6.36,6.36],"comment":""},{"fai":4,"moi":"Dial Caliper","type":"FAI","nom":6.68,"pt":0.2,"mt":0.2,"usl":6.88,"lsl":6.48,"s":[6.67,6.62,6.66],"comment":""},{"fai":5,"moi":"Optical Comparator","type":"FAI","nom":50.54,"pt":0.2,"mt":0.2,"usl":50.74,"lsl":50.34,"s":[50.53,50.55,50.54],"comment":"VL-800/VR-6000"},{"fai":6,"moi":"Dial Caliper","type":"FAI","nom":3.32,"pt":0.1,"mt":0.1,"usl":3.42,"lsl":3.22,"s":[3.27,3.25,3.25],"comment":""},{"fai":7,"moi":"Dial Caliper","type":"FAI","nom":3.31,"pt":0.2,"mt":0.2,"usl":3.51,"lsl":3.11,"s":[3.33,3.28,3.31],"comment":""},{"fai":8,"moi":"Dial Caliper","type":"CPK","nom":2.77,"pt":0.08,"mt":0.08,"usl":2.85,"lsl":2.69,"s":[2.94,2.9,2.93],"comment":""},{"fai":9,"moi":"Dial Caliper","type":"CPK","nom":2.77,"pt":0.08,"mt":0.08,"usl":2.85,"lsl":2.69,"s":[2.96,2.9,2.95],"comment":""},{"fai":10,"moi":"Optical Comparator","type":"FAI","nom":0,"pt":0.4,"mt":0,"usl":0.4,"lsl":0,"s":[0.052,0.047,0.115],"comment":"VL-800/VR-6000"},{"fai":11,"moi":"Optical Comparator","type":"FAI","nom":0,"pt":0.5,"mt":0,"usl":0.5,"lsl":0,"s":[0.08,0.027,0.071],"comment":"VL-800/VR-6000"},{"fai":12,"moi":"Optical Comparator","type":"FAI","nom":0,"pt":0.3,"mt":0,"usl":0.3,"lsl":0,"s":[0.056,0.058,0.058],"comment":"VL-800/VR-6000"},{"fai":13,"moi":"Dial Caliper","type":"CPK","nom":49,"pt":0.2,"mt":0.2,"usl":49.2,"lsl":48.8,"s":[49.14,49.06,49.13],"comment":""},{"fai":14,"moi":"Dial Caliper","type":"CPK","nom":52,"pt":0.3,"mt":0.3,"usl":52.3,"lsl":51.7,"s":[52.08,51.99,52.04],"comment":""}],"savedAt":"2026-03-30T08:00:00.000Z","overall":"REJECT","formNo":"IQC-20260330-0001","isRecord":true,"photos":[]}
-  };
-  // ★ V141（260717）：改為「移除」預載示範記錄 ★
-  // 原本每次開頁會「強制寫入」這 2 筆示範記錄（IQC-20260305-0001 / IQC-20260330-0001，無廠區），
-  // 導致歷史查詢筆數在 21↔23 跳動（開頁塞回來、按「重新同步雲端」又被清掉），使用者困惑。
-  // 系統已上線且有真實記錄，不再需要示範資料 → 開頁時把這 2 筆從本機清乾淨。
-  Object.keys(RECORDS).forEach(k => {
-    try { localStorage.removeItem(k); } catch(e) {}
-  });
-})();
+// ── V141 起：開頁把舊版塞進本機的 2 筆示範 FAI 記錄清掉 ──
+//  V189：原本這裡連同整份示範資料（料號、品名、檢驗員、量測值）寫死在網頁裡，只為了拿 key 來刪；
+//  公開網頁不該帶業務資料 ⇒ 只留 key。
+['fai_record_IQC_05360000-003_2026-03-05T08-00-00-000Z',
+ 'fai_record_IQC_05360000-004_2026-03-30T08-00-00-000Z'].forEach(k => {
+  try { localStorage.removeItem(k); } catch(e) {}
+});
 // ══════════════════════════════════════════════
 // 🏭 組織設定 Org Management
 // ══════════════════════════════════════════════
@@ -9701,6 +9739,30 @@ function saveSession(s){ try { sessionStorage.setItem(LOGIN_SESSION_KEY, JSON.st
 function clearSession(){ try { sessionStorage.removeItem(LOGIN_SESSION_KEY); localStorage.removeItem(LOGIN_SESSION_KEY); } catch(e){} }
 // 啟動時清掉舊版殘留在 localStorage 的 session，避免自動登入
 try { localStorage.removeItem(LOGIN_SESSION_KEY); } catch(e){}
+// ══ V189：清掉舊版（V170 以前）存在瀏覽器的帳號密碼副本 ══
+//  當時 sbPullUsers／sbPullSupplierUsers／sbPullAdminConfig 會把舊表的明碼密碼整份抄進瀏覽器；V170 起不再寫，
+//  但用過舊版的電腦上一直留著。這裡每次開頁檢查：qms_admin_config 整個刪；兩份帳號快取只拿掉 password 欄位
+//  （姓名、角色等其他欄位登入流程還在用，不動）。TEST 組織 test@test.com 照使用者「TEST 都不動」保留。
+//  ⚠ 鍵名用字面字串：SUPPLIER_USERS_KEY 在檔案後面才宣告，這裡引用會出錯。
+(function purgeLegacyPasswordCopies() {
+  try { localStorage.removeItem('qms_admin_config'); } catch(e) {}
+  ['qms_users', 'qms_supplier_users'].forEach(function(key) {
+    try {
+      const db = JSON.parse(localStorage.getItem(key) || 'null');
+      if (!db || typeof db !== 'object') return;
+      let n = 0;
+      Object.keys(db).forEach(function(grp) {
+        const users = db[grp];
+        if (!users || typeof users !== 'object') return;
+        Object.keys(users).forEach(function(u) {
+          if (key === 'qms_users' && grp === 'TEST' && u === 'test@test.com') return;
+          if (users[u] && typeof users[u] === 'object' && 'password' in users[u]) { delete users[u].password; n++; }
+        });
+      });
+      if (n) { localStorage.setItem(key, JSON.stringify(db)); console.log('[V189] 已清掉 ' + key + ' 裡 ' + n + ' 筆舊密碼副本'); }
+    } catch(e) { console.warn('[V189] 清舊密碼副本失敗:', key, e); }
+  });
+})();
 
 // 使用者資料庫：{ [siteCode]: { [userKey]: { name } } }
 function getUserDB() { try { return JSON.parse(localStorage.getItem(USER_DB_KEY)||'{}'); } catch(e){ return {}; } }
@@ -9972,6 +10034,7 @@ async function sbPostLoginRefresh() {
     await sbRefreshViewScope(); // V143：先重算跨廠範圍（動態跟隨），資料拉取才會照新範圍放行
     await Promise.allSettled([ sbPullAllRecords(), sbPullCpkRecords(), sbPullPartSpecs() ]);
     refreshActiveTabAfterSync();   // V170-5：與開頁同步共用同一支
+    ncrOfferLocalUpload();          // V189：舊 NCR 只存在本機的，問要不要上傳
   } catch(e) { console.warn('登入後重拉失敗:', e); }
 }
 
@@ -10590,80 +10653,8 @@ async function doChangePassword() {
     return;
   }
 
-  if (s.isSupplier) {
-    const db = getSupplierUsers();
-    const user = db[s.supplierCode]?.[s.userKey];
-    if (!user) { st.textContent = '❌ 找不到帳號'; st.style.color = '#c0392b'; return; }
-    if (user.password !== oldPwd) { st.textContent = '❌ 舊密碼錯誤'; st.style.color = '#c0392b'; return; }
-    user.password = newPwd;
-    saveSupplierUsers(db);
-  } else if (!s.isAdmin) {
-    const siteKey = s.site || '__nosite__';
-    
-    // ☁ 直接從 Supabase 驗證舊密碼並更新新密碼
-    st.textContent = '⏳ 驗證中...'; st.style.color = '#888';
-    
-    try {
-      // 1. 從 Supabase 查目前密碼
-      const verifyRes = await fetch(
-        SUPABASE_URL + '/rest/v1/qms_users?site_code=eq.' + encodeURIComponent(siteKey) + '&email=eq.' + encodeURIComponent(s.userKey) + '&select=password,name,role,must_change_pwd',
-        { headers: { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer() } }
-      );
-      const verifyData = await verifyRes.json();
-      if (!verifyData || !verifyData.length) { st.textContent = '❌ 找不到帳號'; st.style.color = '#c0392b'; return; }
-      
-      const sbUser = verifyData[0];
-      if (sbUser.password !== oldPwd) { st.textContent = '❌ 舊密碼錯誤'; st.style.color = '#c0392b'; return; }
-      
-      // 2. 直接用 PATCH 更新 Supabase 密碼
-      const patchRes = await fetch(
-        SUPABASE_URL + '/rest/v1/qms_users?site_code=eq.' + encodeURIComponent(siteKey) + '&email=eq.' + encodeURIComponent(s.userKey),
-        {
-          method: 'PATCH',
-          headers: {
-            'apikey': SUPABASE_KEY,
-            'Authorization': sbAuthBearer(),
-            'Content-Type': 'application/json',
-            'Prefer': 'return=minimal'
-          },
-          body: JSON.stringify({ password: newPwd, must_change_pwd: false })
-        }
-      );
-      
-      if (!patchRes.ok) {
-        const errText = await patchRes.text();
-        console.error('密碼更新失敗:', errText);
-        st.textContent = '❌ 密碼更新失敗，請稍後再試'; st.style.color = '#c0392b'; return;
-      }
-      
-      console.log('☁ 密碼已成功更新到 Supabase');
-      
-      // 3. 更新本地 localStorage
-      const db = getUserDB();
-      if (db[siteKey]?.[s.userKey]) {
-        db[siteKey][s.userKey].password = newPwd;
-        db[siteKey][s.userKey].mustChange = false;
-        try { localStorage.setItem(USER_DB_KEY, JSON.stringify(db)); } catch(e) {}
-      }
-      
-    } catch(e) {
-      console.error('修改密碼錯誤:', e);
-      st.textContent = '❌ 網路錯誤，請稍後再試'; st.style.color = '#c0392b'; return;
-    }
-  } else {
-    st.textContent = '❌ 管理員請在設定頁修改密碼'; st.style.color = '#c0392b'; return;
-  }
-
-  st.textContent = '✅ 密碼已修改成功！'; st.style.color = '#1d9e75';
-  _forceChangePwd = false;
-
-  // 確保 Supabase 同步完成後再關閉 modal
-  setTimeout(async () => {
-    // 重新從 Supabase 拉取最新帳號資料，確保本地和雲端一致
-    if (_sbReady) await sbPullUsers();
-    const modal = document.getElementById('chg-pwd-modal');
-    if (modal) modal.style.display = 'none';
-  }, 1500);
+  // V189：這裡原本是 Supabase Auth 以前的舊改密碼邏輯（在上面 return 之後、永遠跑不到），
+  //  內容是直接讀寫舊表 qms_users 的明碼密碼、再把新密碼存回瀏覽器 ⇒ 刪掉，免得日後被誤接回來。
 }
 
 // ══ V179-2：SyncHub 初始密碼還沒改的人不放進系統（登入擋＋舊登入狀態踢出共用這段話）══
@@ -12079,66 +12070,8 @@ async function resyncFromCloud() {
 }
 
 // ══════════════════════════════════════════════
-function forceReimportRecords() {
-  const RECORDS = {
-    'fai_record_IQC_05360000-003_2026-03-05T08-00-00-000Z': {"header":{"process":"IQC","partno":"05360000-003","partname":"KICKSTAND BRACKET, MINI 2 USER TERMINAL","supplier":"SYNX","inspector":"Nick","rev":"A","date":"2026-03-05","material":"PC,10% GLASS FILL","phase":"T1","toolno":"/","lotno":"","poqty":"","dn":""},"rows":[{"fai":1,"moi":"Optical Comparator","type":"FAI","nom":0,"pt":0.2,"mt":0,"usl":0.2,"lsl":0,"s":[0.167,0.143,0.133],"comment":""},{"fai":2,"moi":"Optical Comparator","type":"CPK","nom":65.69,"pt":0.15,"mt":0.15,"usl":65.84,"lsl":65.54,"s":[65.71,65.77,65.71],"comment":""},{"fai":3,"moi":"Dial Caliper","type":"FAI","nom":6.83,"pt":0.15,"mt":0.15,"usl":6.98,"lsl":6.68,"s":[6.79,6.79,6.79],"comment":""},{"fai":4,"moi":"Optical Comparator","type":"FAI","nom":3.28,"pt":0.1,"mt":0.1,"usl":3.38,"lsl":3.18,"s":[3.36,3.32,3.35],"comment":""},{"fai":5,"moi":"Optical Comparator","type":"CPK","nom":3.02,"pt":0.08,"mt":0.08,"usl":3.1,"lsl":2.94,"s":[3.05,3.05,3.08],"comment":""},{"fai":6,"moi":"Optical Comparator","type":"FAI","nom":0,"pt":0.3,"mt":0,"usl":0.3,"lsl":0,"s":[0.287,0.265,0.255],"comment":""},{"fai":7,"moi":"Optical Comparator","type":"FAI","nom":0,"pt":0.3,"mt":0,"usl":0.3,"lsl":0,"s":[0.163,0.224,0.286],"comment":""},{"fai":8,"moi":"Optical Comparator","type":"CPK","nom":49.63,"pt":0.15,"mt":0.15,"usl":49.78,"lsl":49.48,"s":[49.76,49.75,49.75],"comment":""}],"savedAt":"2026-03-05T08:00:00.000Z","overall":"PASS","formNo":"IQC-20260305-0001","isRecord":true,"photos":[]},
-    'fai_record_IQC_05360000-004_2026-03-30T08-00-00-000Z': {"header":{"process":"IQC","partno":"05360000-004","partname":"KICKSTAND LEG, MINI 2 USER TERMINAL","supplier":"SYNX","inspector":"Nick","rev":"A","date":"2026-03-30","material":"ZAMAK 3","phase":"T2","toolno":"/","lotno":"","poqty":"","dn":""},"rows":[{"fai":1,"moi":"Optical Comparator","type":"FAI","nom":0,"pt":0.2,"mt":0,"usl":0.2,"lsl":0,"s":[0.119,0.116,0.128],"comment":""},{"fai":2,"moi":"Dial Caliper","type":"CPK","nom":2.77,"pt":0.08,"mt":0.08,"usl":2.85,"lsl":2.69,"s":[2.94,2.9,2.93],"comment":""},{"fai":3,"moi":"Dial Caliper","type":"CPK","nom":52,"pt":0.3,"mt":0.3,"usl":52.3,"lsl":51.7,"s":[52.08,51.99,52.04],"comment":""}],"savedAt":"2026-03-30T08:00:00.000Z","overall":"REJECT","formNo":"IQC-20260330-0001","isRecord":true,"photos":[]}
-  };
-  let ok=0, fail=0;
-  Object.entries(RECORDS).forEach(([k,v])=>{ try{localStorage.setItem(k,JSON.stringify(v));ok++;}catch(e){fail++;} });
-  alert(`✅ 重新匯入完成！\n寫入: ${ok} 筆  失敗: ${fail} 筆\n\n請按「🔎 查詢」重新查詢。`);
-  if (typeof runHistQuery === 'function') runHistQuery();
-}
-
-function importDemoCpkRecord() {
-  const data = {
-    partno:'05360000-003', partname:'KICKSTAND BRACKET MINI 2 USER TERMINAL',
-    supplier:'SYNX TECH CO.,LTD', rev:'B', material:'PC,10% GLASS FILL',
-    inspector:'NICK', date:'2026-03-26', lotSize:32, toolno:'/', site:'',
-    savedAt:'2026-03-26T00:00:00.000Z',
-    points:[
-      {
-        faiNo:2, moi:'Optical Comparator', nom:65.69,
-        usl:65.84, lsl:65.54, tol:0.30,
-        values:[
-          65.77,65.74,65.76,65.77,65.74,65.76,65.75,65.77,
-          65.76,65.78,65.76,65.77,65.74,65.78,65.76,65.77,
-          65.75,65.76,65.75,65.76,65.76,65.77,65.76,65.75,
-          65.77,65.76,65.75,65.77,65.76,65.77,65.75,65.75
-        ]
-      },
-      {
-        faiNo:5, moi:'Optical Comparator', nom:3.02,
-        usl:3.10, lsl:2.94, tol:0.16,
-        values:[
-          3.09,3.09,3.08,3.07,3.06,3.08,3.06,3.07,
-          3.07,3.03,3.05,3.06,3.07,3.06,3.06,3.04,
-          3.07,3.05,3.06,3.06,3.05,3.07,3.07,3.03,
-          3.08,3.06,3.05,3.06,3.06,3.07,3.06,3.05
-        ]
-      },
-      {
-        faiNo:8, moi:'Optical Comparator', nom:49.63,
-        usl:49.78, lsl:49.48, tol:0.30,
-        values:[
-          49.73,49.75,49.75,49.76,49.76,49.76,49.74,49.75,
-          49.74,49.76,49.77,49.74,49.75,49.76,49.74,49.75,
-          49.75,49.75,49.75,49.74,49.76,49.76,49.76,49.75,
-          49.74,49.74,49.75,49.76,49.76,49.75,49.76,49.77
-        ]
-      }
-    ]
-  };
-  const key = 'cpk_record_05360000-003_2026-03-26T00-00-00-000Z';
-  try {
-    localStorage.setItem(key, JSON.stringify(data));
-    editingCpkKey = null;  // 載入示範數據 → 非編輯模式（存檔將另存新記錄）
-    // 先切換到 CPK tab，等 DOM ready 後再載入資料（避免雙重 render 互相覆蓋）
-    switchTabForce('cpk');
-    setTimeout(() => cpkLoadDemoRecord(data), 100);
-  } catch(e) { alert('❌ 載入失敗：'+e.message); }
-}
-
+// V189：重新匯入示範 FAI 的函式（沒人呼叫）與「載入示範 CPK」函式＋按鈕（含料號／供應商／檢驗員）拿掉——公開網頁不帶業務資料。
+//  cpkLoadDemoRecord 名字雖有 Demo，其實是「把一張 CPK 記錄載入畫面」的共用函式，歷史查詢在用，保留。
 function cpkLoadDemoRecord(data) {
   if (!data) return;
   // 填入表頭欄位（直接用 el.value 賦值，不觸發 oninput 事件，避免 cpkLoadSpec 清空 cpkPoints）
@@ -12421,15 +12354,8 @@ function showEditChoiceDialog(partno, date, callback) {
 // ══════════════════════════════════════════════
 // 🔐 管理員權限系統
 // ══════════════════════════════════════════════
-const ADMIN_KEY     = 'qms_admin_config';
-const ADMIN_DEFAULT = 'admin1234'; // 預設密碼，首次使用請修改
-
-function getAdminConfig() {
-  try {
-    const saved = localStorage.getItem(ADMIN_KEY);
-    return saved ? JSON.parse(saved) : { password: ADMIN_DEFAULT };
-  } catch(e) { return { password: ADMIN_DEFAULT }; }
-}
+// V189：舊的 ADMIN_KEY／寫死的預設密碼／getAdminConfig 拿掉（V177 起沒人用；真正的管理員密碼在 Supabase Auth）。
+//  舊版留在瀏覽器的 qms_admin_config 由開頁清理段刪掉（見 USER_DB_KEY 下方）。
 
 function isAdmin() {
   const s = getSession();
@@ -13025,7 +12951,7 @@ function renderSysTab() {
 
 // 在設定頁顯示管理員密碼輸入框（臨時提升權限）
 // ══ V177：停用（使用者 260930 同意拿掉）══
-//  舊做法：比對 getAdminConfig().password——那是 localStorage 裡的舊值，沒有就用寫死在程式裡的 ADMIN_DEFAULT；
+//  舊做法：比對 getAdminConfig().password——那是 localStorage 裡的舊值，沒有就用寫死在程式裡的預設密碼（V189 已連同函式一起刪）；
 //  qms_admin_config 雲端表 V170 起已刪、真正的管理員密碼在 Supabase Auth（admin@id）⇒ 這裡比對的從來不是真密碼，
 //  任何人看網頁原始碼就知道，輸入後 session.isAdmin=true、畫面變管理員模式（資料庫 RLS 仍會擋寫入，但畫面會亂）。
 //  按鈕已拿掉；函式留著但什麼都不做，防止從 Console 呼叫。

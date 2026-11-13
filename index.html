@@ -398,6 +398,19 @@ input.spec-inp[type=number] { -moz-appearance:textfield; appearance:textfield; }
 .rec-act-btn:hover{opacity:0.75}
 .col-resizer:hover{background:rgba(26,79,138,0.2)}
 .hist-empty{text-align:center;padding:40px;color:#aaa;font-size:13px}
+/* V191：查詢頁切換「檢驗記錄／NCR」——目前看的那顆紅底（使用者規則：切換鈕要看得出目前在哪） */
+.hist-switch{display:flex;margin-bottom:8px}
+.hist-switch button{height:30px;padding:0 16px;font-size:12px;font-weight:700;border:1px solid #1a4f8a;background:#fff;color:#1a4f8a;cursor:pointer;font-family:Arial,sans-serif;white-space:nowrap}
+.hist-switch button:first-child{border-radius:4px 0 0 4px}
+.hist-switch button:last-child{border-radius:0 4px 4px 0;border-left:none}
+.hist-switch button.on{background:#c0392b;border-color:#c0392b;color:#fff}
+.ncr-sev{display:inline-block;padding:1px 7px;border-radius:3px;font-size:10px;font-weight:700;white-space:nowrap}
+.ncr-sev.c{background:#c0392b;color:#fff}.ncr-sev.j{background:#d9822b;color:#fff}.ncr-sev.n{background:#f5d76e;color:#5a4500}
+.hist-table tr.ncr-detail td{background:#fdf5f5;white-space:normal}
+.ncr-dgrid{display:grid;grid-template-columns:90px 1fr 90px 1fr;gap:4px 10px;font-size:12px;margin-bottom:8px}
+.ncr-dgrid b{color:#721c24}
+.ncr-dgrid span{white-space:pre-wrap;word-break:break-word}
+@media (max-width:760px){.ncr-dgrid{grid-template-columns:80px 1fr}}
 .hist-wrap{overflow-y:auto;border:1px solid #dde;border-radius:4px}/*V159:拿掉 520px 上限，改由 inline calc(100vh-300px) 決定＝視窗越高看越多列*/
 /* Photo attachment */
 .photo-section{border:1px solid #ccd;border-radius:4px;overflow:hidden;margin-bottom:14px}
@@ -454,8 +467,26 @@ input.spec-inp[type=number] { -moz-appearance:textfield; appearance:textfield; }
 // 用途＝跟使用者溝通「你看到的畫面是不是最新版」，不是品質文件的表單版次
 //（表單版次 Rev 另有其用途、目前維持 V1.0 不動，日後各廠區若有自己的表單版次需求再談）
 // 顯示位置：① 瀏覽器分頁標題 ② 登入畫面副標下方 ③ 主畫面右上（列印時自動隱藏）
-const APP_VER = 'V189';   // ★★ 每出一版必須同步改這一行（比照 MHR 的做法），否則畫面版號會對不上檔案版號
+const APP_VER = 'V193';   // ★★ 每出一版必須同步改這一行（比照 MHR 的做法），否則畫面版號會對不上檔案版號
 
+// ══ V193（261113 合併版）＝V191（查詢頁 NCR 清單＋修改）＋V190（名單改登入後才讀）。
+//    V190 沒上線過；synchub 專用通道 261113 上線後，以 V191 為底用三方合併套進 V190 的改動（衝突只有這段說明）。
+//    要搭配：SQL 192（人員同步表）＋代驗後端 qms-sso-login-v3。══
+// ══ V191（261112 使用者看過 NCR 清單示意後回「照建議」）——
+//    ①「🔎 查詢」頁上方加切換鈕「📋 檢驗記錄 FAI ／ ⚠ NCR 不合格報告」，NCR 清單讀資料庫 qms_ncr_records（SQL 191 那張表）。
+//      看得到哪些 NCR＝資料庫規則決定（管理員全部；各廠／供應商只看自己的；跨廠檢視勾的廠區只能看），網頁不另外放寬。
+//    ② NCR 可「✏ 開啟修改」：載回填表頁的 NCR 表單，按儲存＝更新同一張；廠區、工序、料號、品名維持這張原本的。
+//      按鈕顯示規則同 FAI 的「✏ 編輯」（角色可新增或修改＋這張在自己可寫的範圍）；跨廠檢視只能看、沒有這顆。
+//    ③ 從清單可列印單張 NCR、可把查詢結果匯出 Excel。
+//    不做：刪除（資料庫沒開放）、狀態欄（處理中／已結案，要加需另跑 SQL，使用者照建議先不加）。不用新的 SQL。
+//    名單改登入後才讀見下面 V190 段（V190 沒上線過，併進 V193）。══
+// ══ V190（261112 名單改登入後才讀；使用者 261112「選 B，2 小時，可以開始做」；設計稿 QMS_名單改登入後才讀_設計稿_261112.md）——
+//    網頁不再用 synchub 公開金鑰讀人員名單（identity_access／oms_roster）：
+//    ①登入：工號、Email 都直接交給代驗後端 qms-sso-login-v3；後端在登入當下判斷 QMS 授權（決定 4「要即時」），
+//      不准進時回原因（未授權／已停用／沒有 SyncHub 帳號／密碼錯…），網頁照原因顯示。登入頁打工號不再顯示姓名與 Email。
+//    ②門③（拿到通行證之後的 OMS 授權檢查）：代驗登入＝後端已判斷，不再問；其他路徑問後端 gate；問不到＝擋下（原本放行）。
+//    ③人員管理、作廢本箱密碼、匯出：改讀本專案的人員同步表 qms_oms_people（SQL 192，每小時經 synchub 專用通道同步；只有 QMS 系統管理員讀得到全部）。
+//    廠區主檔（factories：代碼／名稱／事業群）不是人員資料，照舊讀。══
 // ══ V189（261112 四系統清查「資料有沒有存在程式裡」→ 使用者「OK」、NCR 選「改存資料庫」）——
 //    ①NCR 不合格報告改存資料庫 qms_ncr_records（SQL 191）；原本只存那台電腦的瀏覽器、也不在匯出備份裡。
 //      存檔失敗就顯示紅字、不再假裝存好；這台電腦以前存在瀏覽器的舊 NCR，登入後問要不要上傳。
@@ -1937,6 +1968,13 @@ async function sbInit() {
   <!-- ══ TAB 3：歷史查詢 ══ -->
   <div class="tab-pane" id="tab-hist">
 
+    <!-- V191：切換 檢驗記錄／NCR -->
+    <div class="hist-switch no-print">
+      <button id="hsw-fai" class="on" onclick="histSetView('fai')">📋 檢驗記錄 FAI</button>
+      <button id="hsw-ncr" onclick="histSetView('ncr')">⚠ NCR 不合格報告</button>
+    </div>
+    <div id="hist-fai-view">
+
     <!-- 篩選列 -->
     <div class="hist-filter">
       <div class="ef" style="flex:1.3;min-width:150px">
@@ -2044,6 +2082,71 @@ async function sbInit() {
       <span>💡 點擊列左側 ▶ 可展開查看詳細量測數據。</span>
       <!-- V141（260717）：移除「🔄 重新匯入預載記錄」按鈕——示範資料已停用，按了只會塞回假記錄 -->
     </div>
+    </div><!-- end hist-fai-view（V191） -->
+
+    <!-- ══ V191：NCR 不合格報告清單（讀資料庫 qms_ncr_records） ══ -->
+    <div id="hist-ncr-view" style="display:none">
+      <div class="hist-filter">
+        <div class="ef" style="flex:1.4;min-width:170px">
+          <label>🔍 關鍵字 Keyword</label>
+          <input id="ncr-f-keyword" placeholder="NCR 編號／料號／品名／開立人／描述" style="width:100%" onkeydown="if(event.key==='Enter')ncrRunQuery(false)">
+        </div>
+        <div class="ef" style="flex:1;min-width:140px"><label>組織 Site</label><select id="ncr-f-site" style="width:100%" onchange="ncrRunQuery(false)"></select></div>
+        <div class="ef" style="flex:1;min-width:120px"><label>工序 Process</label><select id="ncr-f-proc" style="width:100%" onchange="ncrRunQuery(false)"></select></div>
+        <div class="ef" style="flex:1;min-width:150px"><label>不合格類型 NC Type</label><select id="ncr-f-type" style="width:100%" onchange="ncrRunQuery(false)"></select></div>
+        <div class="ef" style="flex:1;min-width:120px"><label>緊急程度 Severity</label>
+          <select id="ncr-f-sev" style="width:100%" onchange="ncrRunQuery(false)">
+            <option value="">全部</option><option value="Critical">🔴 Critical 嚴重</option><option value="Major">🟠 Major 主要</option><option value="Minor">🟡 Minor 輕微</option>
+          </select>
+        </div>
+        <div class="ef" style="flex:1;min-width:130px"><label>開立日期起 From</label><input id="ncr-f-from" type="date" style="width:100%" onchange="ncrRunQuery(false)"></div>
+        <div class="ef" style="flex:1;min-width:130px"><label>開立日期迄 To</label><input id="ncr-f-to" type="date" style="width:100%" onchange="ncrRunQuery(false)"></div>
+        <div class="ef" style="flex:0;min-width:140px;display:flex;flex-direction:row;align-items:center">
+          <div style="display:flex;gap:6px">
+            <button class="btn btn-blue" onclick="ncrRunQuery(true)" style="height:30px;font-size:12px;flex:1;white-space:nowrap" title="重新從資料庫讀一次">🔎 查詢</button>
+            <button class="btn" onclick="ncrClearFilter()" style="height:30px;font-size:12px;flex:1;white-space:nowrap">清除</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="hist-stats">
+        <div class="hist-stat-card"><div class="hist-stat-label">查詢結果張數</div><div class="hist-stat-val" id="ncs-total">—</div></div>
+        <div class="hist-stat-card"><div class="hist-stat-label">🔴 Critical 嚴重</div><div class="hist-stat-val fail" id="ncs-c">—</div></div>
+        <div class="hist-stat-card"><div class="hist-stat-label">🟠 Major 主要</div><div class="hist-stat-val warn" id="ncs-j">—</div></div>
+        <div class="hist-stat-card"><div class="hist-stat-label">🟡 Minor 輕微</div><div class="hist-stat-val" id="ncs-n" style="color:#9a7a00">—</div></div>
+      </div>
+
+      <div class="hist-wrap" style="overflow:auto;max-height:calc(100vh - 170px);min-height:340px;-webkit-overflow-scrolling:touch">
+        <table class="hist-table">
+          <thead>
+            <tr>
+              <th style="width:28px"></th>
+              <th>NCR 編號 NCR No.</th>
+              <th>廠區</th>
+              <th>工序</th>
+              <th>料號 Part No.</th>
+              <th>品名</th>
+              <th>不合格類型</th>
+              <th style="text-align:right">數量</th>
+              <th>緊急程度</th>
+              <th>處置</th>
+              <th>開立人</th>
+              <th>開立時間</th>
+            </tr>
+          </thead>
+          <tbody id="ncr-tbody">
+            <tr><td colspan="12" class="hist-empty">請按「🔎 查詢」載入 NCR</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div style="margin-top:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 12px;background:#f8f9fa;border:1px solid #dde;border-radius:6px">
+        <button onclick="ncrExportCSV()" style="height:28px;padding:0 14px;font-size:11px;font-weight:600;background:#0f6e56;color:#fff;border:none;border-radius:4px;cursor:pointer;white-space:nowrap">📊 匯出查詢結果 Excel</button>
+        <span id="ncr-export-status" style="font-size:11px;color:#1d9e75"></span>
+      </div>
+      <div style="font-size:11px;color:#888;margin-top:8px">
+        💡 點列左側 ▶ 展開看描述、原因、改善措施與不合格量測項目。看得到哪些 NCR 跟資料庫權限一樣（跨廠檢視只能看）；NCR 不能刪除。
+      </div>
+    </div><!-- end hist-ncr-view（V191） -->
 
   </div><!-- end tab-hist -->
 
@@ -3692,6 +3795,8 @@ function openNCR() {
   const pad = n => String(n).padStart(2,'0');
   const ncrNo = `NCR-${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}`;
   document.getElementById('ncr-no').value = ncrNo;
+  if (_ncrEditRec) ncrResetForm();   // V191：剛才在改清單載回的舊 NCR ⇒ 欄位清回預設，不帶別張的內容
+  _ncrEditRec = null;
   _ncrSavedId = null;   // V189：新開一張 ⇒ 下次儲存是新增，不是修改上一張
   const _st = document.getElementById('ncr-status'); if (_st) _st.textContent = '';
 
@@ -3763,12 +3868,14 @@ async function saveNCR() {
   if (!s) { say('✘ 尚未登入，無法儲存'); return; }
   if (!_sbReady) { try { _sbReady = await sbTestConnection(); } catch(e) {} }
   if (!_sbReady) { say('✘ 連不到資料庫，NCR 沒有存。請確認網路後再按一次'); return; }
-  const site = ncrScopeSite();
+  // V191：從清單載回修改的 NCR ⇒ 廠區／工序／料號／品名維持原本的，不拿填表頁目前的值蓋掉
+  const ed   = (_ncrEditRec && _ncrEditRec.id === _ncrSavedId) ? _ncrEditRec : null;
+  const site = ed ? ed.site_code : ncrScopeSite();
   if (!site) { say('✘ 找不到所屬廠區，NCR 沒有存'); return; }
   const qty = v('ncr-qty');
   const payload = {
-    ncr_no: v('ncr-no'), site_code: site, process: currentProcess || null,
-    partno: v('h-partno') || null, partname: v('h-partname') || null,
+    ncr_no: v('ncr-no'), site_code: site, process: ed ? (ed.process || null) : (currentProcess || null),
+    partno: ed ? (ed.partno || null) : (v('h-partno') || null), partname: ed ? (ed.partname || null) : (v('h-partname') || null),
     nc_type: v('ncr-type') || null, nc_qty: qty === '' ? null : Number(qty), severity: v('ncr-severity') || null,
     description: v('ncr-desc') || null, cause: v('ncr-cause') || null,
     disposition: v('ncr-disp') || null, corrective_action: v('ncr-action') || null,
@@ -3799,6 +3906,7 @@ async function saveNCR() {
     const rows = await res.json().catch(() => []);
     if (!rows || !rows.length) { say('✘ NCR 沒有存（資料庫沒有回傳資料，可能沒有這個廠區的權限）'); return; }
     _ncrSavedId = rows[0].id;
+    if (ed) { _ncrEditRec = rows[0]; const i = _ncrList.findIndex(x => x.id === rows[0].id); if (i >= 0) _ncrList[i] = rows[0]; }   // V191：清單同步
     say(`✔ NCR ${payload.ncr_no} 已存到資料庫` + (payload.updated_at ? '（已更新）' : ''), true);
   } catch(e) {
     console.warn('NCR 存檔例外', e);
@@ -3835,6 +3943,299 @@ async function ncrOfferLocalUpload() {
     }
     try { showSyncToast(bad ? `⚠ 舊 NCR：上傳 ${ok} 張，${bad} 張沒成功（仍留在這台電腦，下次登入再問）` : `✅ 舊 NCR ${ok} 張已上傳到資料庫`, !!bad); } catch(e) {}
   } catch(e) { console.warn('ncrOfferLocalUpload', e); }
+}
+
+// ══ V191：查詢頁 NCR 清單（使用者 261112 看示意後「照建議」：做開啟修改、不加狀態）══
+//  資料＝qms_ncr_records（SQL 191）。看得到哪些＝資料庫規則；網頁只做畫面篩選，不另外放寬也不另外收窄。
+//  讀不到就紅字顯示原因，不顯示成「0 張」（失敗不能看起來像查無資料）。
+//  分頁讀：每次照實際拿到的筆數往後讀，直到拿到 0 筆（伺服器每次上限不一定是 1000）。
+let _histView   = 'fai';
+let _ncrList    = [];      // 資料庫讀回來的（權限範圍內全部）
+let _ncrShown   = [];      // 篩選後畫面上的
+let _ncrLoaded  = false;
+let _ncrLoadErr = '';
+let _ncrEditRec = null;    // 從清單載回、正在修改的那張
+let _ncrOpenId  = null;    // 目前展開的那張
+
+function histSetView(v) { _histView = (v === 'ncr') ? 'ncr' : 'fai'; histApplyView(); }
+
+function histApplyView() {
+  const isNcr = _histView === 'ncr';
+  const a = document.getElementById('hist-fai-view'), b = document.getElementById('hist-ncr-view');
+  if (a) a.style.display = isNcr ? 'none' : '';
+  if (b) b.style.display = isNcr ? '' : 'none';
+  const ba = document.getElementById('hsw-fai'), bb = document.getElementById('hsw-ncr');
+  if (ba) ba.classList.toggle('on', !isNcr);
+  if (bb) bb.classList.toggle('on', isNcr);
+  if (isNcr) { ncrInitFilters(); ncrRunQuery(true); }
+}
+
+// 組織下拉：照抄 FAI 那顆（initHistSiteFilter 已依身分排好：供應商鎖自己、單廠鎖自己、跨廠＝授權範圍、管理員＝全部）
+function ncrInitFilters() {
+  const fs = document.getElementById('f-site'), ns = document.getElementById('ncr-f-site');
+  if (fs && ns) {
+    const keep = ns.dataset.init ? ns.value : fs.value;
+    ns.innerHTML = fs.innerHTML; ns.disabled = fs.disabled;
+    ns.value = keep; if (ns.value !== keep) ns.selectedIndex = 0;
+    ns.dataset.init = '1';
+  }
+  const fp = document.getElementById('f-proc'), np = document.getElementById('ncr-f-proc');
+  if (fp && np && !np.dataset.init) { np.innerHTML = fp.innerHTML; np.value = ''; np.dataset.init = '1'; }
+  ncrFillTypeFilter();
+}
+
+// 不合格類型：NCR 表單的選項＋資料裡出現過的其他值（舊 NCR 可能寫法不同，也要篩得到）
+function ncrFillTypeFilter() {
+  const sel = document.getElementById('ncr-f-type'); if (!sel) return;
+  const cur = sel.value;
+  const std = Array.from(document.querySelectorAll('#ncr-type option')).map(o => o.value);
+  const seen = new Set(std), extras = [];
+  _ncrList.forEach(r => { const t = (r.nc_type || '').trim(); if (t && !seen.has(t)) { seen.add(t); extras.push(t); } });
+  sel.innerHTML = '<option value="">全部</option>' + std.map(v => `<option value="${qmsEsc(v)}">${qmsEsc(v)}</option>`).join('') +
+    (extras.length ? '<option disabled>── 資料中的其他值 ──</option>' + extras.sort().map(v => `<option value="${qmsEsc(v)}">${qmsEsc(v)}</option>`).join('') : '');
+  sel.value = cur; if (sel.value !== cur) sel.value = '';
+}
+
+async function ncrFetchAll() {
+  if (!_sbReady) { try { _sbReady = await sbTestConnection(); } catch(e) {} }
+  if (!_sbReady) throw new Error('連不到資料庫');
+  const out = [];
+  for (let guard = 0; guard < 200; guard++) {
+    const res = await fetch(SUPABASE_URL + '/rest/v1/qms_ncr_records?select=*&order=created_at.desc,id.asc&limit=1000&offset=' + out.length,
+                            { headers: { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer() } });
+    if (!res.ok) throw new Error('資料庫回應 ' + res.status + (res.status === 401 || res.status === 403 ? '（可能登入已過期，請重新登入）' : ''));
+    const part = await res.json();
+    if (!Array.isArray(part)) throw new Error('資料庫回傳格式不對');
+    if (!part.length) return out;
+    out.push(...part);
+  }
+  throw new Error('NCR 太多，讀到一半停下（超過 200 次分頁）');
+}
+
+function ncrLocalDate(ts) {
+  if (!ts) return '';
+  const d = new Date(ts); if (isNaN(d)) return '';
+  const p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+function ncrTimeStr(ts) {
+  if (!ts) return '—';
+  const d = new Date(ts); if (isNaN(d)) return '—';
+  return d.toLocaleString('zh-TW', { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', hour12:false });
+}
+function ncrSevBadge(v) {
+  const c = v === 'Critical' ? 'c' : v === 'Major' ? 'j' : v === 'Minor' ? 'n' : '';
+  return v ? `<span class="ncr-sev ${c}">${qmsEsc(v)}</span>` : '<span style="color:#bbb">—</span>';
+}
+function ncrCanEdit(r) {
+  const c = ROLE_CAPS[getCurrentUserRole()] || {};
+  return !!((c.edit || c.submit) && canTouchSite(r.site_code));   // 同 FAI「✏ 編輯」的顯示規則
+}
+
+async function ncrRunQuery(reload) {
+  const tbody = document.getElementById('ncr-tbody'); if (!tbody) return;
+  if (reload || !_ncrLoaded) {
+    tbody.innerHTML = '<tr><td colspan="12" class="hist-empty">⏳ 從資料庫讀取 NCR…</td></tr>';
+    try { _ncrList = await ncrFetchAll(); _ncrLoaded = true; _ncrLoadErr = ''; }
+    catch(e) { _ncrLoaded = false; _ncrLoadErr = (e && e.message) || String(e); console.warn('NCR 清單讀取失敗', e); }
+    ncrFillTypeFilter();
+  }
+  const setStat = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+  if (!_ncrLoaded) {
+    ['ncs-total','ncs-c','ncs-j','ncs-n'].forEach(id => setStat(id, '—'));
+    _ncrShown = [];
+    tbody.innerHTML = `<tr><td colspan="12" class="hist-empty" style="color:#c0392b">✘ 讀不到 NCR（${qmsEsc(_ncrLoadErr)}）。這不代表沒有 NCR，請確認網路後再按「🔎 查詢」</td></tr>`;
+    return;
+  }
+  const g = id => (document.getElementById(id) || {}).value || '';
+  const kw = g('ncr-f-keyword').trim().toLowerCase(), fSite = g('ncr-f-site'), fProc = g('ncr-f-proc'),
+        fType = g('ncr-f-type'), fSev = g('ncr-f-sev'), fFrom = g('ncr-f-from'), fTo = g('ncr-f-to');
+  let list = _ncrList.slice();
+  if (kw)    list = list.filter(r => [r.ncr_no, r.partno, r.partname, r.created_by, r.updated_by, r.description]
+                                       .map(x => String(x || '').toLowerCase()).join(' ').includes(kw));
+  if (fSite) list = list.filter(r => r.site_code === fSite);
+  if (fProc) list = list.filter(r => r.process === fProc);
+  if (fType) list = list.filter(r => r.nc_type === fType);
+  if (fSev)  list = list.filter(r => r.severity === fSev);
+  if (fFrom) list = list.filter(r => ncrLocalDate(r.created_at) >= fFrom);
+  if (fTo)   list = list.filter(r => ncrLocalDate(r.created_at) <= fTo);
+  _ncrShown = list;
+  setStat('ncs-total', list.length);
+  setStat('ncs-c', list.filter(r => r.severity === 'Critical').length);
+  setStat('ncs-j', list.filter(r => r.severity === 'Major').length);
+  setStat('ncs-n', list.filter(r => r.severity === 'Minor').length);
+  if (!list.length) {
+    tbody.innerHTML = `<tr><td colspan="12" class="hist-empty">${_ncrList.length ? '沒有符合條件的 NCR' : '目前沒有 NCR（您可看的範圍內）'}</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = list.map(r => {
+    const cfg = PROCESS_CONFIG[r.process] || {};
+    const siteName = (SITE_LIST.find(x => x.code === r.site_code) || {}).name || '';
+    const by = r.updated_by
+      ? `${qmsEsc(r.created_by || '—')}<div style="font-size:10px;color:#BA7517">✏ ${qmsEsc(r.updated_by)}</div>`
+      : qmsEsc(r.created_by || '—');
+    return `<tr id="ncr-r-${qmsEsc(r.id)}"${_ncrOpenId === r.id ? ' class="expanded"' : ''}>
+      <td style="text-align:center;cursor:pointer;color:#1a4f8a;font-size:13px" onclick="ncrToggleDetail(${qmsJsArg(r.id)})">${_ncrOpenId === r.id ? '▼' : '▶'}</td>
+      <td style="white-space:nowrap"><span style="font-size:10px;font-weight:700;color:#c0392b;font-family:'Courier New',monospace;background:#fdecea;padding:1px 6px;border-radius:3px">${qmsEsc(r.ncr_no)}</span>${r.source === 'local_upload' ? ' <span style="font-size:9px;color:#888" title="從某台電腦瀏覽器上傳的舊 NCR（V189 以前只存在本機）">舊</span>' : ''}</td>
+      <td title="${qmsEsc(siteName)}"><span style="font-size:10px;font-weight:700;background:#1a4f8a;color:#fff;border-radius:3px;padding:1px 6px">${qmsEsc(r.site_code)}</span></td>
+      <td>${r.process ? `<span class="hist-result-badge" style="background:${cfg.badgeBg || '#eee'};color:${cfg.badgeColor || '#333'}">${qmsEsc(cfg.badge || r.process)}</span>` : '—'}</td>
+      <td style="font-weight:700;color:#1a4f8a;white-space:nowrap">${qmsEsc(r.partno || '—')}</td>
+      <td style="font-size:11px">${qmsEsc(r.partname || '—')}</td>
+      <td style="font-size:11px;white-space:nowrap">${qmsEsc(r.nc_type || '—')}</td>
+      <td style="text-align:right">${r.nc_qty == null ? '—' : qmsEsc(r.nc_qty)}</td>
+      <td>${ncrSevBadge(r.severity)}</td>
+      <td style="font-size:11px;white-space:nowrap">${qmsEsc(r.disposition || '—')}</td>
+      <td style="font-size:11px;white-space:nowrap">${by}</td>
+      <td style="font-size:11px;color:#666;white-space:nowrap">${ncrTimeStr(r.created_at)}</td>
+    </tr>` + (_ncrOpenId === r.id ? ncrDetailRow(r) : '');
+  }).join('');
+}
+
+function ncrDetailRow(r) {
+  const items = Array.isArray(r.items) ? r.items : [];
+  const itemRows = items.length
+    ? items.map(it => `<tr><td>${qmsEsc(it.fai)}</td><td style="text-align:left">${qmsEsc(it.item)}</td><td>${qmsEsc(it.usl)}</td><td>${qmsEsc(it.lsl)}</td>
+        <td style="color:#c0392b;font-weight:700">${qmsEsc(it.values)}</td><td>${qmsEsc(it.cpk)}</td><td style="color:#c0392b;font-weight:700">${qmsEsc(it.judge)}</td></tr>`).join('')
+    : '<tr><td colspan="7" style="text-align:center;color:#999;padding:6px">（這張 NCR 沒有帶入不合格量測項目）</td></tr>';
+  const upd = r.updated_by ? `${qmsEsc(r.updated_by)}　${ncrTimeStr(r.updated_at)}` : '（未修改過）';
+  const src = r.source === 'local_upload'
+    ? `<b>來源</b><span>從某台電腦瀏覽器上傳的舊 NCR（當初存檔 ${ncrTimeStr(r.local_saved_at)}）</span>` : '';
+  const editBtn = ncrCanEdit(r)
+    ? `<button class="btn btn-red" onclick="ncrEditFromList(${qmsJsArg(r.id)})" style="height:28px;font-size:12px">✏ 開啟修改</button>`
+    : '<span style="font-size:11px;color:#888;align-self:center">（只能看：不在您可修改的範圍）</span>';
+  return `<tr class="ncr-detail" id="ncr-d-${qmsEsc(r.id)}"><td></td><td colspan="11">
+    <div class="ncr-dgrid">
+      <b>不良描述</b><span>${qmsEsc(r.description || '—')}</span>
+      <b>可能原因</b><span>${qmsEsc(r.cause || '—')}</span>
+      <b>改善措施</b><span>${qmsEsc(r.corrective_action || '—')}</span>
+      <b>最後修改</b><span>${upd}</span>
+      ${src}
+    </div>
+    <table class="ncr-items-table" style="width:auto;min-width:60%">
+      <thead><tr><th>FAI#</th><th>量測項目</th><th>USL</th><th>LSL</th><th>量測值</th><th>Cpk / Cpu</th><th>判定</th></tr></thead>
+      <tbody>${itemRows}</tbody>
+    </table>
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <button class="btn" onclick="ncrPrintFromList(${qmsJsArg(r.id)})" style="height:28px;font-size:12px">🖨 列印 NCR</button>
+      ${editBtn}
+    </div>
+  </td></tr>`;
+}
+
+function ncrToggleDetail(id) { _ncrOpenId = (_ncrOpenId === id) ? null : id; ncrRunQuery(false); }
+
+function ncrClearFilter() {
+  ['ncr-f-keyword','ncr-f-proc','ncr-f-type','ncr-f-sev','ncr-f-from','ncr-f-to'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+  const ns = document.getElementById('ncr-f-site'); if (ns && !ns.disabled) ns.value = '';
+  ncrRunQuery(false);
+}
+
+// 下拉要顯示存的值：存的值不在選項裡（舊 NCR 寫法不同、或原本沒填）⇒ 暫時加一個選項，不改成別的值
+function ncrSetSelect(id, val) {
+  const sel = document.getElementById(id); if (!sel) return;
+  sel.querySelectorAll('option[data-ncrtmp]').forEach(o => o.remove());
+  const v = val == null ? '' : String(val);
+  if (!Array.from(sel.options).some(o => o.value === v)) {
+    const o = document.createElement('option');
+    o.value = v; o.textContent = v === '' ? '（原本未填）' : v; o.dataset.ncrtmp = '1';
+    sel.appendChild(o);
+  }
+  sel.value = v;
+}
+
+function ncrResetForm() {
+  ['ncr-type','ncr-cause','ncr-disp','ncr-severity'].forEach(id => {
+    const sel = document.getElementById(id); if (!sel) return;
+    sel.querySelectorAll('option[data-ncrtmp]').forEach(o => o.remove());
+    sel.selectedIndex = 0;
+  });
+  const sv = document.getElementById('ncr-severity'); if (sv) sv.value = 'Major';
+  ['ncr-desc','ncr-action'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+}
+
+function ncrEditFromList(id) {
+  const r = _ncrList.find(x => x.id === id); if (!r) return;
+  if (!ncrCanEdit(r)) { showNoPermToast('這張 NCR 不在您可修改的範圍（跨廠檢視只能看）'); return; }
+  switchTab('fai');
+  if (!document.getElementById('tab-fai')?.classList.contains('active')) return;   // 沒有填表頁權限 ⇒ switchTab 已提示
+  const setv = (k, v) => { const el = document.getElementById(k); if (el) el.value = (v == null ? '' : v); };
+  setv('ncr-no', r.ncr_no);
+  setv('ncr-qty', r.nc_qty);
+  ncrSetSelect('ncr-type', r.nc_type);
+  ncrSetSelect('ncr-severity', r.severity);
+  ncrSetSelect('ncr-cause', r.cause);
+  ncrSetSelect('ncr-disp', r.disposition);
+  setv('ncr-desc', r.description);
+  setv('ncr-action', r.corrective_action);
+  const tbody = document.getElementById('ncr-items-tbody');
+  const items = Array.isArray(r.items) ? r.items : [];
+  tbody.innerHTML = items.length
+    ? items.map(it => `<tr><td>${qmsEsc(it.fai)}</td><td style="text-align:left">${qmsEsc(it.item)}</td><td>${qmsEsc(it.usl)}</td><td>${qmsEsc(it.lsl)}</td>
+        <td style="color:#c0392b;font-weight:700">${qmsEsc(it.values)}</td><td>${qmsEsc(it.cpk)}</td><td style="color:#c0392b;font-weight:700">${qmsEsc(it.judge)}</td></tr>`).join('')
+    : '<tr><td colspan="7" style="text-align:center;color:#999;padding:8px">目前無不合格項目</td></tr>';
+  _ncrSavedId = r.id;
+  _ncrEditRec = r;
+  const st = document.getElementById('ncr-status');
+  if (st) {
+    st.style.color = '#1a4f8a';
+    st.textContent = `ℹ 正在修改 NCR ${r.ncr_no}（廠區 ${r.site_code}${r.partno ? '、料號 ' + r.partno : ''}）。按「💾 儲存 NCR」會更新這一張；廠區、工序、料號、品名維持原本的。`;
+  }
+  document.getElementById('ncr-section').classList.add('show');
+  document.getElementById('ncr-section').scrollIntoView({ behavior:'smooth', block:'start' });
+}
+
+// 從清單印單張：開一個只有這張 NCR 的視窗來印（跨廠只能看的人也能印，不用進填表頁）
+function ncrPrintFromList(id) {
+  const r = _ncrList.find(x => x.id === id); if (!r) return;
+  const items = Array.isArray(r.items) ? r.items : [];
+  const title = buildPrintTitle('NCR', r.partno, r.ncr_no);
+  const cell = (k, v) => `<tr><th>${k}</th><td>${qmsEsc(v == null || v === '' ? '—' : v)}</td></tr>`;
+  const html = `<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><title>${qmsEsc(title)}</title>
+<style>body{font-family:Arial,"Microsoft JhengHei",sans-serif;font-size:12px;margin:16px;color:#222}
+h1{font-size:16px;color:#c0392b;margin:0 0 10px}table{border-collapse:collapse;width:100%;margin-bottom:12px}
+th,td{border:1px solid #999;padding:4px 6px;text-align:left;vertical-align:top}th{background:#f3e3e3;width:120px;white-space:nowrap}
+td{white-space:pre-wrap;word-break:break-word}.it th{width:auto;text-align:center}.it td{text-align:center}</style></head><body>
+<h1>⚠ NCR 不合格報告 Non-Conformance Report</h1>
+<table>${cell('NCR 編號', r.ncr_no)}${cell('廠區', r.site_code)}${cell('工序', r.process)}${cell('料號', r.partno)}${cell('品名', r.partname)}
+${cell('不合格類型', r.nc_type)}${cell('不良數量', r.nc_qty)}${cell('緊急程度', r.severity)}${cell('不良描述', r.description)}
+${cell('可能原因', r.cause)}${cell('建議處置', r.disposition)}${cell('改善措施', r.corrective_action)}
+${cell('開立', (r.created_by || '—') + '　' + ncrTimeStr(r.created_at))}${r.updated_by ? cell('最後修改', r.updated_by + '　' + ncrTimeStr(r.updated_at)) : ''}</table>
+<div style="font-weight:700;color:#721c24;margin-bottom:4px">不合格量測項目 NC Measurement Items</div>
+<table class="it"><tr><th>FAI#</th><th>量測項目</th><th>USL</th><th>LSL</th><th>量測值</th><th>Cpk / Cpu</th><th>判定</th></tr>
+${items.length ? items.map(it => `<tr><td>${qmsEsc(it.fai)}</td><td style="text-align:left">${qmsEsc(it.item)}</td><td>${qmsEsc(it.usl)}</td><td>${qmsEsc(it.lsl)}</td><td>${qmsEsc(it.values)}</td><td>${qmsEsc(it.cpk)}</td><td>${qmsEsc(it.judge)}</td></tr>`).join('')
+  : '<tr><td colspan="7">（沒有帶入不合格量測項目）</td></tr>'}</table>
+</body></html>`;
+  const w = window.open('', '_blank');
+  if (!w) { alert('瀏覽器擋住了列印視窗。請允許這個網站開新視窗後再按一次'); return; }
+  w.document.open(); w.document.write(html); w.document.close();
+  setTimeout(() => { try { w.focus(); w.print(); } catch(e) {} }, 300);
+}
+
+function ncrExportCSV() {
+  const st = document.getElementById('ncr-export-status');
+  const say = (m, ok) => { if (st) { st.textContent = m; st.style.color = ok ? '#1d9e75' : '#c0392b'; } };
+  if (!_ncrLoaded) { say('⚠ NCR 還沒讀到，沒有東西可匯出'); return; }
+  if (!_ncrShown.length) { say('⚠ 目前查詢結果 0 張，沒有東西可匯出'); return; }
+  const q = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const fSite = (document.getElementById('ncr-f-site') || {}).value || '';
+  const out = [];
+  out.push([`QMS NCR 不合格報告匯出　共 ${_ncrShown.length} 張`]);
+  out.push([`匯出時間：${new Date().toLocaleString('zh-TW')}`]);
+  out.push([]);
+  out.push(['NCR 編號','廠區','工序','料號','品名','不合格類型','不良數量','緊急程度','可能原因','建議處置','不良描述','改善措施','開立人','開立時間','最後修改人','最後修改時間','來源','不合格量測項目']);
+  _ncrShown.forEach(r => {
+    const items = (Array.isArray(r.items) ? r.items : []).map(it => `${it.fai || ''} ${it.item || ''}：${it.values || ''}（${it.judge || ''}）`).join('；');
+    out.push([r.ncr_no, r.site_code, r.process, r.partno, r.partname, r.nc_type, r.nc_qty, r.severity, r.cause, r.disposition,
+              r.description, r.corrective_action, r.created_by, ncrTimeStr(r.created_at), r.updated_by, r.updated_at ? ncrTimeStr(r.updated_at) : '',
+              r.source === 'local_upload' ? '舊 NCR 上傳' : '網頁', items]);
+  });
+  const csv = '﻿' + out.map(row => row.map(q).join(',')).join('\r\n');
+  const url = URL.createObjectURL(new Blob([csv], { type:'text/csv;charset=utf-8' }));
+  const a = document.createElement('a');
+  a.href = url; a.download = `QMS_NCR_${fSite || 'ALL'}_${new Date().toISOString().slice(0,10).replace(/-/g,'')}.csv`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+  say(`✔ 已匯出 ${_ncrShown.length} 張`, true);
 }
 
 function printNCR() {
@@ -4343,7 +4744,7 @@ function switchTab(tab) {
     }
   });
   if (tab==='mgr')  { renderPnList(); ensureScopePanelForNew(); }   // V178：清單直接讀雲端清單；V178-2：管理員新增料號要看得到 STEP 4
-  if (tab==='hist') { cleanDuplicateRecords(); initHistSiteFilter(); initHistProcFilter(); runHistQuery(); }
+  if (tab==='hist') { cleanDuplicateRecords(); initHistSiteFilter(); initHistProcFilter(); runHistQuery(); histApplyView(); }   // V191：NCR 清單
   if (tab==='dash') { renderDashboard(); }
   if (tab==='sys')  { renderSysTab(); }
   if (tab==='cpk')  { cpkInitTab(); }
@@ -4375,7 +4776,7 @@ function switchTabForce(tab) {
     }
   });
   if (tab==='mgr')  { renderPnList(); ensureScopePanelForNew(); }   // V178：清單直接讀雲端清單；V178-2：管理員新增料號要看得到 STEP 4
-  if (tab==='hist') { cleanDuplicateRecords(); initHistSiteFilter(); initHistProcFilter(); runHistQuery(); }
+  if (tab==='hist') { cleanDuplicateRecords(); initHistSiteFilter(); initHistProcFilter(); runHistQuery(); histApplyView(); }   // V191：NCR 清單
   if (tab==='dash') { renderDashboard(); }
   if (tab==='sys')  { renderSysTab(); }
   if (tab==='cpk')  { cpkInitTab(); }
@@ -8265,10 +8666,11 @@ async function loadOmsQmsRoster() {
     + (OMS_ROSTER_RETRY_MS.length ? '；已自動重試 ' + OMS_ROSTER_RETRY_MS.length + ' 次' : ''));
 }
 async function loadOmsQmsRosterOnce() {
-  const d = await sbFetchAllRows(OMS_IDENTITY_URL + '/rest/v1/identity_access?systems=cs.%5B%22QMS%22%5D&active=eq.true&select=emp_id,name,eng_name,email,factory_code,dept,title&order=emp_id.asc,email.asc',
-    { headers: { apikey: OMS_IDENTITY_KEY, Authorization: 'Bearer ' + OMS_IDENTITY_KEY },
-      key: r => String(r.emp_id || '') + '\u0001' + String(r.email || '').toLowerCase() });   // 萬一有人沒工號，靠 email 區分
-  if (!d.length) throw new Error('OMS 授權名單讀到 0 筆（可能被權限擋下）');
+  //  V190：改讀本專案的人員同步表（每小時經 synchub 專用通道同步；SQL 192）。只有 QMS 系統管理員讀得到全部。
+  //   部門、職稱這裡沒用到，不讀；has_synchub_account 給作廢工具用（取代讀帳號名冊）。
+  const d = await sbFetchAllRows(SUPABASE_URL + '/rest/v1/qms_oms_people?status=eq.authorized&qms_authorized=is.true&select=emp_id,name,eng_name,email,factory_code,has_synchub_account&order=emp_id.asc',
+    { key: r => String(r.emp_id || '') });
+  if (!d.length) throw new Error('人員同步表讀到 0 筆（可能還沒同步，或沒有管理員權限）');
   return d;
 }
 // ── V143：🌐 跨廠區查詢範圍（admin 設定；BU 動態跟隨、供應商可增選）──
@@ -9034,18 +9436,15 @@ async function voidInternalBoxPasswords() {
   const say = (t, c) => { if (st) { st.textContent = t; st.style.color = c || '#1a4f8a'; } };
   const sess = getSession();
   if (!sess || !(sess.isAdmin || getCurrentUserRole() === 'admin')) { say('⚠ 需要管理員權限', '#c0392b'); return { ok: false, reason: 'perm' }; }
-  say('⏳ 讀取帳號清單與 SyncHub 帳號名冊…');
+  say('⏳ 讀取帳號清單與人員同步表…');
   const lr = await sbCallAdminFn('list');
   if (!lr.ok || !lr.data || !Array.isArray(lr.data.profiles)) { say('❌ 讀不到帳號清單（' + (lr.msg || '') + '）——沒有動任何密碼', '#c0392b'); return { ok: false, reason: 'list' }; }
   const targets = lr.data.profiles.filter(p => isInternalProfile(p) && p.can_access_qms !== false && p.active !== false && p.email);
-  let roster, omsList;
+  let omsList;
   try {
-    roster = await sbFetchAllRows(OMS_IDENTITY_URL + '/rest/v1/oms_roster?select=id,emp_id,active&order=id.asc',
-      { headers: { apikey: OMS_IDENTITY_KEY, Authorization: 'Bearer ' + OMS_IDENTITY_KEY }, key: r => String(r.id) });
-    if (!roster.length) throw new Error('名冊讀到 0 筆');
-    omsList = await loadOmsQmsRoster();
-  } catch (e) { say('❌ 讀不到 SyncHub 帳號名冊／OMS 名單（' + (e && e.message || e) + '）——沒有動任何密碼', '#c0392b'); return { ok: false, reason: 'roster' }; }
-  const hasAcc = new Set(roster.filter(r => r.emp_id && r.active !== false).map(r => String(r.emp_id).trim().toLowerCase()));
+    omsList = await loadOmsQmsRoster();   // V190：「有沒有 SyncHub 帳號」改看人員同步表，不再讀帳號名冊
+  } catch (e) { say('❌ 讀不到人員同步表（' + (e && e.message || e) + '）——沒有動任何密碼', '#c0392b'); return { ok: false, reason: 'roster' }; }
+  const hasAcc = new Set(omsList.filter(r => r.emp_id && r.has_synchub_account === true).map(r => String(r.emp_id).trim().toLowerCase()));
   const empByEmail = {};
   omsList.forEach(p => { if (p.email && p.emp_id) empByEmail[String(p.email).trim().toLowerCase()] = p.emp_id; });
   const ready = [], skipped = [];
@@ -9423,13 +9822,14 @@ function qmsRoleChecks(role, acctType) {
     (!sup && role === 'admin') ? '✓' : ''];
 }
 
-//  讀 OMS 兩份公開資料（員工、廠區主檔）；任何一份讀不到就記下來，對應的欄位寫「讀不到」
+//  讀兩份資料（V190：員工改讀本專案人員同步表；廠區主檔照舊讀 OMS）；任何一份讀不到就記下來，對應的欄位寫「讀不到」
 async function qmsExportLoadOms() {
   const H = { apikey: OMS_IDENTITY_KEY, Authorization: 'Bearer ' + OMS_IDENTITY_KEY };
   const out = { empByEmp: {}, empByEmail: {}, empErr: '', buByFac: {}, facErr: '' };
   try {
-    const emp = await sbFetchAllRows(OMS_IDENTITY_URL + '/rest/v1/identity_access?select=emp_id,name,eng_name,email,factory_code,dept,title,active&order=emp_id.asc,email.asc',
-      { headers: H, key: r => String(r.emp_id || '') + '\u0001' + String(r.email || '').toLowerCase() });
+    //  V190：只會有 QMS／MHR 相關的人（授權名單＋已撤銷）；已撤銷的人只有工號與姓名（決定 5a）
+    const emp = await sbFetchAllRows(SUPABASE_URL + '/rest/v1/qms_oms_people?select=emp_id,name,eng_name,email,factory_code,dept,title,status&order=emp_id.asc',
+      { key: r => String(r.emp_id || '') });
     if (!emp.length) throw new Error('讀到 0 筆');
     emp.forEach(e => { if (e.emp_id) out.empByEmp[String(e.emp_id).trim().toUpperCase()] = e;
                        if (e.email) out.empByEmail[String(e.email).trim().toLowerCase()] = e; });
@@ -9812,7 +10212,7 @@ async function sbAuthLogin(email, password) {
 }
 
 // V174：以「已取得的通行證」完成登入檢查（本箱密碼登入與 SyncHub 代驗登入共用）
-async function sbAuthAfterToken(token, refresh, uid, mustChange) {
+async function sbAuthAfterToken(token, refresh, uid, mustChange, ssoChecked) {   // V190：ssoChecked＝代驗後端已判斷過 OMS 授權
   try {
     const pRes = await fetch(
       SUPABASE_URL + '/rest/v1/profiles?id=eq.' + encodeURIComponent(uid) + '&select=*&limit=1',
@@ -9857,10 +10257,13 @@ async function sbAuthAfterToken(token, refresh, uid, mustChange) {
       if (profile.can_access_qms === false) {
         return { ok: false, msg: '您的 QMS 權限尚未開通 —— 已在 OMS 取得授權，但管理員還沒設定您的角色，請洽管理員於 QMS 人員管理開通' };
       }
-      // ⓑ OMS 授權（撤銷即時生效；查不到時走 fail-safe，靠上面 ⓐ 的本地旗標把關）
-      const au = await sbCheckOmsAuth(profile.email);
-      if (au.decided && !au.allowed) {
-        return { ok: false, msg: '此帳號未授權 QMS —— 請洽管理員於 OMS「系統資料授權」勾選 QMS' };
+      // ⓑ OMS 授權——V190：改由代驗後端判斷（決定 4「要即時」）。
+      //   代驗登入（ssoChecked）＝後端簽通行證前已判斷過；其他路徑問後端 gate。
+      //   問不到＝擋下（原本 fail-safe 放行；synchub 收名單後會變成「撤銷永遠不生效」）。
+      //   讀不到 OMS 時後端自己看人員同步表＋最近一次成功同步在 2 小時內（選項 B）。
+      if (!ssoChecked) {
+        const g = await sbGateCheck(token);
+        if (!g.allowed) return { ok: false, msg: g.msg };
       }
     }
     return { ok: true, token, refresh, uid, profile, mustChange: mustChange === true };
@@ -9886,7 +10289,7 @@ async function sbAuthAfterToken(token, refresh, uid, mustChange) {
 //   ・SyncHub 明確回答「密碼錯」不走備援。
 //  前端三處：① 這支改指新後端、認得 reason:'down' ② doLogin 打工號而 OMS 查不到時，把工號直接交給後端
 //           ③ 連不上時的訊息不再講成「帳號或密碼錯誤」／「QMS 自己的密碼已停用」
-const SSO_LOGIN_FN = 'qms-sso-login-v2';
+const SSO_LOGIN_FN = 'qms-sso-login-v3';   // V190：v3＝名單走 synchub 專用通道＋登入當下判斷授權（v2 原封不動留給 MHR）
 async function sbSsoTryLogin(identifier, password) {
   try {
     //  V181：改指新的後端程式 qms-sso-login-v2（備援通道；舊的 qms-sso-login 原封不動留給 MHR）
@@ -9900,12 +10303,45 @@ async function sbSsoTryLogin(identifier, password) {
     if (!res.ok) return { mode: 'local', down: true };
     const d = await res.json().catch(() => ({}));
     if (d && d.mode === 'sso' && d.access_token) return d;
+    //  V190：內部同仁、不准進（後端附原因）⇒ 不再退回本箱密碼
+    if (d && d.mode === 'deny') return { mode: 'deny', reason: String(d.reason || '') };
     //  V181：後端明講「SyncHub／OMS 連不上（或太忙），備援也沒過」⇒ 一樣算連不上，不能講成密碼不對
     if (d && d.reason === 'down') return { mode: 'local', down: true };
     return { mode: 'local' };
   } catch (e) {
     console.warn('SyncHub 代驗無法連線:', e);
     return { mode: 'local', down: true };
+  }
+}
+
+// V190：代驗後端回的「不准進」原因 → 畫面訊息
+function ssoDenyMsg(reason) {
+  switch (reason) {
+    case 'inactive':           return MSG_OMS_INACTIVE;
+    case 'not_authorized':     return MSG_OMS_NOT_AUTHED;
+    case 'no_email':           return MSG_OMS_NO_EMAIL;
+    case 'no_synchub_account': return MSG_SSO_NO_ACCOUNT;
+    case 'wrong_password':     return MSG_SSO_WRONG_PWD;
+    case 'no_account':         return MSG_QMS_NO_ACCOUNT;
+    default:                   return MSG_SSO_DOWN;
+  }
+}
+// V190：拿到通行證之後問代驗後端「這個人有沒有 QMS 授權」（取代網頁自己讀 OMS 名單的門③）
+//  回 { allowed:true } ／ { allowed:false, msg }；後端沒回應、回錯格式 ⇒ 不放行（決定 4：讀不到就擋下並提示）
+async function sbGateCheck(token) {
+  try {
+    const res = await fetch(SUPABASE_URL + '/functions/v1/' + SSO_LOGIN_FN, {
+      method: 'POST',
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'gate', system: 'QMS' })
+    });
+    if (!res.ok) return { allowed: false, msg: MSG_GATE_DOWN };
+    const d = await res.json().catch(() => null);
+    if (d && d.ok === true && d.allowed === true) return { allowed: true };
+    if (d && d.ok === true && d.allowed === false) return { allowed: false, msg: d.reason === 'down' ? MSG_GATE_DOWN : ssoDenyMsg(d.reason) };
+    return { allowed: false, msg: MSG_GATE_DOWN };
+  } catch (e) {
+    return { allowed: false, msg: MSG_GATE_DOWN };
   }
 }
 
@@ -10183,85 +10619,10 @@ function showLoginErr(msg){
   window._loginErrTimer=setTimeout(()=>{ if(fx) fx.style.display='none'; }, 4000);
 }
 
-// V149：工號 → Email（查 OMS identity_access，ilike 大小寫不敏感；供應商無工號故不套用此路徑）
-// 回傳 {ok:true, email} / {ok:false, msg}
-// V163：查 OMS 該 email 有沒有 QMS 授權。回 {decided, allowed}
-//  decided=false ＝「查不到／網路異常」，呼叫端要走 fail-safe（不可當成沒授權）
-// ══ V167-1：修掉 ILIKE 萬用字元問題 ══
-//  ⚠ SQL 的 ILIKE 裡 `_` ＝任意一個字元、`%` ＝任意字串。舊版直接把使用者的 email
-//    當成 pattern 丟進去 ⇒ **email 含底線的人會匹配到別人**。
-//    實例（260903 查 OMS 全 146 筆）：有一位的信箱是「名_姓@公司網域」（QMS 已授權）
-//    這個 pattern 會匹配「名X姓@…」任何單一字元；而貴司信箱慣例正是「名.姓@」
-//    ⇒ 哪天有人建了「名.姓@」就會互相誤中。當下只匹配到他自己，屬潛伏狀態。
-//  ⚠ 舊版還加了 `limit=1`：萬用字元命中多列時，第一筆不保證是本人 ⇒ 會拿別人的授權來判定。
-//  修法（刻意不靠跳脫字元）：
-//    ① 查詢仍用 ilike——它只會「多撈」不會「少撈」，所以**不可能**因此把該進的人擋掉；
-//       改用 eq. 反而危險，因為 eq. 大小寫敏感，OMS 端大小寫不一致就會漏擋（該進的進不來）。
-//    ② limit 放寬到 20，避免第一筆不是本人。
-//    ③ **撈回來後在前端做精確比對**：去空白、轉小寫後必須完全相等才算數。這才是真正的把關。
-async function sbCheckOmsAuth(email) {
-  const target = String(email || '').trim().toLowerCase();
-  if (!target) return { decided: false, allowed: false };
-  try {
-    const r = await fetch(OMS_IDENTITY_URL + '/rest/v1/identity_access?email=ilike.' +
-      encodeURIComponent(String(email).trim()) + '&select=email,systems,active&limit=20',
-      { headers: { apikey: OMS_IDENTITY_KEY, Authorization: 'Bearer ' + OMS_IDENTITY_KEY } });
-    if (!r.ok) return { decided: false, allowed: false };
-    const d = await r.json();
-    const rows = Array.isArray(d) ? d : [];
-    // ③ 精確比對：ilike 可能因萬用字元多撈，這裡只認 email 完全相同的那一列
-    const hit = rows.find(x => String(x && x.email || '').trim().toLowerCase() === target);
-    if (!hit) return { decided: true, allowed: false };            // OMS 名單查無此人＝未授權
-    if (hit.active === false) return { decided: true, allowed: false };
-    const sys = Array.isArray(hit.systems) ? hit.systems.map(x => String(x).toUpperCase()) : [];
-    return { decided: true, allowed: sys.indexOf('QMS') >= 0 };
-  } catch (e) {
-    console.warn('OMS 授權查詢失敗（走 fail-safe）:', e);
-    return { decided: false, allowed: false };
-  }
-}
+// V190：原本這裡的 sbCheckOmsAuth（門③查 OMS）、omsFindByEmpId（工號查 OMS）、resolveEmpIdToEmail（工號換 Email）已拿掉——
+//  名單改登入後才讀：工號換 Email、授權判斷都由代驗後端 qms-sso-login-v3 經 synchub 專用通道做（精確比對，沒有 ilike 萬用字元問題）。
 
-// ══ V175：用工號查 OMS 的唯一出處（門禁鐵則第 ⑥ 條三件一次到位）══
-//  ⚠ 三個坑，三件都要做，缺一個就會出事（MHR 260924 踩到大小寫那個、回頭提醒 QMS 查自己）：
-//    ① `eq.` 大小寫敏感 —— OMS 的工號存大寫（例：AB123／CD1234），現場打小寫會「查無工號」⇒ 用 `ilike`。
-//    ② `ilike` 的 `_` 是萬用字元 —— **實測**：`emp_id=ilike.AB12_` 真的撈到 `AB123`。
-//    ③ `limit=1` 會拿到別人那一筆 —— 所以要放寬 limit，**再由前端精確比對**。
-//  舊版（V174-1 以前）只做到 ①：登入頁打 `SS08_`，即時提示會直接顯示**別人的姓名與 Email**，
-//    按登入又拿別人的 Email 去驗密碼 ⇒ 只看到「帳號或密碼錯誤」，現場無從判斷。
-//  ⇒ 本支是「工號→那個人」的單一出處：登入翻譯與即時提示共用，以後只改這裡。
-//  回傳：{ ok:true, row } ／ { ok:false, reason:'none'|'net' }
-async function omsFindByEmpId(empId, selectCols) {
-  const want = String(empId || '').trim().toLowerCase();
-  if (!want) return { ok:false, reason:'none' };
-  try {
-    const r = await fetch(OMS_IDENTITY_URL + '/rest/v1/identity_access?emp_id=ilike.' +
-      encodeURIComponent(String(empId).trim()) +
-      '&select=' + (selectCols || 'emp_id,email,active') + '&limit=20',
-      { headers: { apikey: OMS_IDENTITY_KEY, Authorization: 'Bearer ' + OMS_IDENTITY_KEY } });
-    if (!r.ok) return { ok:false, reason:'net' };
-    const d = await r.json();
-    const rows = Array.isArray(d) ? d : [];
-    // ★精確比對：ilike 可能因萬用字元多撈，只認工號完全相同的那一筆（比對時忽略大小寫）
-    const hit = rows.find(x => String(x && x.emp_id || '').trim().toLowerCase() === want);
-    return hit ? { ok:true, row:hit } : { ok:false, reason:'none' };
-  } catch (e) {
-    console.warn('工號查詢失敗:', e);
-    return { ok:false, reason:'net' };
-  }
-}
-
-async function resolveEmpIdToEmail(empId) {
-  const f = await omsFindByEmpId(empId, 'emp_id,email,active');
-  if (!f.ok) {
-    return f.reason === 'net'
-      ? { ok:false, net:true, msg:'無法查詢工號（SyncHub 暫時連不上），請稍後再試，或改用 Email 登入' }   // V181：net＝OMS 沒回應（不是查無此人）
-      : { ok:false, msg:'查無此工號，請確認後重試，或改用 Email 登入' };
-  }
-  if (!f.row.email) return { ok:false, msg:'此工號未設定 Email，請洽管理員' };
-  return { ok:true, email: String(f.row.email).trim().toLowerCase() };
-}
-
-// V151：即時工號回饋（比照 MHR）——輸入不含 @ 時查 OMS，顯示「✓ 姓名 · Email」；含 @ 或空白則不顯示
+// V151：即時工號回饋 → V190：不再查 OMS（原本打工號就會在登入頁顯示那個人的姓名與 Email＝沒登入就看得到人員資料）
 let _empHintTimer = null;
 function onEmpIdInput() {
   const el   = document.getElementById('login-email-input');
@@ -10271,36 +10632,12 @@ function onEmpIdInput() {
   if (_empHintTimer) clearTimeout(_empHintTimer);
   if (!v) { hint.textContent = ''; return; }
   // V151-1：打 Email 時只回饋「格式」，不查也不揭露是誰
-  //（避免任何人在登入頁猜 email 就能確認某供應商有無此人＝帳號枚舉）
   if (v.includes('@')) {
     if (/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v)) { hint.style.color = '#0f6e56'; hint.textContent = '✓ Email 格式正確'; }
     else { hint.style.color = '#888'; hint.textContent = '請輸入完整 Email'; }
     return;
   }
-  hint.style.color = '#888'; hint.textContent = '查詢中…';
-  _empHintTimer = setTimeout(async () => {
-    const cur = (document.getElementById('login-email-input')?.value || '').trim();
-    if (cur !== v) return;                       // 使用者又改了 → 放掉這次結果
-    try {
-      // V175：改走共用的 omsFindByEmpId（ilike＋放寬 limit＋前端精確比對）
-      //  舊版只取第一筆 ⇒ 打 `SS08_` 會在登入頁直接顯示別人的姓名與 Email
-      const f = await omsFindByEmpId(v, 'emp_id,name,eng_name,email');
-      const hit = f.ok ? f.row : null;
-      const now = (document.getElementById('login-email-input')?.value || '').trim();
-      if (now !== v) return;                     // 回來時已過期 → 不覆蓋
-      // V181-1：OMS 連不上（不是查無此人）⇒ 不顯示任何字。
-      //  使用者 261012 實測備援時看到紅字「✗ 查無此工號」卻登得進去——工號是對的，只是當下問不到 OMS；
-      //  下面那個 catch 原本就寫「網路問題就安靜」，但 omsFindByEmpId 連不上是回 reason:'net'、不會丟錯，所以沒走到。
-      if (!f.ok && f.reason === 'net') { hint.textContent = ''; return; }
-      if (hit && hit.email) {
-        hint.style.color = '#0f6e56';
-        hint.textContent = '✓ ' + (hit.name || hit.eng_name || hit.emp_id) + ' · ' + hit.email;
-      } else {
-        hint.style.color = '#c0392b';
-        hint.textContent = '✗ 查無此工號（或改用 Email 登入）';
-      }
-    } catch (e) { hint.textContent = ''; }       // 網路問題就安靜，不干擾登入
-  }, 450);
+  hint.style.color = '#888'; hint.textContent = '以工號登入（請用 SyncHub 密碼）';
 }
 
 async function doLogin() {
@@ -10318,55 +10655,42 @@ async function doLogin() {
 
   const loginBtn = document.getElementById('login-btn');
   setLoginSyncHubLink(false);   // V180：每次按登入先把下方連結還原成「回 SyncHub」
-  let typedEmpId = '';          // V180：打的是工號（OMS 查得到）＝一定是內部同仁
-  let ssoPre = null;            // V181：打工號而 OMS 查不到時，已經先問過後端的答案（不重問第二次）
+  let typedEmpId = '';          // V180：打的是工號＝一定是內部同仁
   let ssoDown = false;          // V181：後端說 SyncHub／OMS 連不上
-  // V149：輸入不含 @ ＝ 當工號 → 先換成 Email 再走原本流程（含 @ 者路徑完全不變＝向後相容）
-  if (!email.includes('@')) {
-    if (loginBtn) loginBtn.textContent = '⏳ 查詢工號...';
-    typedEmpId = email;
-    const rid = await resolveEmpIdToEmail(email);
-    if (!rid.ok && rid.net === true) {
-      // ══ V181：OMS 連不上、查不到工號對應的 Email ⇒ 把工號直接交給後端（它連不上 OMS 時會用備援資料認人）══
-      //  後端有過＝回 mode=sso 並帶回這個人的 Email，接回原本流程；沒過就照舊顯示查不到工號。
-      if (loginBtn) loginBtn.textContent = '⏳ 驗證中...';
-      ssoPre = await sbSsoTryLogin(typedEmpId, password);
-      if (!(ssoPre.mode === 'sso' && ssoPre.email)) { if (loginBtn) loginBtn.textContent = '登入 Login'; showLoginErr(rid.msg); return; }
-      email = String(ssoPre.email).trim().toLowerCase();
-    } else if (!rid.ok) { if (loginBtn) loginBtn.textContent = '登入 Login'; showLoginErr(rid.msg); return; }
-    else email = rid.email;
-  }
+  // ══ V190：名單改登入後才讀——登入頁不再自己查 OMS；工號、Email 都直接交給代驗後端 v3 ══
+  //  後端回 sso＝過了；deny＝內部同仁、不准進（附原因）；local＝不歸它管（管理員／供應商／TEST）；local＋down＝連不上
+  if (!email.includes('@')) typedEmpId = email;
   if (loginBtn) loginBtn.textContent = '⏳ 驗證中...';
 
-  // 🔐 V174：先試 SyncHub 代驗（內部人員一組密碼走遍四系統），不歸它管或沒過就照原本的 QMS 密碼驗
+  // 🔐 V174：先試 SyncHub 代驗（內部人員一組密碼走遍四系統），不歸它管才照原本的 QMS 密碼驗
   //  ⚠ 管理員虛擬帳號不進代驗（兩箱 admin 密碼各自獨立）；EF 端也會再擋一次。
   let r = null, viaSso = false;
   if (email !== ADMIN_EMAIL) {
-    const sso = ssoPre || await sbSsoTryLogin(email, password);
+    const sso = await sbSsoTryLogin(email, password);   // email 此時可能是工號，後端兩種都認
     ssoDown = sso.down === true;
-    // ══ V179-2：SyncHub 初始密碼還沒改 ⇒ 擋下（261007 急件，OMS 對話轉來、使用者確認「三路發動」）══
-    //  事故：261007 實測有人用「別人的工號＋SyncHub 統一初始密碼」經代驗登入成功；舊版只跳提醒、照樣放進系統。
-    //  ⇒ 不放行、也**不拿同一組密碼去試 QMS 本箱**（直接 return，不往下走 sbAuthLogin）。
+    // ══ V179-2：SyncHub 初始密碼還沒改 ⇒ 擋下，不拿同一組密碼去試 QMS 本箱 ══
     if (sso.mode === 'sso' && sso.must_change === true) {
       if (loginBtn) loginBtn.textContent = '登入 Login';
       setLoginSyncHubLink(true);                       // V180：下方連結改成改密直達入口
       showLoginErr(SSO_MUST_CHANGE_MSG);
       return;
     }
+    // V190：後端判斷內部同仁不准進 ⇒ 照原因顯示，不再試本箱密碼
+    if (sso.mode === 'deny') {
+      if (loginBtn) loginBtn.textContent = '登入 Login';
+      showLoginErr(ssoDenyMsg(sso.reason));
+      return;
+    }
     if (sso.mode === 'sso') {
-      r = await sbAuthAfterToken(sso.access_token, sso.refresh_token, sso.user_id, sso.must_change === true);
+      if (sso.email) email = String(sso.email).trim().toLowerCase();   // 打工號的，換成後端回的 Email
+      r = await sbAuthAfterToken(sso.access_token, sso.refresh_token, sso.user_id, sso.must_change === true, true);
       viaSso = r.ok;                                   // 檢查沒過就不算代驗成功（訊息照原本的走）
     }
-    // ══ V180 ①：代驗沒過，而這個人是內部同仁 ⇒ 到此為止，不再試 QMS 本箱密碼 ══
-    //  認不認得出「內部同仁」＝OMS 員工名單上有（打工號的一定是；打 Email 的用 Email 查）。
-    //  OMS 一時查不到（internal:null）才往下試本箱，並由下面 ② 的保險把關。
-    if (!r) {
-      const ex = await ssoExplainLocal(email, typedEmpId, sso.down === true);
-      if (ex.internal === true) {
-        if (loginBtn) loginBtn.textContent = '登入 Login';
-        showLoginErr(ex.msg);
-        return;
-      }
+    // 打工號、後端沒簽通行證：連不上 ⇒ 講連不上；不歸它管 ⇒ OMS 名單上沒有這個工號（本箱只認 Email，不往下試）
+    if (!r && typedEmpId) {
+      if (loginBtn) loginBtn.textContent = '登入 Login';
+      showLoginErr(ssoDown ? MSG_SSO_DOWN : '查無此工號，請確認後重試，或改用 Email 登入');
+      return;
     }
   }
   if (!r) r = await sbAuthLogin(email, password);
@@ -10683,6 +11007,9 @@ const MSG_SSO_DOWN          = 'SyncHub 驗證服務暫時連不上，請稍後�
 const MSG_SSO_DOWN_HINT     = '（若您是內部同仁：SyncHub 驗證服務目前連不上，請稍後再試）';   // V181
 const MSG_OMS_NOT_AUTHED    = '此帳號未授權 QMS —— 請洽管理員於 OMS「系統資料授權」勾選 QMS';
 const MSG_OMS_INACTIVE      = '此帳號在 OMS 已停用，請洽管理員。';
+const MSG_OMS_NO_EMAIL      = '此工號在 OMS 沒有 Email，請洽管理員於 ' + OMS_AUTH_PAGE + '補上。';   // V190
+const MSG_QMS_NO_ACCOUNT    = '您已在 OMS 取得 QMS 授權，但 QMS 還沒有您的帳號，請洽 QMS 管理員於人員管理開通。';   // V190
+const MSG_GATE_DOWN         = '暫時無法確認您的 QMS 授權（SyncHub 連不上），請稍後再試。';   // V190
 
 //  內部同仁＝不是供應商、不是 admin@id 虛擬管理員、廠區不是 TEST（跟 sbAuthAfterToken 的門③排除規則同一套）
 function isInternalProfile(p) {
@@ -10698,47 +11025,7 @@ function randomBoxPassword() {
   (window.crypto || crypto).getRandomValues(a);
   return 'Qx7' + Array.from(a, b => b.toString(16).padStart(2, '0')).join('') + 'Zk9';
 }
-//  用 Email 查 OMS 員工名單（比照 omsFindByEmpId：ilike＋放寬 limit＋前端精確比對）
-async function omsFindByEmail(email, selectCols) {
-  const want = String(email || '').trim().toLowerCase();
-  if (!want) return { ok: false, reason: 'none' };
-  try {
-    const r = await fetch(OMS_IDENTITY_URL + '/rest/v1/identity_access?email=ilike.' + encodeURIComponent(want) +
-      '&select=' + (selectCols || 'emp_id,email,active,systems') + '&limit=20',
-      { headers: { apikey: OMS_IDENTITY_KEY, Authorization: 'Bearer ' + OMS_IDENTITY_KEY } });
-    if (!r.ok) return { ok: false, reason: 'net' };
-    const d = await r.json();
-    const hit = (Array.isArray(d) ? d : []).find(x => String(x && x.email || '').trim().toLowerCase() === want);
-    return hit ? { ok: true, row: hit } : { ok: false, reason: 'none' };
-  } catch (e) { return { ok: false, reason: 'net' }; }
-}
-//  這個工號有沒有 SyncHub 帳號（讀 OMS 的帳號名冊；true／false／null＝查不到）
-async function omsHasSyncHubAccount(empId) {
-  const want = String(empId || '').trim().toLowerCase();
-  if (!want) return false;
-  try {
-    const r = await fetch(OMS_IDENTITY_URL + '/rest/v1/oms_roster?emp_id=ilike.' + encodeURIComponent(want) + '&select=emp_id,active&limit=20',
-      { headers: { apikey: OMS_IDENTITY_KEY, Authorization: 'Bearer ' + OMS_IDENTITY_KEY } });
-    if (!r.ok) return null;
-    const d = await r.json();
-    return (Array.isArray(d) ? d : []).some(x => String(x && x.emp_id || '').trim().toLowerCase() === want && x.active !== false);
-  } catch (e) { return null; }
-}
-//  登入用：代驗沒過時，判斷這個人是不是內部同仁、以及該給什麼訊息
-//   回傳 { internal:true, msg } ＝內部同仁，不要再試本箱；{ internal:false } ＝不是（供應商／TEST 等）；{ internal:null } ＝OMS 查不到，無法判斷
-async function ssoExplainLocal(email, typedEmpId, ssoDown) {
-  const f = typedEmpId ? await omsFindByEmpId(typedEmpId, 'emp_id,email,active,systems')
-                       : await omsFindByEmail(email, 'emp_id,email,active,systems');
-  if (!f.ok) return { internal: f.reason === 'net' ? null : false };
-  const row = f.row;
-  if (row.active === false) return { internal: true, msg: MSG_OMS_INACTIVE };
-  const sys = Array.isArray(row.systems) ? row.systems.map(x => String(x).toUpperCase()) : [];
-  if (sys.indexOf('QMS') < 0) return { internal: true, msg: MSG_OMS_NOT_AUTHED };
-  if (ssoDown) return { internal: true, msg: MSG_SSO_DOWN };
-  const has = await omsHasSyncHubAccount(row.emp_id);
-  if (has === false) return { internal: true, msg: MSG_SSO_NO_ACCOUNT };
-  return { internal: true, msg: MSG_SSO_WRONG_PWD };   // 有帳號（或一時查不到名冊）⇒ 當成密碼不對
-}
+//  V190：omsFindByEmail／omsHasSyncHubAccount／ssoExplainLocal 已拿掉（不准進的原因改由代驗後端回）
 //  登入頁下方的 SyncHub 連結：平常回大廳；被「初始密碼」擋下時改成改密直達入口
 function setLoginSyncHubLink(toPwd) {
   const a = document.getElementById('login-synchub-link');
